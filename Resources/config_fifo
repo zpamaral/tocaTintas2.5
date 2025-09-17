@@ -1,0 +1,33 @@
+[general]
+bars = 30  # Number of bars to display
+sleep_timer = 10
+
+[input]
+method = portaudio
+source = "BlackHole 2ch"
+
+[output]
+method = raw
+raw_target = /var/tmp/cava_fifo  # Path to the FIFO or file for output
+data_format = binary  # or ascii
+; data_format = ascii
+bit_format = 16bit  # or 8bit, depends on your preference
+channels = stereo
+mono_option = average
+reverse = 0
+
+[smoothing]
+# Noise reduction, int 0 - 100. default 77
+# the raw visualization is very noisy, this factor adjusts the integral and gravity filters to keep the signal smooth
+# 100 will be very slow and smooth, 0 will be fast but noisy.
+noise_reduction = 25
+
+[eq]
+# This one is tricky. You can have as much keys as you want.
+# Remember to uncomment more than one key! More keys = more precision.
+# Look at readme.md on github for further explanations and examples.
+1 = 2 # bass
+2 = 2
+3 = 2 # midtone
+4 = 2
+5 = 2 # treble

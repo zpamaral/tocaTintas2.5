@@ -1,0 +1,522 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		112929F66D9F636BDBC6F7A1A867BA1A /* TPCircularBuffer+AudioBufferList.c in Sources */ = {isa = PBXBuildFile; fileRef = B6C3081B8E049F90F3B89F02221C922D /* TPCircularBuffer+AudioBufferList.c */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
+		2073D4B4FBE6E3A0388AEC07F3471A4A /* TPCircularBuffer+AudioBufferList.h in Headers */ = {isa = PBXBuildFile; fileRef = E172F5863FAF6031B5CF01C79699F32F /* TPCircularBuffer+AudioBufferList.h */; settings = {ATTRIBUTES = (Project, ); }; };
+		4FA9CED531A8170947304C0E71CAFFB8 /* TPCircularBuffer.h in Headers */ = {isa = PBXBuildFile; fileRef = 759D7F65C0EB2B045ECC7BB7DC87F971 /* TPCircularBuffer.h */; settings = {ATTRIBUTES = (Project, ); }; };
+		56EE6ED4072740DD04D374F869F6E58A /* Pods-tocaTintas-dummy.m in Sources */ = {isa = PBXBuildFile; fileRef = FF280EDC85F29C764EB6E9B2B2B454BD /* Pods-tocaTintas-dummy.m */; };
+		C9F2D94C64D0A9C0049E1BD76552C1DB /* TPCircularBuffer.c in Sources */ = {isa = PBXBuildFile; fileRef = 95C134D8ABD73EC0B40036095C12909D /* TPCircularBuffer.c */; settings = {COMPILER_FLAGS = "-fno-objc-arc"; }; };
+		DFF06FCD58AA6D399EC1EC1DAB4CD801 /* TPCircularBuffer-dummy.m in Sources */ = {isa = PBXBuildFile; fileRef = 9D11F20305293FBF76240630F726066A /* TPCircularBuffer-dummy.m */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		EC72E4C08D7B560506BDB9C5EDD94818 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = BFDFE7DC352907FC980B868725387E98 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3F366479BDFA5B8FDA48D0F34F864DBB;
+			remoteInfo = TPCircularBuffer;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		08A695F31FCDB3A9737B9CC0904092A6 /* Pods-tocaTintas */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; name = "Pods-tocaTintas"; path = "libPods-tocaTintas.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		1B7B5902233C1AB573708CCC356F7231 /* libTPCircularBuffer.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libTPCircularBuffer.a; sourceTree = BUILT_PRODUCTS_DIR; };
+		5EAC896FC96F2ACCAB6951753EDDE790 /* Pods-tocaTintas-acknowledgements.markdown */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text; path = "Pods-tocaTintas-acknowledgements.markdown"; sourceTree = "<group>"; };
+		6039CA68320B9679F514461531BECC26 /* Pods-tocaTintas.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; path = "Pods-tocaTintas.debug.xcconfig"; sourceTree = "<group>"; };
+		6C482B45178E20DB595D56256EF457A3 /* TPCircularBuffer-prefix.pch */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = "TPCircularBuffer-prefix.pch"; sourceTree = "<group>"; };
+		6D68634B8521843639645ECF68992832 /* TPCircularBuffer.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; path = TPCircularBuffer.debug.xcconfig; sourceTree = "<group>"; };
+		759D7F65C0EB2B045ECC7BB7DC87F971 /* TPCircularBuffer.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = TPCircularBuffer.h; sourceTree = "<group>"; };
+		95C134D8ABD73EC0B40036095C12909D /* TPCircularBuffer.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; path = TPCircularBuffer.c; sourceTree = "<group>"; };
+		9D11F20305293FBF76240630F726066A /* TPCircularBuffer-dummy.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = "TPCircularBuffer-dummy.m"; sourceTree = "<group>"; };
+		9D940727FF8FB9C785EB98E56350EF41 /* Podfile */ = {isa = PBXFileReference; explicitFileType = text.script.ruby; includeInIndex = 1; indentWidth = 2; name = Podfile; path = ../Podfile; sourceTree = SOURCE_ROOT; tabWidth = 2; xcLanguageSpecificationIdentifier = xcode.lang.ruby; };
+		B6C3081B8E049F90F3B89F02221C922D /* TPCircularBuffer+AudioBufferList.c */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.c; path = "TPCircularBuffer+AudioBufferList.c"; sourceTree = "<group>"; };
+		D2C247D6E3EAD305B59D1A8185731137 /* Pods-tocaTintas-acknowledgements.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = "Pods-tocaTintas-acknowledgements.plist"; sourceTree = "<group>"; };
+		E15E3A3B9FA8208354DFE92FCF35864E /* TPCircularBuffer.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; path = TPCircularBuffer.release.xcconfig; sourceTree = "<group>"; };
+		E172F5863FAF6031B5CF01C79699F32F /* TPCircularBuffer+AudioBufferList.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = "TPCircularBuffer+AudioBufferList.h"; sourceTree = "<group>"; };
+		EF410005615A328C2D6D1E50885AF796 /* Pods-tocaTintas.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; path = "Pods-tocaTintas.release.xcconfig"; sourceTree = "<group>"; };
+		FF280EDC85F29C764EB6E9B2B2B454BD /* Pods-tocaTintas-dummy.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = "Pods-tocaTintas-dummy.m"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7A29891ED46C41881D507B91E81E01A3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F2A23EF3532C50A3383668EF4A96A9F2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		05CA9980F343372DF45E7DA411187620 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				08A695F31FCDB3A9737B9CC0904092A6 /* Pods-tocaTintas */,
+				1B7B5902233C1AB573708CCC356F7231 /* libTPCircularBuffer.a */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		29E6B2568FA3A9372EFB0016BFFFC507 /* Pods-tocaTintas */ = {
+			isa = PBXGroup;
+			children = (
+				5EAC896FC96F2ACCAB6951753EDDE790 /* Pods-tocaTintas-acknowledgements.markdown */,
+				D2C247D6E3EAD305B59D1A8185731137 /* Pods-tocaTintas-acknowledgements.plist */,
+				FF280EDC85F29C764EB6E9B2B2B454BD /* Pods-tocaTintas-dummy.m */,
+				6039CA68320B9679F514461531BECC26 /* Pods-tocaTintas.debug.xcconfig */,
+				EF410005615A328C2D6D1E50885AF796 /* Pods-tocaTintas.release.xcconfig */,
+			);
+			name = "Pods-tocaTintas";
+			path = "Target Support Files/Pods-tocaTintas";
+			sourceTree = "<group>";
+		};
+		314964A75FB7ADB78EF71D219BDC3556 /* Targets Support Files */ = {
+			isa = PBXGroup;
+			children = (
+				29E6B2568FA3A9372EFB0016BFFFC507 /* Pods-tocaTintas */,
+			);
+			name = "Targets Support Files";
+			sourceTree = "<group>";
+		};
+		651CD56281C63DC57B2FDA1E4CBD2242 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				F62C9345C1EDE192126946D2665E0B19 /* TPCircularBuffer */,
+			);
+			name = Pods;
+			sourceTree = "<group>";
+		};
+		7F8DF668B6811F4029B6F6FDFCB36CEE /* Support Files */ = {
+			isa = PBXGroup;
+			children = (
+				9D11F20305293FBF76240630F726066A /* TPCircularBuffer-dummy.m */,
+				6C482B45178E20DB595D56256EF457A3 /* TPCircularBuffer-prefix.pch */,
+				6D68634B8521843639645ECF68992832 /* TPCircularBuffer.debug.xcconfig */,
+				E15E3A3B9FA8208354DFE92FCF35864E /* TPCircularBuffer.release.xcconfig */,
+			);
+			name = "Support Files";
+			path = "../Target Support Files/TPCircularBuffer";
+			sourceTree = "<group>";
+		};
+		CF1408CF629C7361332E53B88F7BD30C = {
+			isa = PBXGroup;
+			children = (
+				9D940727FF8FB9C785EB98E56350EF41 /* Podfile */,
+				D89477F20FB1DE18A04690586D7808C4 /* Frameworks */,
+				651CD56281C63DC57B2FDA1E4CBD2242 /* Pods */,
+				05CA9980F343372DF45E7DA411187620 /* Products */,
+				314964A75FB7ADB78EF71D219BDC3556 /* Targets Support Files */,
+			);
+			sourceTree = "<group>";
+		};
+		D89477F20FB1DE18A04690586D7808C4 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		F62C9345C1EDE192126946D2665E0B19 /* TPCircularBuffer */ = {
+			isa = PBXGroup;
+			children = (
+				95C134D8ABD73EC0B40036095C12909D /* TPCircularBuffer.c */,
+				759D7F65C0EB2B045ECC7BB7DC87F971 /* TPCircularBuffer.h */,
+				B6C3081B8E049F90F3B89F02221C922D /* TPCircularBuffer+AudioBufferList.c */,
+				E172F5863FAF6031B5CF01C79699F32F /* TPCircularBuffer+AudioBufferList.h */,
+				7F8DF668B6811F4029B6F6FDFCB36CEE /* Support Files */,
+			);
+			path = TPCircularBuffer;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXHeadersBuildPhase section */
+		A380B95668A3FC2342215EF6796828AF /* Headers */ = {
+			isa = PBXHeadersBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4FA9CED531A8170947304C0E71CAFFB8 /* TPCircularBuffer.h in Headers */,
+				2073D4B4FBE6E3A0388AEC07F3471A4A /* TPCircularBuffer+AudioBufferList.h in Headers */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C9935FCA9AB6A4C1D90CA9433C1E6ECD /* Headers */ = {
+			isa = PBXHeadersBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXHeadersBuildPhase section */
+
+/* Begin PBXNativeTarget section */
+		2BFAB9E483EE3571712F2E7B59FAD9C1 /* Pods-tocaTintas */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D974A3EB57E88222537E7FB9CFBDF6B3 /* Build configuration list for PBXNativeTarget "Pods-tocaTintas" */;
+			buildPhases = (
+				C9935FCA9AB6A4C1D90CA9433C1E6ECD /* Headers */,
+				DE731337E2F9679864F8A097376878C5 /* Sources */,
+				7A29891ED46C41881D507B91E81E01A3 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				760E2218D875E59C344D15344FB02207 /* PBXTargetDependency */,
+			);
+			name = "Pods-tocaTintas";
+			productName = "Pods-tocaTintas";
+			productReference = 08A695F31FCDB3A9737B9CC0904092A6 /* Pods-tocaTintas */;
+			productType = "com.apple.product-type.library.static";
+		};
+		3F366479BDFA5B8FDA48D0F34F864DBB /* TPCircularBuffer */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5C9D494220F1F7C4F7200C962C631CC9 /* Build configuration list for PBXNativeTarget "TPCircularBuffer" */;
+			buildPhases = (
+				A380B95668A3FC2342215EF6796828AF /* Headers */,
+				74B407DF981DDA73A3370FEAAB24EAAD /* Sources */,
+				F2A23EF3532C50A3383668EF4A96A9F2 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TPCircularBuffer;
+			productName = TPCircularBuffer;
+			productReference = 1B7B5902233C1AB573708CCC356F7231 /* libTPCircularBuffer.a */;
+			productType = "com.apple.product-type.library.static";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		BFDFE7DC352907FC980B868725387E98 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+			};
+			buildConfigurationList = 4821239608C13582E20E6DA73FD5F1F9 /* Build configuration list for PBXProject "Pods" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = CF1408CF629C7361332E53B88F7BD30C;
+			productRefGroup = 05CA9980F343372DF45E7DA411187620 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				2BFAB9E483EE3571712F2E7B59FAD9C1 /* Pods-tocaTintas */,
+				3F366479BDFA5B8FDA48D0F34F864DBB /* TPCircularBuffer */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		74B407DF981DDA73A3370FEAAB24EAAD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C9F2D94C64D0A9C0049E1BD76552C1DB /* TPCircularBuffer.c in Sources */,
+				112929F66D9F636BDBC6F7A1A867BA1A /* TPCircularBuffer+AudioBufferList.c in Sources */,
+				DFF06FCD58AA6D399EC1EC1DAB4CD801 /* TPCircularBuffer-dummy.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DE731337E2F9679864F8A097376878C5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				56EE6ED4072740DD04D374F869F6E58A /* Pods-tocaTintas-dummy.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		760E2218D875E59C344D15344FB02207 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = TPCircularBuffer;
+			target = 3F366479BDFA5B8FDA48D0F34F864DBB /* TPCircularBuffer */;
+			targetProxy = EC72E4C08D7B560506BDB9C5EDD94818 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		12DBBD00403B70384FB3B353283E52D5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = E15E3A3B9FA8208354DFE92FCF35864E /* TPCircularBuffer.release.xcconfig */;
+			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
+				"CODE_SIGN_IDENTITY[sdk=appletvos*]" = "";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "";
+				"CODE_SIGN_IDENTITY[sdk=watchos*]" = "";
+				ENABLE_MODULE_VERIFIER = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				EXECUTABLE_PREFIX = lib;
+				GCC_PREFIX_HEADER = "Target Support Files/TPCircularBuffer/TPCircularBuffer-prefix.pch";
+				GENERATE_INFOPLIST_FILE = NO;
+				MACOSX_DEPLOYMENT_TARGET = 12.4;
+				OTHER_LDFLAGS = "";
+				OTHER_LIBTOOLFLAGS = "";
+				PRIVATE_HEADERS_FOLDER_PATH = "";
+				PRODUCT_MODULE_NAME = TPCircularBuffer;
+				PRODUCT_NAME = TPCircularBuffer;
+				PUBLIC_HEADERS_FOLDER_PATH = "";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) ";
+				SWIFT_INSTALL_OBJC_HEADER = YES;
+			};
+			name = Release;
+		};
+		1ACD22CE242A3E0B3E3C93EE079D6639 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = EF410005615A328C2D6D1E50885AF796 /* Pods-tocaTintas.release.xcconfig */;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = NO;
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
+				"CODE_SIGN_IDENTITY[sdk=appletvos*]" = "";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "";
+				"CODE_SIGN_IDENTITY[sdk=watchos*]" = "";
+				ENABLE_MODULE_VERIFIER = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				EXECUTABLE_PREFIX = lib;
+				MACH_O_TYPE = staticlib;
+				MACOSX_DEPLOYMENT_TARGET = 12.4;
+				OTHER_LDFLAGS = "";
+				OTHER_LIBTOOLFLAGS = "";
+				PODS_ROOT = "$(SRCROOT)";
+				PRODUCT_BUNDLE_IDENTIFIER = "org.cocoapods.${PRODUCT_NAME:rfc1034identifier}";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		6C74C40F8770726A5DA8CDE06CA2B5F9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"POD_CONFIGURATION_DEBUG=1",
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 12.4;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRIP_INSTALLED_PRODUCT = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				SYMROOT = "${SRCROOT}/../build";
+			};
+			name = Debug;
+		};
+		A36D3E3593244DA5C890E81BB6733634 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 6039CA68320B9679F514461531BECC26 /* Pods-tocaTintas.debug.xcconfig */;
+			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = NO;
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
+				"CODE_SIGN_IDENTITY[sdk=appletvos*]" = "";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "";
+				"CODE_SIGN_IDENTITY[sdk=watchos*]" = "";
+				ENABLE_MODULE_VERIFIER = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				EXECUTABLE_PREFIX = lib;
+				MACH_O_TYPE = staticlib;
+				MACOSX_DEPLOYMENT_TARGET = 12.4;
+				OTHER_LDFLAGS = "";
+				OTHER_LIBTOOLFLAGS = "";
+				PODS_ROOT = "$(SRCROOT)";
+				PRODUCT_BUNDLE_IDENTIFIER = "org.cocoapods.${PRODUCT_NAME:rfc1034identifier}";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		D535BF07EB667844BDCA567ECB03F5DB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"POD_CONFIGURATION_RELEASE=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 12.4;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRIP_INSTALLED_PRODUCT = NO;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				SYMROOT = "${SRCROOT}/../build";
+			};
+			name = Release;
+		};
+		D8BEC76E244B15E88E827A334030EF52 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 6D68634B8521843639645ECF68992832 /* TPCircularBuffer.debug.xcconfig */;
+			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
+				"CODE_SIGN_IDENTITY[sdk=appletvos*]" = "";
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "";
+				"CODE_SIGN_IDENTITY[sdk=watchos*]" = "";
+				ENABLE_MODULE_VERIFIER = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				EXECUTABLE_PREFIX = lib;
+				GCC_PREFIX_HEADER = "Target Support Files/TPCircularBuffer/TPCircularBuffer-prefix.pch";
+				GENERATE_INFOPLIST_FILE = NO;
+				MACOSX_DEPLOYMENT_TARGET = 12.4;
+				OTHER_LDFLAGS = "";
+				OTHER_LIBTOOLFLAGS = "";
+				PRIVATE_HEADERS_FOLDER_PATH = "";
+				PRODUCT_MODULE_NAME = TPCircularBuffer;
+				PRODUCT_NAME = TPCircularBuffer;
+				PUBLIC_HEADERS_FOLDER_PATH = "";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) ";
+				SWIFT_INSTALL_OBJC_HEADER = YES;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		4821239608C13582E20E6DA73FD5F1F9 /* Build configuration list for PBXProject "Pods" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6C74C40F8770726A5DA8CDE06CA2B5F9 /* Debug */,
+				D535BF07EB667844BDCA567ECB03F5DB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5C9D494220F1F7C4F7200C962C631CC9 /* Build configuration list for PBXNativeTarget "TPCircularBuffer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D8BEC76E244B15E88E827A334030EF52 /* Debug */,
+				12DBBD00403B70384FB3B353283E52D5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D974A3EB57E88222537E7FB9CFBDF6B3 /* Build configuration list for PBXNativeTarget "Pods-tocaTintas" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A36D3E3593244DA5C890E81BB6733634 /* Debug */,
+				1ACD22CE242A3E0B3E3C93EE079D6639 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = BFDFE7DC352907FC980B868725387E98 /* Project object */;
+}

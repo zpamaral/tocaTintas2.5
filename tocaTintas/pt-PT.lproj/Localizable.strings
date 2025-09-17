@@ -1,0 +1,40 @@
+/* 
+  Localizable.strings
+  tocaTintas
+
+  Created by Zé Pedro do Amaral on 29/08/2024.
+  
+*/
+
+"notification_permission_not_granted" = "Permissão de notificação não concedida.";
+"now_playing_title" = "a tocar: %@";
+"now_playing_album" = "álbum: %@";
+"now_playing_artist" = "artista: %@";
+"error_attaching_cover_art" = "Erro ao anexar a capa: %@";
+"starting_wavpack_playback" = "A iniciar reprodução WAVPack para: %@";
+"error_opening_wavpack_file" = "Erro ao abrir o ficheiro WAVPack: %s";
+"no_audio_files_to_play" = "Sem ficheiros de áudio para reproduzir.";
+"starting_playback_for_track" = "A iniciar reprodução para a faixa índice: %ld";
+"no_audio_files_to_shuffle" = "Sem ficheiros de áudio para baralhar.";
+"initializing_shuffling_track_list" = "A iniciar e baralhar a lista de faixas.";
+"repeat_mode_activated" = "Modo de repetição ativado.";
+"shuffle_mode_activated" = "Modo de baralhamento ativado.";
+"playing_next_track" = "A reproduzir próxima faixa.";
+"reached_end_of_playlist" = "Chegou ao fim da lista de reprodução.";
+"Plays: %@" = "tocou %@ vezes";
+"Plays: 0" = "tocou 0 vezes";
+/* Play count label when played once */
+"Played 1 time" = "tocou 1 vez";
+"Played 0 times" = "tocou 0 vezes";
+/* Play count label when played more than once */
+"Played %@ times" = "tocou %@ vezes";
+"choose_song_here" = "escolher a música";
+"Select the Songs Directory" = "Seleccione a pasta com ficheiros de música";
+"Please select the folder where your songs are stored." = "Por favor seleccione a pasta onde suas músicas estão armazenadas.";
+/* Version label with version number */
+"Version %@ is installed." = "a versão %@ está instalada";
+"About tocaTintas" = "Acerca do tocaTintas";
+"Close" = "Fechar";
+"NSLocalNetworkUsageDescription" = "Este programa requer acesso à rede local para descobrir e ligar-se a aparelhos AirPlay.";
+"NSMicrophoneUsageDescription" = "Este programa requer acesso ao microfone para ver o áudio.";
+"Searching for AirPlay devices" = "  A procurar aparelhos AirPlay    ";

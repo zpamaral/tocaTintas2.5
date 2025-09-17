@@ -1,0 +1,40 @@
+/* 
+  Localizable.strings
+  tocaTintas
+
+  Created by Zé Pedro do Amaral on 29/08/2024.
+  
+*/
+
+"notification_permission_not_granted" = "Notification permission not granted.";
+"now_playing_title" = "playing: %@";
+"now_playing_album" = "album: %@";
+"now_playing_artist" = "artist: %@";
+"error_attaching_cover_art" = "Error attaching cover art: %@";
+"starting_wavpack_playback" = "Starting WAVPack playback for: %@";
+"error_opening_wavpack_file" = "Error opening WAVPack file: %s";
+"no_audio_files_to_play" = "No audio files to play.";
+"starting_playback_for_track" = "Starting playback for track index: %ld";
+"no_audio_files_to_shuffle" = "No audio files to shuffle.";
+"initializing_shuffling_track_list" = "Initializing and shuffling the track list.";
+"repeat_mode_activated" = "Repeat mode activated.";
+"shuffle_mode_activated" = "Shuffle mode activated.";
+"playing_next_track" = "Playing next track.";
+"reached_end_of_playlist" = "Reached the end of the playlist.";
+"Plays: %@" = "played %@ times";
+"Plays: 0" = "played 0 times";
+/* Play count label when played once */
+"Played 1 time" = "played 1 time";
+"Played 0 times" = "played 0 times";
+/* Play count label when played more than once */
+"Played %@ times" = "played %@ times";
+"choose_song_here" = "choose song here";
+"Select the Songs Directory" = "Select the Songs Directory";
+"Please select the folder where your songs are stored." = "Please select the folder where your songs are stored.";
+/* Version label with version number */
+"Version %@ is installed." = "version %@ is installed";
+"About tocaTintas" = "About tocaTintas";
+"Close" = "Close";
+"NSLocalNetworkUsageDescription" = "This app requires access to the local network to discover and connect to AirPlay devices.";
+"NSMicrophoneUsageDescription" = "This app requires access to the microphone to visualize audio.";
+"Searching for AirPlay devices" = "  Searching for AirPlay devices    ";

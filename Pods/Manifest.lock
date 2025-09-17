@@ -1,0 +1,16 @@
+PODS:
+  - TPCircularBuffer (1.6.1)
+
+DEPENDENCIES:
+  - TPCircularBuffer
+
+SPEC REPOS:
+  trunk:
+    - TPCircularBuffer
+
+SPEC CHECKSUMS:
+  TPCircularBuffer: c13243556527551c4d320709c7b14a6d20cdc30a
+
+PODFILE CHECKSUM: 37fe931989cfa09fc6e054f932599366d2b9c436
+
+COCOAPODS: 1.16.2

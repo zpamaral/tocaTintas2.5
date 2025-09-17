@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.videolan.wv</string>
+			<key>UTTypeDescription</key>
+			<string>WavPack Audio File</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.audio</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>wv</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>audio/wavpack</string>
+					<string>audio/x-wavpack</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+	<key>CFBundlePackageType</key>
+	<string>XPC!</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleIdentifier</key>
+	<string>JPSdA.tocaTintas.ZPSpotLightwv</string>
+	<key>CFBundleName</key>
+	<string>ZPSpotLightwv</string>
+	<key>CFBundleExecutable</key>
+	<string>ZPSpotLightwv</string>
+	<key>CFBundleVersion</key>
+	<string>2.5</string>
+	<key>CFBundleShortVersionString</key>
+	<string>2.5</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleSupportedPlatforms</key>
+	<array>
+		<string>MacOSX</string>
+	</array>
+	<key>LSMinimumSystemVersion</key>
+	<string>15.0</string>
+	<key>CSExtensionLabel</key>
+	<string>ZPSpotLightwvImporter</string>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<key>CSSupportedContentTypes</key>
+			<array>
+				<string>org.videolan.wv</string>
+			</array>
+		</dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.spotlight.import</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>ZPwvImportExtension</string>
+	</dict>
+</dict>
+</plist>

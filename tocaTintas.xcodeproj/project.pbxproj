@@ -1,0 +1,1085 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1F04EB2E2E5BBA9500323023 /* audio_stuff_info in Resources */ = {isa = PBXBuildFile; fileRef = 1F04EB2D2E5BBA9500323023 /* audio_stuff_info */; };
+		1F12F2AA2C7C85480064C694 /* ViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F12F2A92C7C85480064C694 /* ViewController.m */; };
+		1F12F2AC2C7C854C0064C694 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1F12F2AB2C7C854C0064C694 /* Assets.xcassets */; };
+		1F12F2AF2C7C854C0064C694 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 1F12F2AD2C7C854C0064C694 /* Main.storyboard */; };
+		1F12F2B12C7C854C0064C694 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F12F2B02C7C854C0064C694 /* main.m */; };
+		1F12F2B92C7C86D60064C694 /* Property List.plist in Resources */ = {isa = PBXBuildFile; fileRef = 1F12F2B82C7C86D60064C694 /* Property List.plist */; };
+		1F1955182E4AA80900488F3A /* Quartz.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F7D8B562E32D815009D8628 /* Quartz.framework */; };
+		1F1955272E4AA80900488F3A /* ZPQLverwv.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1F1955172E4AA80800488F3A /* ZPQLverwv.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		1F1955312E4AA8CB00488F3A /* PreviewProvider.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F1955302E4AA8CB00488F3A /* PreviewProvider.m */; };
+		1F1955332E4AA9BF00488F3A /* libwavpack.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F651EE52C88B91D00CA223D /* libwavpack.a */; };
+		1F1955342E4AAA1E00488F3A /* QuickLookUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FF2BC7E2E358EF200133BF3 /* QuickLookUI.framework */; };
+		1F1955352E4AAA2700488F3A /* QuickLook.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FF2BC7C2E358EA900133BF3 /* QuickLook.framework */; };
+		1F2614532C809B140041651D /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 1F2614552C809B140041651D /* Localizable.strings */; };
+		1F2FB2BB2E494BE7008CD88C /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F2FB2BA2E494BE7008CD88C /* Foundation.framework */; };
+		1F2FB2BD2E494C00008CD88C /* UniformTypeIdentifiers.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F2FB2BC2E494C00008CD88C /* UniformTypeIdentifiers.framework */; };
+		1F37C8C52CD5446700346A66 /* cava in Resources */ = {isa = PBXBuildFile; fileRef = 1F37C8C42CD5446700346A66 /* cava */; };
+		1F37C8C82CD5486600346A66 /* config_fifo in Resources */ = {isa = PBXBuildFile; fileRef = 1F37C8C72CD5486600346A66 /* config_fifo */; };
+		1F616B612C92FBA70002D4EA /* PreferencesWindowController.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F616B602C92FBA70002D4EA /* PreferencesWindowController.m */; };
+		1F651EE82C88B91D00CA223D /* libwavpack.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F651EE52C88B91D00CA223D /* libwavpack.a */; };
+		1F651EE92C88B91D00CA223D /* libFLAC.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F651EE62C88B91D00CA223D /* libFLAC.a */; };
+		1F651EEA2C88B91D00CA223D /* libogg.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F651EE72C88B91D00CA223D /* libogg.a */; };
+		1F73F9C22CFE0C2D007C70AD /* refresh_icon.png in Resources */ = {isa = PBXBuildFile; fileRef = 1F73F9C12CFE0C2D007C70AD /* refresh_icon.png */; };
+		1F7D75202C95DCAF0046E0AC /* M3UPlaylist.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F7D751F2C95DCAF0046E0AC /* M3UPlaylist.m */; };
+		1F7D75232C963F600046E0AC /* ZPOpusDecoder.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F7D75222C963F600046E0AC /* ZPOpusDecoder.m */; };
+		1F7D75262C9642000046E0AC /* libopus.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F7D75242C9642000046E0AC /* libopus.a */; };
+		1F7D75272C9642000046E0AC /* libopusfile.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F7D75252C9642000046E0AC /* libopusfile.a */; };
+		1FAA50772E436F2E00DB68C7 /* QuickLookThumbnailing.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FEC26C92E33C1EB0099225A /* QuickLookThumbnailing.framework */; };
+		1FAA50782E436F2E00DB68C7 /* Quartz.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F7D8B562E32D815009D8628 /* Quartz.framework */; };
+		1FAA507C2E436F2F00DB68C7 /* ThumbnailProvider.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FAA507B2E436F2F00DB68C7 /* ThumbnailProvider.m */; };
+		1FAA50812E436F2F00DB68C7 /* ZPQLiconwv.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1FAA50762E436F2E00DB68C7 /* ZPQLiconwv.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		1FAA50852E43707400DB68C7 /* libwavpack.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F651EE52C88B91D00CA223D /* libwavpack.a */; };
+		1FBE64BD2CE37FD90092C6FA /* ZPAirPlay.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FBE64BC2CE37FD90092C6FA /* ZPAirPlay.m */; };
+		1FBE937C2D0B130E00E14743 /* placeholder.png in Resources */ = {isa = PBXBuildFile; fileRef = 1FBE937B2D0B130E00E14743 /* placeholder.png */; };
+		1FC8C3EC2CE4254400271175 /* ZPAudioCapture.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FC8C3EA2CE4254300271175 /* ZPAudioCapture.m */; };
+		1FC8C3EE2CE4C1A300271175 /* raop_play in Resources */ = {isa = PBXBuildFile; fileRef = 1FC8C3ED2CE4C1A200271175 /* raop_play */; };
+		1FC8C3F22CE63CE500271175 /* ZPAirPlayStreamer.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FC8C3F12CE63CE500271175 /* ZPAirPlayStreamer.m */; };
+		1FC9EE5A2E47CD4E006E3B2D /* ImportExtension.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FC9EE592E47CD4E006E3B2D /* ImportExtension.m */; };
+		1FC9EE5F2E47CD4E006E3B2D /* ZPSpotLightwv.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1FC9EE562E47CD4D006E3B2D /* ZPSpotLightwv.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		1FC9EE632E47D3E7006E3B2D /* libwavpack.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F651EE52C88B91D00CA223D /* libwavpack.a */; };
+		1FC9EE652E4809FC006E3B2D /* CoreSpotlight.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FC9EE642E4809FC006E3B2D /* CoreSpotlight.framework */; };
+		1FE94C532C7CDAE700C3EF4E /* HistogramView.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FE94C522C7CDAE700C3EF4E /* HistogramView.m */; };
+		1FF2BD3F2CEF75CE009726BF /* ListAudioDevices in Resources */ = {isa = PBXBuildFile; fileRef = 1FF2BD3E2CEF75CE009726BF /* ListAudioDevices */; };
+		9E7D6D52EBF61BE8A212D080 /* libPods-tocaTintas.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 17E8DA888F4D64ACE9A45A1E /* libPods-tocaTintas.a */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		1F1955252E4AA80900488F3A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1F12F29A2C7C85480064C694 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1F1955162E4AA80800488F3A;
+			remoteInfo = ZPQLverwv;
+		};
+		1FAA507F2E436F2F00DB68C7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1F12F29A2C7C85480064C694 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1FAA50752E436F2E00DB68C7;
+			remoteInfo = ZPQLiconwv;
+		};
+		1FC9EE5D2E47CD4E006E3B2D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1F12F29A2C7C85480064C694 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1FC9EE552E47CD4D006E3B2D;
+			remoteInfo = ZPSpotLightwv;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		1F3D98622E32E766002CA3B2 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 12;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				1F1955272E4AA80900488F3A /* ZPQLverwv.appex in Embed Foundation Extensions */,
+				1FC9EE5F2E47CD4E006E3B2D /* ZPSpotLightwv.appex in Embed Foundation Extensions */,
+				1FAA50812E436F2F00DB68C7 /* ZPQLiconwv.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		17E8DA888F4D64ACE9A45A1E /* libPods-tocaTintas.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-tocaTintas.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		1F04EB2D2E5BBA9500323023 /* audio_stuff_info */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = audio_stuff_info; path = /Users/amaral/Applications/audio_stuff_info; sourceTree = "<absolute>"; };
+		1F12F2A22C7C85480064C694 /* tocaTintas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = tocaTintas.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1F12F2A82C7C85480064C694 /* ViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ViewController.h; sourceTree = "<group>"; };
+		1F12F2A92C7C85480064C694 /* ViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ViewController.m; sourceTree = "<group>"; };
+		1F12F2AB2C7C854C0064C694 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		1F12F2AE2C7C854C0064C694 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
+		1F12F2B02C7C854C0064C694 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
+		1F12F2B22C7C854C0064C694 /* tocaTintas.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = tocaTintas.entitlements; sourceTree = "<group>"; };
+		1F12F2B82C7C86D60064C694 /* Property List.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "Property List.plist"; sourceTree = "<group>"; };
+		1F1955172E4AA80800488F3A /* ZPQLverwv.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ZPQLverwv.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		1F19552C2E4AA85A00488F3A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		1F19552E2E4AA88000488F3A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		1F19552F2E4AA8BD00488F3A /* PreviewProvider.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = PreviewProvider.h; sourceTree = "<group>"; };
+		1F1955302E4AA8CB00488F3A /* PreviewProvider.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = PreviewProvider.m; sourceTree = "<group>"; };
+		1F1955322E4AA8D200488F3A /* ZPQLverwv.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ZPQLverwv.entitlements; sourceTree = "<group>"; };
+		1F26144F2C7F2C860041651D /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Main.strings; sourceTree = "<group>"; };
+		1F2614502C8099760041651D /* pt-PT */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "pt-PT"; path = "pt-PT.lproj/Main.strings"; sourceTree = "<group>"; };
+		1F2614542C809B140041651D /* pt-PT */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.strings; lineEnding = 0; name = "pt-PT"; path = "pt-PT.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		1F2614562C809B260041651D /* en */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.strings; lineEnding = 0; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		1F2FB2BA2E494BE7008CD88C /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
+		1F2FB2BC2E494C00008CD88C /* UniformTypeIdentifiers.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UniformTypeIdentifiers.framework; path = System/Library/Frameworks/UniformTypeIdentifiers.framework; sourceTree = SDKROOT; };
+		1F37C8C42CD5446700346A66 /* cava */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = cava; sourceTree = "<group>"; };
+		1F37C8C72CD5486600346A66 /* config_fifo */ = {isa = PBXFileReference; lastKnownFileType = text; path = config_fifo; sourceTree = "<group>"; };
+		1F616B5F2C92FBA70002D4EA /* PreferencesWindowController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PreferencesWindowController.h; sourceTree = "<group>"; };
+		1F616B602C92FBA70002D4EA /* PreferencesWindowController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PreferencesWindowController.m; sourceTree = "<group>"; };
+		1F651EE52C88B91D00CA223D /* libwavpack.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libwavpack.a; path = tocaTintas.xcodeproj/Frameworks/libwavpack.a; sourceTree = "<group>"; };
+		1F651EE62C88B91D00CA223D /* libFLAC.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libFLAC.a; path = tocaTintas.xcodeproj/Frameworks/libFLAC.a; sourceTree = "<group>"; };
+		1F651EE72C88B91D00CA223D /* libogg.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libogg.a; path = tocaTintas.xcodeproj/Frameworks/libogg.a; sourceTree = "<group>"; };
+		1F73F9C12CFE0C2D007C70AD /* refresh_icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = refresh_icon.png; sourceTree = "<group>"; };
+		1F73F9C32CFE7744007C70AD /* placeholder.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = placeholder.jpg; sourceTree = "<group>"; };
+		1F7D751E2C95DCAF0046E0AC /* M3UPlaylist.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = M3UPlaylist.h; sourceTree = "<group>"; };
+		1F7D751F2C95DCAF0046E0AC /* M3UPlaylist.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = M3UPlaylist.m; sourceTree = "<group>"; };
+		1F7D75212C963F600046E0AC /* ZPOpusDecoder.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPOpusDecoder.h; sourceTree = "<group>"; };
+		1F7D75222C963F600046E0AC /* ZPOpusDecoder.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPOpusDecoder.m; sourceTree = "<group>"; };
+		1F7D75242C9642000046E0AC /* libopus.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libopus.a; path = tocaTintas.xcodeproj/Frameworks/libopus.a; sourceTree = "<group>"; };
+		1F7D75252C9642000046E0AC /* libopusfile.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libopusfile.a; path = tocaTintas.xcodeproj/Frameworks/libopusfile.a; sourceTree = "<group>"; };
+		1F7D8B562E32D815009D8628 /* Quartz.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Quartz.framework; path = System/Library/Frameworks/Quartz.framework; sourceTree = SDKROOT; };
+		1FAA50762E436F2E00DB68C7 /* ZPQLiconwv.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ZPQLiconwv.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		1FAA507A2E436F2F00DB68C7 /* ThumbnailProvider.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ThumbnailProvider.h; sourceTree = "<group>"; };
+		1FAA507B2E436F2F00DB68C7 /* ThumbnailProvider.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ThumbnailProvider.m; sourceTree = "<group>"; };
+		1FAA507E2E436F2F00DB68C7 /* ZPQLiconwv.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ZPQLiconwv.entitlements; sourceTree = "<group>"; };
+		1FBE64BB2CE37FD90092C6FA /* ZPAirPlay.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ZPAirPlay.h; sourceTree = "<group>"; };
+		1FBE64BC2CE37FD90092C6FA /* ZPAirPlay.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ZPAirPlay.m; sourceTree = "<group>"; };
+		1FBE937B2D0B130E00E14743 /* placeholder.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = placeholder.png; sourceTree = "<group>"; };
+		1FC8C3EA2CE4254300271175 /* ZPAudioCapture.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = ZPAudioCapture.m; sourceTree = "<group>"; };
+		1FC8C3EB2CE4254400271175 /* ZPAudioCapture.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = ZPAudioCapture.h; sourceTree = "<group>"; };
+		1FC8C3ED2CE4C1A200271175 /* raop_play */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = raop_play; sourceTree = "<group>"; };
+		1FC8C3F02CE63CE500271175 /* ZPAirPlayStreamer.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPAirPlayStreamer.h; sourceTree = "<group>"; };
+		1FC8C3F12CE63CE500271175 /* ZPAirPlayStreamer.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPAirPlayStreamer.m; sourceTree = "<group>"; };
+		1FC9EE562E47CD4D006E3B2D /* ZPSpotLightwv.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ZPSpotLightwv.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		1FC9EE582E47CD4E006E3B2D /* ImportExtension.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ImportExtension.h; sourceTree = "<group>"; };
+		1FC9EE592E47CD4E006E3B2D /* ImportExtension.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ImportExtension.m; sourceTree = "<group>"; };
+		1FC9EE5B2E47CD4E006E3B2D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		1FC9EE5C2E47CD4E006E3B2D /* ZPSpotLightwv.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ZPSpotLightwv.entitlements; sourceTree = "<group>"; };
+		1FC9EE642E4809FC006E3B2D /* CoreSpotlight.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreSpotlight.framework; path = System/Library/Frameworks/CoreSpotlight.framework; sourceTree = SDKROOT; };
+		1FE94C522C7CDAE700C3EF4E /* HistogramView.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = HistogramView.m; sourceTree = "<group>"; };
+		1FE94C562C7CDB5000C3EF4E /* HistogramView.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = HistogramView.h; sourceTree = "<group>"; };
+		1FEC26C92E33C1EB0099225A /* QuickLookThumbnailing.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuickLookThumbnailing.framework; path = System/Library/PrivateFrameworks/QuickLookThumbnailing.framework; sourceTree = SDKROOT; };
+		1FF29C702CA71FCB00FE2CAB /* ru */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ru; path = ru.lproj/Main.strings; sourceTree = "<group>"; };
+		1FF29C712CA71FCB00FE2CAB /* ru */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ru; path = ru.lproj/Localizable.strings; sourceTree = "<group>"; };
+		1FF2BC7C2E358EA900133BF3 /* QuickLook.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuickLook.framework; path = System/Library/Frameworks/QuickLook.framework; sourceTree = SDKROOT; };
+		1FF2BC7E2E358EF200133BF3 /* QuickLookUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuickLookUI.framework; path = System/Library/Frameworks/QuickLookUI.framework; sourceTree = SDKROOT; };
+		1FF2BD3E2CEF75CE009726BF /* ListAudioDevices */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = ListAudioDevices; sourceTree = "<group>"; };
+		BB9A1BD9A7E59D78853E2EE8 /* Pods-tocaTintas.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-tocaTintas.release.xcconfig"; path = "Target Support Files/Pods-tocaTintas/Pods-tocaTintas.release.xcconfig"; sourceTree = "<group>"; };
+		F444ADD308D793289E02B933 /* Pods-tocaTintas.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-tocaTintas.debug.xcconfig"; path = "Target Support Files/Pods-tocaTintas/Pods-tocaTintas.debug.xcconfig"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1F12F29F2C7C85480064C694 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1F7D75262C9642000046E0AC /* libopus.a in Frameworks */,
+				1F7D75272C9642000046E0AC /* libopusfile.a in Frameworks */,
+				1F651EE82C88B91D00CA223D /* libwavpack.a in Frameworks */,
+				1F651EE92C88B91D00CA223D /* libFLAC.a in Frameworks */,
+				1F651EEA2C88B91D00CA223D /* libogg.a in Frameworks */,
+				9E7D6D52EBF61BE8A212D080 /* libPods-tocaTintas.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1F1955142E4AA80800488F3A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1F1955342E4AAA1E00488F3A /* QuickLookUI.framework in Frameworks */,
+				1F1955352E4AAA2700488F3A /* QuickLook.framework in Frameworks */,
+				1F1955182E4AA80900488F3A /* Quartz.framework in Frameworks */,
+				1F1955332E4AA9BF00488F3A /* libwavpack.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1FAA50732E436F2E00DB68C7 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1FAA50772E436F2E00DB68C7 /* QuickLookThumbnailing.framework in Frameworks */,
+				1FAA50782E436F2E00DB68C7 /* Quartz.framework in Frameworks */,
+				1FAA50852E43707400DB68C7 /* libwavpack.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1FC9EE532E47CD4D006E3B2D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1F2FB2BD2E494C00008CD88C /* UniformTypeIdentifiers.framework in Frameworks */,
+				1FC9EE652E4809FC006E3B2D /* CoreSpotlight.framework in Frameworks */,
+				1F2FB2BB2E494BE7008CD88C /* Foundation.framework in Frameworks */,
+				1FC9EE632E47D3E7006E3B2D /* libwavpack.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1F12F2992C7C85480064C694 = {
+			isa = PBXGroup;
+			children = (
+				1F12F2A42C7C85480064C694 /* tocaTintas */,
+				1F37C8C92CD5491A00346A66 /* Resources */,
+				1F1955192E4AA80900488F3A /* ZPQLverwv */,
+				1FAA50792E436F2F00DB68C7 /* ZPQLiconwv */,
+				1FC9EE572E47CD4E006E3B2D /* ZPSpotLightwv */,
+				1F12F2A32C7C85480064C694 /* Products */,
+				1F2614442C7DDECB0041651D /* Frameworks */,
+				62C0AF758214C8FA4B367AFC /* Pods */,
+			);
+			sourceTree = "<group>";
+		};
+		1F12F2A32C7C85480064C694 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				1F12F2A22C7C85480064C694 /* tocaTintas.app */,
+				1FAA50762E436F2E00DB68C7 /* ZPQLiconwv.appex */,
+				1FC9EE562E47CD4D006E3B2D /* ZPSpotLightwv.appex */,
+				1F1955172E4AA80800488F3A /* ZPQLverwv.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		1F12F2A42C7C85480064C694 /* tocaTintas */ = {
+			isa = PBXGroup;
+			children = (
+				1F12F2B82C7C86D60064C694 /* Property List.plist */,
+				1F12F2A82C7C85480064C694 /* ViewController.h */,
+				1F12F2A92C7C85480064C694 /* ViewController.m */,
+				1FBE64BB2CE37FD90092C6FA /* ZPAirPlay.h */,
+				1FBE64BC2CE37FD90092C6FA /* ZPAirPlay.m */,
+				1FC8C3EB2CE4254400271175 /* ZPAudioCapture.h */,
+				1FC8C3EA2CE4254300271175 /* ZPAudioCapture.m */,
+				1FC8C3F02CE63CE500271175 /* ZPAirPlayStreamer.h */,
+				1FC8C3F12CE63CE500271175 /* ZPAirPlayStreamer.m */,
+				1FE94C562C7CDB5000C3EF4E /* HistogramView.h */,
+				1FE94C522C7CDAE700C3EF4E /* HistogramView.m */,
+				1F7D75212C963F600046E0AC /* ZPOpusDecoder.h */,
+				1F7D75222C963F600046E0AC /* ZPOpusDecoder.m */,
+				1F7D751E2C95DCAF0046E0AC /* M3UPlaylist.h */,
+				1F7D751F2C95DCAF0046E0AC /* M3UPlaylist.m */,
+				1F616B5F2C92FBA70002D4EA /* PreferencesWindowController.h */,
+				1F616B602C92FBA70002D4EA /* PreferencesWindowController.m */,
+				1F12F2AD2C7C854C0064C694 /* Main.storyboard */,
+				1F12F2B02C7C854C0064C694 /* main.m */,
+				1F2614552C809B140041651D /* Localizable.strings */,
+				1F12F2B22C7C854C0064C694 /* tocaTintas.entitlements */,
+				1F12F2AB2C7C854C0064C694 /* Assets.xcassets */,
+			);
+			path = tocaTintas;
+			sourceTree = "<group>";
+		};
+		1F1955192E4AA80900488F3A /* ZPQLverwv */ = {
+			isa = PBXGroup;
+			children = (
+				1F19552E2E4AA88000488F3A /* Info.plist */,
+				1F19552F2E4AA8BD00488F3A /* PreviewProvider.h */,
+				1F1955302E4AA8CB00488F3A /* PreviewProvider.m */,
+				1F1955322E4AA8D200488F3A /* ZPQLverwv.entitlements */,
+			);
+			path = ZPQLverwv;
+			sourceTree = "<group>";
+		};
+		1F2614442C7DDECB0041651D /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				1F2FB2BC2E494C00008CD88C /* UniformTypeIdentifiers.framework */,
+				1F2FB2BA2E494BE7008CD88C /* Foundation.framework */,
+				1FC9EE642E4809FC006E3B2D /* CoreSpotlight.framework */,
+				1FF2BC7E2E358EF200133BF3 /* QuickLookUI.framework */,
+				1FF2BC7C2E358EA900133BF3 /* QuickLook.framework */,
+				1FEC26C92E33C1EB0099225A /* QuickLookThumbnailing.framework */,
+				1F04EB2D2E5BBA9500323023 /* audio_stuff_info */,
+				1F7D75242C9642000046E0AC /* libopus.a */,
+				1F7D75252C9642000046E0AC /* libopusfile.a */,
+				1F651EE62C88B91D00CA223D /* libFLAC.a */,
+				1F651EE72C88B91D00CA223D /* libogg.a */,
+				1F651EE52C88B91D00CA223D /* libwavpack.a */,
+				17E8DA888F4D64ACE9A45A1E /* libPods-tocaTintas.a */,
+				1F7D8B562E32D815009D8628 /* Quartz.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		1F37C8C92CD5491A00346A66 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				1FBE937B2D0B130E00E14743 /* placeholder.png */,
+				1F73F9C32CFE7744007C70AD /* placeholder.jpg */,
+				1F73F9C12CFE0C2D007C70AD /* refresh_icon.png */,
+				1FF2BD3E2CEF75CE009726BF /* ListAudioDevices */,
+				1FC8C3ED2CE4C1A200271175 /* raop_play */,
+				1F37C8C42CD5446700346A66 /* cava */,
+				1F37C8C72CD5486600346A66 /* config_fifo */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		1FAA50792E436F2F00DB68C7 /* ZPQLiconwv */ = {
+			isa = PBXGroup;
+			children = (
+				1F19552C2E4AA85A00488F3A /* Info.plist */,
+				1FAA507A2E436F2F00DB68C7 /* ThumbnailProvider.h */,
+				1FAA507B2E436F2F00DB68C7 /* ThumbnailProvider.m */,
+				1FAA507E2E436F2F00DB68C7 /* ZPQLiconwv.entitlements */,
+			);
+			path = ZPQLiconwv;
+			sourceTree = "<group>";
+		};
+		1FC9EE572E47CD4E006E3B2D /* ZPSpotLightwv */ = {
+			isa = PBXGroup;
+			children = (
+				1FC9EE5B2E47CD4E006E3B2D /* Info.plist */,
+				1FC9EE582E47CD4E006E3B2D /* ImportExtension.h */,
+				1FC9EE592E47CD4E006E3B2D /* ImportExtension.m */,
+				1FC9EE5C2E47CD4E006E3B2D /* ZPSpotLightwv.entitlements */,
+			);
+			path = ZPSpotLightwv;
+			sourceTree = "<group>";
+		};
+		62C0AF758214C8FA4B367AFC /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				F444ADD308D793289E02B933 /* Pods-tocaTintas.debug.xcconfig */,
+				BB9A1BD9A7E59D78853E2EE8 /* Pods-tocaTintas.release.xcconfig */,
+			);
+			path = Pods;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1F12F2A12C7C85480064C694 /* tocaTintas */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1F12F2B52C7C854C0064C694 /* Build configuration list for PBXNativeTarget "tocaTintas" */;
+			buildPhases = (
+				CF141D18F8A9F39AD0FCDB9E /* [CP] Check Pods Manifest.lock */,
+				1F12F29E2C7C85480064C694 /* Sources */,
+				1F12F29F2C7C85480064C694 /* Frameworks */,
+				1F12F2A02C7C85480064C694 /* Resources */,
+				1F3D98622E32E766002CA3B2 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				1FAA50802E436F2F00DB68C7 /* PBXTargetDependency */,
+				1FC9EE5E2E47CD4E006E3B2D /* PBXTargetDependency */,
+				1F1955262E4AA80900488F3A /* PBXTargetDependency */,
+			);
+			name = tocaTintas;
+			productName = tocaTintas;
+			productReference = 1F12F2A22C7C85480064C694 /* tocaTintas.app */;
+			productType = "com.apple.product-type.application";
+		};
+		1F1955162E4AA80800488F3A /* ZPQLverwv */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1F1955282E4AA80A00488F3A /* Build configuration list for PBXNativeTarget "ZPQLverwv" */;
+			buildPhases = (
+				1F1955132E4AA80800488F3A /* Sources */,
+				1F1955142E4AA80800488F3A /* Frameworks */,
+				1F1955152E4AA80800488F3A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ZPQLverwv;
+			productName = ZPQLverwv;
+			productReference = 1F1955172E4AA80800488F3A /* ZPQLverwv.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		1FAA50752E436F2E00DB68C7 /* ZPQLiconwv */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1FAA50822E436F2F00DB68C7 /* Build configuration list for PBXNativeTarget "ZPQLiconwv" */;
+			buildPhases = (
+				1FAA50722E436F2E00DB68C7 /* Sources */,
+				1FAA50732E436F2E00DB68C7 /* Frameworks */,
+				1FAA50742E436F2E00DB68C7 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ZPQLiconwv;
+			productName = ZPQLiconwv;
+			productReference = 1FAA50762E436F2E00DB68C7 /* ZPQLiconwv.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		1FC9EE552E47CD4D006E3B2D /* ZPSpotLightwv */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1FC9EE602E47CD4E006E3B2D /* Build configuration list for PBXNativeTarget "ZPSpotLightwv" */;
+			buildPhases = (
+				1FC9EE522E47CD4D006E3B2D /* Sources */,
+				1FC9EE532E47CD4D006E3B2D /* Frameworks */,
+				1FC9EE542E47CD4D006E3B2D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ZPSpotLightwv;
+			productName = ZPSpotLightwv;
+			productReference = 1FC9EE562E47CD4D006E3B2D /* ZPSpotLightwv.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1F12F29A2C7C85480064C694 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastUpgradeCheck = 1640;
+				TargetAttributes = {
+					1F12F2A12C7C85480064C694 = {
+						CreatedOnToolsVersion = 14.2;
+					};
+					1F1955162E4AA80800488F3A = {
+						CreatedOnToolsVersion = 14.2;
+					};
+					1FAA50752E436F2E00DB68C7 = {
+						CreatedOnToolsVersion = 14.2;
+					};
+					1FC9EE552E47CD4D006E3B2D = {
+						CreatedOnToolsVersion = 14.2;
+					};
+				};
+			};
+			buildConfigurationList = 1F12F29D2C7C85480064C694 /* Build configuration list for PBXProject "tocaTintas" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+				"pt-PT",
+				ru,
+			);
+			mainGroup = 1F12F2992C7C85480064C694;
+			productRefGroup = 1F12F2A32C7C85480064C694 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				1F12F2A12C7C85480064C694 /* tocaTintas */,
+				1FAA50752E436F2E00DB68C7 /* ZPQLiconwv */,
+				1FC9EE552E47CD4D006E3B2D /* ZPSpotLightwv */,
+				1F1955162E4AA80800488F3A /* ZPQLverwv */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		1F12F2A02C7C85480064C694 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1FBE937C2D0B130E00E14743 /* placeholder.png in Resources */,
+				1F73F9C22CFE0C2D007C70AD /* refresh_icon.png in Resources */,
+				1F04EB2E2E5BBA9500323023 /* audio_stuff_info in Resources */,
+				1FF2BD3F2CEF75CE009726BF /* ListAudioDevices in Resources */,
+				1FC8C3EE2CE4C1A300271175 /* raop_play in Resources */,
+				1F37C8C82CD5486600346A66 /* config_fifo in Resources */,
+				1F37C8C52CD5446700346A66 /* cava in Resources */,
+				1F12F2B92C7C86D60064C694 /* Property List.plist in Resources */,
+				1F2614532C809B140041651D /* Localizable.strings in Resources */,
+				1F12F2AC2C7C854C0064C694 /* Assets.xcassets in Resources */,
+				1F12F2AF2C7C854C0064C694 /* Main.storyboard in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1F1955152E4AA80800488F3A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1FAA50742E436F2E00DB68C7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1FC9EE542E47CD4D006E3B2D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		CF141D18F8A9F39AD0FCDB9E /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-tocaTintas-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1F12F29E2C7C85480064C694 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1F7D75202C95DCAF0046E0AC /* M3UPlaylist.m in Sources */,
+				1FC8C3F22CE63CE500271175 /* ZPAirPlayStreamer.m in Sources */,
+				1F12F2AA2C7C85480064C694 /* ViewController.m in Sources */,
+				1F12F2B12C7C854C0064C694 /* main.m in Sources */,
+				1F7D75232C963F600046E0AC /* ZPOpusDecoder.m in Sources */,
+				1FBE64BD2CE37FD90092C6FA /* ZPAirPlay.m in Sources */,
+				1F616B612C92FBA70002D4EA /* PreferencesWindowController.m in Sources */,
+				1FE94C532C7CDAE700C3EF4E /* HistogramView.m in Sources */,
+				1FC8C3EC2CE4254400271175 /* ZPAudioCapture.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1F1955132E4AA80800488F3A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1F1955312E4AA8CB00488F3A /* PreviewProvider.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1FAA50722E436F2E00DB68C7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1FAA507C2E436F2F00DB68C7 /* ThumbnailProvider.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1FC9EE522E47CD4D006E3B2D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1FC9EE5A2E47CD4E006E3B2D /* ImportExtension.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		1F1955262E4AA80900488F3A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1F1955162E4AA80800488F3A /* ZPQLverwv */;
+			targetProxy = 1F1955252E4AA80900488F3A /* PBXContainerItemProxy */;
+		};
+		1FAA50802E436F2F00DB68C7 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1FAA50752E436F2E00DB68C7 /* ZPQLiconwv */;
+			targetProxy = 1FAA507F2E436F2F00DB68C7 /* PBXContainerItemProxy */;
+		};
+		1FC9EE5E2E47CD4E006E3B2D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1FC9EE552E47CD4D006E3B2D /* ZPSpotLightwv */;
+			targetProxy = 1FC9EE5D2E47CD4E006E3B2D /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		1F12F2AD2C7C854C0064C694 /* Main.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				1F12F2AE2C7C854C0064C694 /* Base */,
+				1F26144F2C7F2C860041651D /* en */,
+				1F2614502C8099760041651D /* pt-PT */,
+				1FF29C702CA71FCB00FE2CAB /* ru */,
+			);
+			name = Main.storyboard;
+			sourceTree = "<group>";
+		};
+		1F2614552C809B140041651D /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				1F2614542C809B140041651D /* pt-PT */,
+				1F2614562C809B260041651D /* en */,
+				1FF29C712CA71FCB00FE2CAB /* ru */,
+			);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		1F12F2B32C7C854C0064C694 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = FJ238DJ67E;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = fast;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		1F12F2B42C7C854C0064C694 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = FJ238DJ67E;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = fast;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		1F12F2B62C7C854C0064C694 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = F444ADD308D793289E02B933 /* Pods-tocaTintas.debug.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = tocaTintas/tocaTintas.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 2.5;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = FJ238DJ67E;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				"HEADER_SEARCH_PATHS[sdk=macosx*]" = (
+					/usr/local/include,
+					"$(inherited)",
+				);
+				INFOPLIST_FILE = "";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "This app requires access to the local network to discover and connect to AirPlay devices.";
+				INFOPLIST_KEY_NSMainStoryboardFile = Main;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app requires access to the microphone to visualize audio.";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 2.5;
+				OTHER_CFLAGS = "-Wno-documentation";
+				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SYSTEM_FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SDKROOT)$(SYSTEM_LIBRARY_DIR)/PrivateFrameworks",
+				);
+			};
+			name = Debug;
+		};
+		1F12F2B72C7C854C0064C694 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = BB9A1BD9A7E59D78853E2EE8 /* Pods-tocaTintas.release.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = tocaTintas/tocaTintas.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 2.5;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = FJ238DJ67E;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					/usr/local/include,
+					"$(inherited)",
+				);
+				"HEADER_SEARCH_PATHS[sdk=macosx*]" = (
+					/usr/local/include,
+					"$(inherited)",
+				);
+				INFOPLIST_FILE = "";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "This app requires access to the local network to discover and connect to AirPlay devices.";
+				INFOPLIST_KEY_NSMainStoryboardFile = Main;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app requires access to the microphone to visualize audio.";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 2.5;
+				OTHER_CFLAGS = "-Wno-documentation";
+				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SYSTEM_FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SDKROOT)$(SYSTEM_LIBRARY_DIR)/PrivateFrameworks",
+				);
+			};
+			name = Release;
+		};
+		1F1955292E4AA80A00488F3A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ZPQLverwv/ZPQLverwv.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2.3;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = /usr/local/include;
+				INFOPLIST_FILE = ZPQLverwv/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Mostrar e tocar WavPack";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 2.3;
+				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPQLverwv;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		1F19552A2E4AA80A00488F3A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ZPQLverwv/ZPQLverwv.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2.3;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = /usr/local/include;
+				INFOPLIST_FILE = ZPQLverwv/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Mostrar e tocar WavPack";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 2.3;
+				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPQLverwv;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+		1FAA50832E436F2F00DB68C7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ZPQLiconwv/ZPQLiconwv.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2.3;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = /usr/local/include;
+				INFOPLIST_FILE = ZPQLiconwv/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ZPQLiconwv;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 2.3;
+				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPQLiconwv;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SYSTEM_FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SDKROOT)$(SYSTEM_LIBRARY_DIR)/PrivateFrameworks",
+				);
+			};
+			name = Debug;
+		};
+		1FAA50842E436F2F00DB68C7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ZPQLiconwv/ZPQLiconwv.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2.3;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = /usr/local/include;
+				INFOPLIST_FILE = ZPQLiconwv/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ZPQLiconwv;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 2.3;
+				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPQLiconwv;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SYSTEM_FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SDKROOT)$(SYSTEM_LIBRARY_DIR)/PrivateFrameworks",
+				);
+			};
+			name = Release;
+		};
+		1FC9EE612E47CD4E006E3B2D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ZPSpotLightwv/ZPSpotLightwv.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2.3;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = /usr/local/include;
+				INFOPLIST_FILE = ZPSpotLightwv/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ZPSpotLightwv;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 2.3;
+				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPSpotLightwv;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		1FC9EE622E47CD4E006E3B2D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ZPSpotLightwv/ZPSpotLightwv.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2.3;
+				DEAD_CODE_STRIPPING = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = /usr/local/include;
+				INFOPLIST_FILE = ZPSpotLightwv/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = ZPSpotLightwv;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 2.3;
+				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPSpotLightwv;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1F12F29D2C7C85480064C694 /* Build configuration list for PBXProject "tocaTintas" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1F12F2B32C7C854C0064C694 /* Debug */,
+				1F12F2B42C7C854C0064C694 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1F12F2B52C7C854C0064C694 /* Build configuration list for PBXNativeTarget "tocaTintas" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1F12F2B62C7C854C0064C694 /* Debug */,
+				1F12F2B72C7C854C0064C694 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1F1955282E4AA80A00488F3A /* Build configuration list for PBXNativeTarget "ZPQLverwv" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1F1955292E4AA80A00488F3A /* Debug */,
+				1F19552A2E4AA80A00488F3A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1FAA50822E436F2F00DB68C7 /* Build configuration list for PBXNativeTarget "ZPQLiconwv" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1FAA50832E436F2F00DB68C7 /* Debug */,
+				1FAA50842E436F2F00DB68C7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1FC9EE602E47CD4E006E3B2D /* Build configuration list for PBXNativeTarget "ZPSpotLightwv" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1FC9EE612E47CD4E006E3B2D /* Debug */,
+				1FC9EE622E47CD4E006E3B2D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 1F12F29A2C7C85480064C694 /* Project object */;
+}

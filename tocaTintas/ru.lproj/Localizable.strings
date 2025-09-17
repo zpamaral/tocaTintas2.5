@@ -1,0 +1,48 @@
+/* 
+  Localizable.strings
+  tocaTintas
+
+  Created by Zé Pedro do Amaral on 29/08/2024.
+  
+*/
+
+/*
+  Localizable.strings
+  tocaTintas
+
+  Created by Zé Pedro do Amaral on 29/08/2024.
+  
+*/
+
+"notification_permission_not_granted" = "Разрешение на уведомления не предоставлено.";
+"now_playing_title" = "воспроизводится: %@";
+"now_playing_album" = "альбом: %@";
+"now_playing_artist" = "исполнитель: %@";
+"error_attaching_cover_art" = "Ошибка при прикреплении обложки: %@";
+"starting_wavpack_playback" = "Запуск воспроизведения WAVPack для: %@";
+"error_opening_wavpack_file" = "Ошибка при открытии файла WAVPack: %s";
+"no_audio_files_to_play" = "Нет аудиофайлов для воспроизведения.";
+"starting_playback_for_track" = "Запуск воспроизведения трека с индексом: %ld";
+"no_audio_files_to_shuffle" = "Нет аудиофайлов для случайного воспроизведения.";
+"initializing_shuffling_track_list" = "Инициализация и перемешивание списка треков.";
+"repeat_mode_activated" = "Режим повторения активирован.";
+"shuffle_mode_activated" = "Режим случайного воспроизведения активирован.";
+"playing_next_track" = "Воспроизведение следующего трека.";
+"reached_end_of_playlist" = "Достигнут конец плейлиста.";
+"Plays: %@" = "воспроизведено %@ раз";
+"Plays: 0" = "воспроизведено 0 раз";
+/* Play count label when played once */
+"Played 1 time" = "воспроизведено 1 раз";
+"Played 0 times" = "воспроизведено 0 раз";
+/* Play count label when played more than once */
+"Played %@ times" = "воспроизведено %@ раз";
+"choose_song_here" = "выберите песню здесь";
+"Select the Songs Directory" = "Выберите каталог песен";
+"Please select the folder where your songs are stored." = "Пожалуйста, выберите папку, где хранятся ваши песни.";
+/* Version label with version number */
+"Version %@ is installed." = "Установлена версия %@";
+"About tocaTintas" = "О tocaTintas";
+"Close" = "Закрыть";
+"NSLocalNetworkUsageDescription" = "Это приложение требует доступ к локальной сети для обнаружения и подключения к устройствам AirPlay.";
+"NSMicrophoneUsageDescription" = "Это приложение требует доступ к микрофону для визуализации аудио.";
+"Searching for AirPlay devices" = "  Поиск устройств AirPlay    ";
