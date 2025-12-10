@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2024 Zé Pedro do Amaral <amaral@mac.com>
+Copyright (c) 2025 Zé Pedro do Amaral <amaral@mac.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -195,8 +195,10 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) ZPAirPlayStreamer *airPlayStreamer;
 @property (nonatomic, assign) BOOL isProgrammaticChange;
 
-// To implement s2b when using headphones
+// To implement s2b when using headphones (or line out)
 @property (strong, nonatomic) NSTask *bs2bTask;
+@property (strong, nonatomic) NSTimer *bs2bHeadphonePollTimer;
+@property (assign, nonatomic) BOOL bs2bLastHeadphonesConnected;
 
 @end
 
@@ -977,149 +979,6 @@ CoreAudioPlaybackState playbackState;
 
 #pragma mark - Need organizing:
 
-// Helper method to detect headphones for s2b
-- (BOOL)headphonesAreConnected
-{
-    // 1) Query the list size for all Core Audio devices
-    AudioObjectPropertyAddress devicesAddr = (AudioObjectPropertyAddress) {
-        .mSelector = kAudioHardwarePropertyDevices,
-        .mScope    = kAudioObjectPropertyScopeGlobal,
-        .mElement  = kAudioObjectPropertyElementMain
-    };
-
-    UInt32 dataSize = 0;
-    OSStatus status = AudioObjectGetPropertyDataSize(kAudioObjectSystemObject,
-                                                     &devicesAddr,
-                                                     0,
-                                                     NULL,
-                                                     &dataSize);
-    if (status != noErr || dataSize == 0) {
-#ifdef DEBUG
-        NSLog(@"[bs2b] Failed to get device list size (status = %d).", (int)status);
-#endif
-        return NO;
-    }
-
-    UInt32 deviceCount = dataSize / sizeof(AudioObjectID);
-    AudioObjectID *deviceIDs = (AudioObjectID *)malloc(dataSize);
-    if (!deviceIDs) {
-#ifdef DEBUG
-        NSLog(@"[bs2b] Failed to allocate memory for %u devices.", (unsigned)deviceCount);
-#endif
-        return NO;
-    }
-
-    status = AudioObjectGetPropertyData(kAudioObjectSystemObject,
-                                        &devicesAddr,
-                                        0,
-                                        NULL,
-                                        &dataSize,
-                                        deviceIDs);
-    if (status != noErr) {
-#ifdef DEBUG
-        NSLog(@"[bs2b] Failed to get device list (status = %d).", (int)status);
-#endif
-        free(deviceIDs);
-        return NO;
-    }
-
-    BOOL foundHeadphones = NO;
-
-    // 2) Iterate over all devices and look for an OUTPUT device
-    //    whose name contains our headphones substring
-    for (UInt32 i = 0; i < deviceCount; ++i) {
-        AudioObjectID devID = deviceIDs[i];
-
-        // 2a) Check if this device actually has output channels
-        UInt32 streamsSize = 0;
-        AudioObjectPropertyAddress streamAddr = (AudioObjectPropertyAddress) {
-            .mSelector = kAudioDevicePropertyStreamConfiguration,
-            .mScope    = kAudioDevicePropertyScopeOutput,
-            .mElement  = kAudioObjectPropertyElementMain
-        };
-
-        status = AudioObjectGetPropertyDataSize(devID,
-                                                &streamAddr,
-                                                0,
-                                                NULL,
-                                                &streamsSize);
-        if (status != noErr || streamsSize == 0) {
-            // No output or error: skip this device
-            continue;
-        }
-
-        AudioBufferList *bufferList = (AudioBufferList *)malloc(streamsSize);
-        if (!bufferList) {
-            continue;
-        }
-
-        status = AudioObjectGetPropertyData(devID,
-                                            &streamAddr,
-                                            0,
-                                            NULL,
-                                            &streamsSize,
-                                            bufferList);
-        if (status != noErr) {
-            free(bufferList);
-            continue;
-        }
-
-        UInt32 totalOutputChannels = 0;
-        for (UInt32 b = 0; b < bufferList->mNumberBuffers; ++b) {
-            totalOutputChannels += bufferList->mBuffers[b].mNumberChannels;
-        }
-        free(bufferList);
-
-        if (totalOutputChannels < 2) {
-            // Not enough output channels to be interesting for stereo phones
-            continue;
-        }
-
-        // 2b) Get the device's output name
-        CFStringRef nameRef = NULL;
-        UInt32 nameSize = sizeof(nameRef);
-        AudioObjectPropertyAddress nameAddr = (AudioObjectPropertyAddress) {
-            .mSelector = kAudioDevicePropertyDeviceNameCFString,
-            .mScope    = kAudioDevicePropertyScopeOutput,
-            .mElement  = kAudioObjectPropertyElementMain
-        };
-
-        status = AudioObjectGetPropertyData(devID,
-                                            &nameAddr,
-                                            0,
-                                            NULL,
-                                            &nameSize,
-                                            &nameRef);
-        if (status != noErr || !nameRef) {
-            continue;
-        }
-
-        NSString *deviceName = CFBridgingRelease(nameRef);
-
-        // 2c) Check if the name contains our headphones substring
-        NSRange range = [deviceName rangeOfString:kBS2BHeadphonesNameSubstring
-                                          options:NSCaseInsensitiveSearch];
-        if (range.location != NSNotFound) {
-            foundHeadphones = YES;
-#ifdef DEBUG
-            NSLog(@"[bs2b] Found headphones output device: %@", deviceName);
-#endif
-            break;
-        }
-    }
-
-    free(deviceIDs);
-
-#ifdef DEBUG
-    if (!foundHeadphones) {
-        NSLog(@"[bs2b] No headphones output device containing \"%@\" found.",
-              kBS2BHeadphonesNameSubstring);
-    }
-#endif
-
-    return foundHeadphones;
-}
-
 // Implement the application:openFile: method
 - (BOOL)application:(NSApplication *)sender openFile:(NSString *)filename {
     NSURL *fileURL = [NSURL fileURLWithPath:filename];
@@ -1324,8 +1183,267 @@ CoreAudioPlaybackState playbackState;
     }];
 }
 
-- (void)startBs2bIfNeeded {
+#pragma mark - Headsets and bs2b:
+
+// Helper method to detect headphones for s2b
+- (BOOL)headphonesAreConnected
+{
+    // 1) Query the list size for all Core Audio devices
+    AudioObjectPropertyAddress devicesAddr = (AudioObjectPropertyAddress) {
+        .mSelector = kAudioHardwarePropertyDevices,
+        .mScope    = kAudioObjectPropertyScopeGlobal,
+        .mElement  = kAudioObjectPropertyElementMain
+    };
+
+    UInt32 dataSize = 0;
+    OSStatus status = AudioObjectGetPropertyDataSize(kAudioObjectSystemObject,
+                                                     &devicesAddr,
+                                                     0,
+                                                     NULL,
+                                                     &dataSize);
+    if (status != noErr || dataSize == 0) {
+        #ifdef DEBUG
+        NSLog(@"[bs2b] Failed to get device list size (status = %d).", (int)status);
+        #endif
+        return NO;
+    }
+
+    UInt32 deviceCount = dataSize / sizeof(AudioObjectID);
+    AudioObjectID *deviceIDs = (AudioObjectID *)malloc(dataSize);
+    if (!deviceIDs) {
+        #ifdef DEBUG
+        NSLog(@"[bs2b] Failed to allocate memory for %u devices.", (unsigned)deviceCount);
+        #endif
+        return NO;
+    }
+
+    status = AudioObjectGetPropertyData(kAudioObjectSystemObject,
+                                        &devicesAddr,
+                                        0,
+                                        NULL,
+                                        &dataSize,
+                                        deviceIDs);
+    if (status != noErr) {
+        #ifdef DEBUG
+        NSLog(@"[bs2b] Failed to get device list (status = %d).", (int)status);
+        #endif
+        free(deviceIDs);
+        return NO;
+    }
+
+    BOOL foundHeadphones = NO;
+
+    // 2) Iterate over all devices and look for an OUTPUT device
+    //    whose name contains our headphones substring
+    for (UInt32 i = 0; i < deviceCount; ++i) {
+        AudioObjectID devID = deviceIDs[i];
+
+        // 2a) Check if this device actually has output channels
+        UInt32 streamsSize = 0;
+        AudioObjectPropertyAddress streamAddr = (AudioObjectPropertyAddress) {
+            .mSelector = kAudioDevicePropertyStreamConfiguration,
+            .mScope    = kAudioDevicePropertyScopeOutput,
+            .mElement  = kAudioObjectPropertyElementMain
+        };
+
+        status = AudioObjectGetPropertyDataSize(devID,
+                                                &streamAddr,
+                                                0,
+                                                NULL,
+                                                &streamsSize);
+        if (status != noErr || streamsSize == 0) {
+            // No output or error: skip this device
+            continue;
+        }
+
+        AudioBufferList *bufferList = (AudioBufferList *)malloc(streamsSize);
+        if (!bufferList) {
+            continue;
+        }
+
+        status = AudioObjectGetPropertyData(devID,
+                                            &streamAddr,
+                                            0,
+                                            NULL,
+                                            &streamsSize,
+                                            bufferList);
+        if (status != noErr) {
+            free(bufferList);
+            continue;
+        }
+
+        UInt32 totalOutputChannels = 0;
+        for (UInt32 b = 0; b < bufferList->mNumberBuffers; ++b) {
+            totalOutputChannels += bufferList->mBuffers[b].mNumberChannels;
+        }
+        free(bufferList);
+
+        if (totalOutputChannels < 2) {
+            // Not enough output channels to be interesting for stereo phones
+            continue;
+        }
+
+        // 2b) Get the device's output name
+        CFStringRef nameRef = NULL;
+        UInt32 nameSize = sizeof(nameRef);
+        AudioObjectPropertyAddress nameAddr = (AudioObjectPropertyAddress) {
+            .mSelector = kAudioDevicePropertyDeviceNameCFString,
+            .mScope    = kAudioDevicePropertyScopeOutput,
+            .mElement  = kAudioObjectPropertyElementMain
+        };
+
+        status = AudioObjectGetPropertyData(devID,
+                                            &nameAddr,
+                                            0,
+                                            NULL,
+                                            &nameSize,
+                                            &nameRef);
+        if (status != noErr || !nameRef) {
+            continue;
+        }
+
+        NSString *deviceName = CFBridgingRelease(nameRef);
+
+        // 2c) Check if the name contains our headphones substring
+        NSRange range = [deviceName rangeOfString:kBS2BHeadphonesNameSubstring
+                                          options:NSCaseInsensitiveSearch];
+        if (range.location != NSNotFound) {
+            foundHeadphones = YES;
+            #ifdef DEBUG
+            NSLog(@"[bs2b] Found headphones output device: %@", deviceName);
+            #endif
+            break;
+        }
+    }
+
+    free(deviceIDs);
+
+    #ifdef DEBUG
+    if (!foundHeadphones) {
+        NSLog(@"[bs2b] No headphones output device containing \"%@\" found.",
+              kBS2BHeadphonesNameSubstring);
+    }
+    #endif
+
+    return foundHeadphones;
+}
+
+// Actualiza o bs2b_bridge em função do estado dos auscultadores
+- (void)updateBs2bForHeadphonesConnected:(BOOL)connected
+{
 #if ENABLE_BS2B_BRIDGE
+    // Borda ascendente: passaram de desligados → ligados
+    if (connected && !self.bs2bLastHeadphonesConnected) {
+#ifdef DEBUG
+        NSLog(@"[bs2b] Headphones plugged in — starting bs2b_bridge if needed.");
+#endif
+        [self startBs2bIfNeeded];
+    }
+
+    // Borda descendente: passaram de ligados → desligados
+    if (!connected && self.bs2bLastHeadphonesConnected) {
+#ifdef DEBUG
+        NSLog(@"[bs2b] Headphones unplugged — stopping bs2b_bridge.");
+#endif
+        [self stopBs2bIfRunning];
+    }
+
+    self.bs2bLastHeadphonesConnected = connected;
+#endif
+}
+
+- (void)setupBs2bHeadphoneMonitoring
+{
+#if ENABLE_BS2B_BRIDGE
+    AudioObjectPropertyAddress addr = (AudioObjectPropertyAddress) {
+        .mSelector = kAudioHardwarePropertyDefaultOutputDevice,
+        .mScope    = kAudioObjectPropertyScopeGlobal,
+        .mElement  = kAudioObjectPropertyElementMain
+    };
+
+    __weak typeof(self) weakSelf = self;
+
+    AudioObjectAddPropertyListenerBlock(kAudioObjectSystemObject,
+                                        &addr,
+                                        dispatch_get_main_queue(),
+                                        ^(UInt32 inNumberAddresses,
+                                          const AudioObjectPropertyAddress *inAddresses) {
+
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+
+#ifdef DEBUG
+        NSLog(@"[bs2b] Default output device changed.");
+#endif
+
+        BOOL connected = [strongSelf headphonesAreConnected];
+        [strongSelf updateBs2bForHeadphonesConnected:connected];
+    });
+
+    // Estado inicial (app arranca já com phones ligados?)
+    BOOL connected = [self headphonesAreConnected];
+    self.bs2bLastHeadphonesConnected = !connected;  // força tratamento como "borda"
+    [self updateBs2bForHeadphonesConnected:connected];
+#endif
+}
+
+- (void)teardownBs2bHeadphoneMonitoring
+{
+#if ENABLE_BS2B_BRIDGE
+    AudioObjectPropertyAddress addr = (AudioObjectPropertyAddress) {
+        .mSelector = kAudioHardwarePropertyDefaultOutputDevice,
+        .mScope    = kAudioObjectPropertyScopeGlobal,
+        .mElement  = kAudioObjectPropertyElementMain
+    };
+
+    AudioObjectRemovePropertyListenerBlock(kAudioObjectSystemObject,
+                                           &addr,
+                                           dispatch_get_main_queue(),
+                                           ^(UInt32 inNumberAddresses,
+                                             const AudioObjectPropertyAddress *inAddresses) {
+                                               // Block must match; in prática o runtime trata disto.
+                                           });
+#endif
+}
+
+- (void)pollBs2bHeadphones
+{
+#if ENABLE_BS2B_BRIDGE
+    BOOL connected = [self headphonesAreConnected];
+    [self updateBs2bForHeadphonesConnected:connected];
+#endif
+}
+
+- (void)startBs2bHeadphoneAutoStart
+{
+#if ENABLE_BS2B_BRIDGE
+    if (self.bs2bHeadphonePollTimer) {
+        return; // já está activo
+    }
+
+    // Estado inicial forçado via poll
+    self.bs2bLastHeadphonesConnected = NO;
+    [self pollBs2bHeadphones];
+
+    self.bs2bHeadphonePollTimer =
+        [NSTimer scheduledTimerWithTimeInterval:1.0
+                                         target:self
+                                       selector:@selector(pollBs2bHeadphones)
+                                       userInfo:nil
+                                        repeats:YES];
+#endif
+}
+
+- (void)stopBs2bHeadphoneAutoStart
+{
+#if ENABLE_BS2B_BRIDGE
+    [self.bs2bHeadphonePollTimer invalidate];
+    self.bs2bHeadphonePollTimer = nil;
+#endif
+}
+
+- (void)startBs2bIfNeeded {
+    #if ENABLE_BS2B_BRIDGE
     // Já está a correr?
     if (self.bs2bTask && self.bs2bTask.isRunning) {
         return;
@@ -1383,11 +1501,11 @@ CoreAudioPlaybackState playbackState;
         #endif
         self.bs2bTask = nil;
     }
-#endif
+        #endif
 }
 
 - (void)stopBs2bIfRunning {
-#if ENABLE_BS2B_BRIDGE
+        #if ENABLE_BS2B_BRIDGE
     if (self.bs2bTask && self.bs2bTask.isRunning) {
         #ifdef DEBUG
         NSLog(@"[bs2b] Terminating bs2b_bridge…");
@@ -1404,7 +1522,7 @@ CoreAudioPlaybackState playbackState;
         }
     }
     self.bs2bTask = nil;
-#endif
+            #endif
 }
 
 - (void)setupOpenRecentMenu {
@@ -1475,6 +1593,8 @@ CoreAudioPlaybackState playbackState;
         [aboutMenuItem setEnabled:YES];
     }
     [self initializeAirPlaySettings];
+    [self startBs2bHeadphoneAutoStart];
+    [self setupBs2bHeadphoneMonitoring];
 }
 
 - (NSString *)localizedVersionStringWithVersion:(NSString *)version {
@@ -5368,6 +5488,8 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 - (void)applicationWillTerminate:(NSNotification *)notification {
     [self stopCava];
     [self stopBs2bIfRunning];
+    [self teardownBs2bHeadphoneMonitoring];
+    [self stopBs2bHeadphoneAutoStart];
     [self saveTrackPlayCounts];
     [self.airPlayManager stopDiscovery];
     // Ensure AirPlay_BonJour.txt is reset on app termination

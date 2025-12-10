@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2024 Zé Pedro do Amaral <amaral@mac.com>
+Copyright (c) 2025 Zé Pedro do Amaral <amaral@mac.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
