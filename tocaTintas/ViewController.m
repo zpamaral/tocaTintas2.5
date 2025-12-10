@@ -52,6 +52,7 @@ SOFTWARE.
 #import "ZPAirPlayStreamer.h"
 
 #define NUM_BUFFERS 3  // Three is typically a good number for real-time audio playback
+#define ENABLE_BS2B_BRIDGE 1 // Running bs2b_bridge
 
 // Helper structures and callbacks for reading WavPack data from memory
 typedef struct {
@@ -191,6 +192,9 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSString *selectedDeviceName; // Store the selected device name
 @property (nonatomic, strong) ZPAirPlayStreamer *airPlayStreamer;
 @property (nonatomic, assign) BOOL isProgrammaticChange;
+
+// To implement s2b when using headphones
+@property (strong, nonatomic) NSTask *bs2bTask;
 
 @end
 
@@ -971,6 +975,66 @@ CoreAudioPlaybackState playbackState;
 
 #pragma mark - Need organizing:
 
+// Helper method to detect headphones for s2b
+- (BOOL)headphonesAreConnected {
+    AudioObjectID deviceID = kAudioObjectUnknown;
+    UInt32 size = sizeof(deviceID);
+
+    AudioObjectPropertyAddress addr = {
+        kAudioHardwarePropertyDefaultOutputDevice,
+        kAudioObjectPropertyScopeGlobal,
+        kAudioObjectPropertyElementMain
+    };
+
+    OSStatus status = AudioObjectGetPropertyData(kAudioObjectSystemObject,
+                                                 &addr,
+                                                 0,
+                                                 NULL,
+                                                 &size,
+                                                 &deviceID);
+    if (status != noErr || deviceID == kAudioObjectUnknown) {
+        #ifdef DEBUG
+        NSLog(@"[bs2b] Could not get default output device (status = %d).", (int)status);
+        #endif
+        return NO;
+    }
+
+    CFStringRef deviceNameRef = NULL;
+    size = sizeof(deviceNameRef);
+    AudioObjectPropertyAddress nameAddr = {
+        kAudioDevicePropertyDeviceNameCFString,
+        kAudioObjectPropertyScopeOutput,
+        kAudioObjectPropertyElementMain
+    };
+
+    status = AudioObjectGetPropertyData(deviceID,
+                                        &nameAddr,
+                                        0,
+                                        NULL,
+                                        &size,
+                                        &deviceNameRef);
+    if (status != noErr || !deviceNameRef) {
+        #ifdef DEBUG
+        NSLog(@"[bs2b] Could not get output device name (status = %d).", (int)status);
+        #endif
+        return NO;
+    }
+
+    NSString *deviceName = CFBridgingRelease(deviceNameRef);
+
+    // Aqui podes refinar o critério; deixo um teste simples:
+    NSRange range = [deviceName rangeOfString:@"headphones"
+                                      options:NSCaseInsensitiveSearch];
+    BOOL isHeadphones = (range.location != NSNotFound);
+
+    #ifdef DEBUG
+    NSLog(@"[bs2b] Default output device: %@ (headphones = %@)",
+          deviceName, isHeadphones ? @"YES" : @"NO");
+    #endif
+
+    return isHeadphones;
+}
+
 // Implement the application:openFile: method
 - (BOOL)application:(NSApplication *)sender openFile:(NSString *)filename {
     NSURL *fileURL = [NSURL fileURLWithPath:filename];
@@ -1173,6 +1237,89 @@ CoreAudioPlaybackState playbackState;
             #endif
         }
     }];
+}
+
+- (void)startBs2bIfNeeded {
+#if ENABLE_BS2B_BRIDGE
+    // Já está a correr?
+    if (self.bs2bTask && self.bs2bTask.isRunning) {
+        return;
+    }
+
+    // Só corre se houver auscultadores
+    if (![self headphonesAreConnected]) {
+        #ifdef DEBUG
+        NSLog(@"[bs2b] Headphones not detected; not starting bs2b_bridge.");
+        #endif
+        return;
+    }
+
+    NSString *bridgePath = [[NSBundle mainBundle] pathForResource:@"bs2b_bridge" ofType:nil];
+    if (!bridgePath) {
+        #ifdef DEBUG
+        NSLog(@"[bs2b] bs2b_bridge not found in app bundle.");
+        #endif
+        return;
+    }
+
+    NSTask *task = [[NSTask alloc] init];
+    task.launchPath = bridgePath;
+
+    // To choose specific options:
+    // task.arguments = @[@"--perfil", @"cmoy"];
+    task.arguments = @[@"--silencioso"];  // or any other default
+
+    // To avoid spam in stdout, redirect to /dev/null
+    task.standardOutput = [NSPipe pipe];
+    task.standardError  = [NSPipe pipe];
+
+    __weak typeof(self) weakSelf = self;
+    task.terminationHandler = ^(NSTask *finishedTask) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (weakSelf.bs2bTask == finishedTask) {
+                weakSelf.bs2bTask = nil;
+            }
+            #ifdef DEBUG
+            NSLog(@"[bs2b] bs2b_bridge terminated (exitStatus=%d).",
+                  finishedTask.terminationStatus);
+            #endif
+        });
+    };
+
+    @try {
+        [task launch];
+        self.bs2bTask = task;
+        #ifdef DEBUG
+        NSLog(@"[bs2b] bs2b_bridge started at path %@", bridgePath);
+        #endif
+    } @catch (NSException *exception) {
+        #ifdef DEBUG
+        NSLog(@"[bs2b] Failed to launch bs2b_bridge: %@", exception);
+        #endif
+        self.bs2bTask = nil;
+    }
+#endif
+}
+
+- (void)stopBs2bIfRunning {
+#if ENABLE_BS2B_BRIDGE
+    if (self.bs2bTask && self.bs2bTask.isRunning) {
+        #ifdef DEBUG
+        NSLog(@"[bs2b] Terminating bs2b_bridge…");
+        #endif
+        [self.bs2bTask terminate];
+
+        // To be sure of an immediate cleanup:
+        @try {
+            [self.bs2bTask waitUntilExit];
+        } @catch (NSException *exception) {
+            #ifdef DEBUG
+            NSLog(@"[bs2b] Exception waiting for bs2b_bridge to exit: %@", exception);
+            #endif
+        }
+    }
+    self.bs2bTask = nil;
+#endif
 }
 
 - (void)setupOpenRecentMenu {
@@ -1752,6 +1899,7 @@ CoreAudioPlaybackState playbackState;
 
 // Add Ogg Opus support
 - (void)handleOpusPlayback:(NSURL *)trackURL {
+    [self startBs2bIfNeeded];
     // Ensure the current track maps to its original counterpart
     NSURL *originalTrackURL = self.shuffledToOriginalMap[self.currentTrackURL] ?: self.currentTrackURL;
 
@@ -2314,6 +2462,7 @@ void flac_metadata_callback(const FLAC__StreamDecoder *decoder,
 
 // Start playback for the WavPack file and set up the timer to update progress
 - (void)playWavPack:(NSURL *)trackURL {
+    [self startBs2bIfNeeded];
     NSURL *originalTrackURL = self.shuffledToOriginalMap[trackURL] ?: trackURL;  // Use original if available
 
     // Convert the file URL path to a UTF-8 string for WavPack
@@ -2890,6 +3039,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 }
 
 - (void)playAudio {
+    [self startBs2bIfNeeded];
     //self.replayGainValue = 0.0f;
 
     // Clear any previous Now Playing notifications
@@ -4668,6 +4818,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 
 // Ensure the timer is invalidated if playback is stopped or a new track is played
 - (void)stopAudio {
+    [self stopBs2bIfRunning];
     // Invalidate the previous progress update timer
     if (self.progressUpdateTimer) {
         [self.progressUpdateTimer invalidate];
@@ -5132,6 +5283,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
     [self stopCava];
+    [self stopBs2bIfRunning];
     [self saveTrackPlayCounts];
     [self.airPlayManager stopDiscovery];
     // Ensure AirPlay_BonJour.txt is reset on app termination
