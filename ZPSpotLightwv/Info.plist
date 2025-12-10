@@ -39,9 +39,9 @@
 	<key>CFBundleExecutable</key>
 	<string>ZPSpotLightwv</string>
 	<key>CFBundleVersion</key>
-	<string>2.5</string>
+	<string>2.5.5</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.5</string>
+	<string>2.5.5</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleSupportedPlatforms</key>

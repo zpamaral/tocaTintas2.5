@@ -29,6 +29,7 @@
 		1F651EE92C88B91D00CA223D /* libFLAC.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F651EE62C88B91D00CA223D /* libFLAC.a */; };
 		1F651EEA2C88B91D00CA223D /* libogg.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F651EE72C88B91D00CA223D /* libogg.a */; };
 		1F73F9C22CFE0C2D007C70AD /* refresh_icon.png in Resources */ = {isa = PBXBuildFile; fileRef = 1F73F9C12CFE0C2D007C70AD /* refresh_icon.png */; };
+		1F75D8E02EE994110005EE27 /* bs2b_bridge in Resources */ = {isa = PBXBuildFile; fileRef = 1F75D8DF2EE994110005EE27 /* bs2b_bridge */; };
 		1F7D75202C95DCAF0046E0AC /* M3UPlaylist.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F7D751F2C95DCAF0046E0AC /* M3UPlaylist.m */; };
 		1F7D75232C963F600046E0AC /* ZPOpusDecoder.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F7D75222C963F600046E0AC /* ZPOpusDecoder.m */; };
 		1F7D75262C9642000046E0AC /* libopus.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F7D75242C9642000046E0AC /* libopus.a */; };
@@ -124,6 +125,7 @@
 		1F651EE72C88B91D00CA223D /* libogg.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libogg.a; path = tocaTintas.xcodeproj/Frameworks/libogg.a; sourceTree = "<group>"; };
 		1F73F9C12CFE0C2D007C70AD /* refresh_icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = refresh_icon.png; sourceTree = "<group>"; };
 		1F73F9C32CFE7744007C70AD /* placeholder.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = placeholder.jpg; sourceTree = "<group>"; };
+		1F75D8DF2EE994110005EE27 /* bs2b_bridge */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = bs2b_bridge; sourceTree = "<group>"; };
 		1F7D751E2C95DCAF0046E0AC /* M3UPlaylist.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = M3UPlaylist.h; sourceTree = "<group>"; };
 		1F7D751F2C95DCAF0046E0AC /* M3UPlaylist.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = M3UPlaylist.m; sourceTree = "<group>"; };
 		1F7D75212C963F600046E0AC /* ZPOpusDecoder.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPOpusDecoder.h; sourceTree = "<group>"; };
@@ -304,6 +306,7 @@
 				1F73F9C12CFE0C2D007C70AD /* refresh_icon.png */,
 				1FF2BD3E2CEF75CE009726BF /* ListAudioDevices */,
 				1FC8C3ED2CE4C1A200271175 /* raop_play */,
+				1F75D8DF2EE994110005EE27 /* bs2b_bridge */,
 				1F37C8C42CD5446700346A66 /* cava */,
 				1F37C8C72CD5486600346A66 /* config_fifo */,
 			);
@@ -424,7 +427,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastUpgradeCheck = 1640;
+				LastUpgradeCheck = 2610;
 				TargetAttributes = {
 					1F12F2A12C7C85480064C694 = {
 						CreatedOnToolsVersion = 14.2;
@@ -472,6 +475,7 @@
 				1F73F9C22CFE0C2D007C70AD /* refresh_icon.png in Resources */,
 				1F04EB2E2E5BBA9500323023 /* audio_stuff_info in Resources */,
 				1FF2BD3F2CEF75CE009726BF /* ListAudioDevices in Resources */,
+				1F75D8E02EE994110005EE27 /* bs2b_bridge in Resources */,
 				1FC8C3EE2CE4C1A300271175 /* raop_play in Resources */,
 				1F37C8C82CD5486600346A66 /* config_fifo in Resources */,
 				1F37C8C52CD5446700346A66 /* cava in Resources */,
@@ -676,6 +680,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 			};
 			name = Debug;
 		};
@@ -735,6 +740,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 			};
 			name = Release;
 		};
@@ -748,9 +754,10 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2.5;
+				CURRENT_PROJECT_VERSION = 2.5.5;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = FJ238DJ67E;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				"HEADER_SEARCH_PATHS[sdk=macosx*]" = (
@@ -770,10 +777,13 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 2.5;
+				MARKETING_VERSION = 2.5.5;
 				OTHER_CFLAGS = "-Wno-documentation";
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				RUNTIME_EXCEPTION_ALLOW_UNSIGNED_EXECUTABLE_MEMORY = YES;
+				RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION = YES;
+				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SYSTEM_FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -792,9 +802,10 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2.5;
+				CURRENT_PROJECT_VERSION = 2.5.5;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = FJ238DJ67E;
+				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				HEADER_SEARCH_PATHS = (
@@ -818,10 +829,13 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 2.5;
+				MARKETING_VERSION = 2.5.5;
 				OTHER_CFLAGS = "-Wno-documentation";
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				RUNTIME_EXCEPTION_ALLOW_UNSIGNED_EXECUTABLE_MEMORY = YES;
+				RUNTIME_EXCEPTION_DISABLE_EXECUTABLE_PAGE_PROTECTION = YES;
+				RUNTIME_EXCEPTION_DISABLE_LIBRARY_VALIDATION = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SYSTEM_FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
@@ -837,7 +851,10 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2.3;
 				DEAD_CODE_STRIPPING = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
 				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_USER_SELECTED_FILES = readonly;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GENERATE_INFOPLIST_FILE = NO;
 				HEADER_SEARCH_PATHS = /usr/local/include;
@@ -869,7 +886,10 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2.3;
 				DEAD_CODE_STRIPPING = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
 				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = NO;
 				HEADER_SEARCH_PATHS = /usr/local/include;
 				INFOPLIST_FILE = ZPQLverwv/Info.plist;
@@ -900,7 +920,10 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2.3;
 				DEAD_CODE_STRIPPING = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
 				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_USER_SELECTED_FILES = readonly;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GENERATE_INFOPLIST_FILE = NO;
 				HEADER_SEARCH_PATHS = /usr/local/include;
@@ -937,7 +960,10 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2.3;
 				DEAD_CODE_STRIPPING = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
 				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = NO;
 				HEADER_SEARCH_PATHS = /usr/local/include;
 				INFOPLIST_FILE = ZPQLiconwv/Info.plist;
@@ -974,7 +1000,10 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2.3;
 				DEAD_CODE_STRIPPING = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
 				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_USER_SELECTED_FILES = readonly;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GENERATE_INFOPLIST_FILE = NO;
 				HEADER_SEARCH_PATHS = /usr/local/include;
@@ -1007,7 +1036,10 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2.3;
 				DEAD_CODE_STRIPPING = YES;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
 				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = NO;
 				HEADER_SEARCH_PATHS = /usr/local/include;
 				INFOPLIST_FILE = ZPSpotLightwv/Info.plist;
