@@ -1331,30 +1331,30 @@ CoreAudioPlaybackState playbackState;
 // Actualiza o bs2b_bridge em função do estado dos auscultadores
 - (void)updateBs2bForHeadphonesConnected:(BOOL)connected
 {
-#if ENABLE_BS2B_BRIDGE
+    #if ENABLE_BS2B_BRIDGE
     // Borda ascendente: passaram de desligados → ligados
     if (connected && !self.bs2bLastHeadphonesConnected) {
-#ifdef DEBUG
+        #ifdef DEBUG
         NSLog(@"[bs2b] Headphones plugged in — starting bs2b_bridge if needed.");
-#endif
+        #endif
         [self startBs2bIfNeeded];
     }
 
     // Borda descendente: passaram de ligados → desligados
     if (!connected && self.bs2bLastHeadphonesConnected) {
-#ifdef DEBUG
+        #ifdef DEBUG
         NSLog(@"[bs2b] Headphones unplugged — stopping bs2b_bridge.");
-#endif
+        #endif
         [self stopBs2bIfRunning];
     }
 
     self.bs2bLastHeadphonesConnected = connected;
-#endif
+    #endif
 }
 
 - (void)setupBs2bHeadphoneMonitoring
 {
-#if ENABLE_BS2B_BRIDGE
+    #if ENABLE_BS2B_BRIDGE
     AudioObjectPropertyAddress addr = (AudioObjectPropertyAddress) {
         .mSelector = kAudioHardwarePropertyDefaultOutputDevice,
         .mScope    = kAudioObjectPropertyScopeGlobal,
@@ -1372,9 +1372,9 @@ CoreAudioPlaybackState playbackState;
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
 
-#ifdef DEBUG
+        #ifdef DEBUG
         NSLog(@"[bs2b] Default output device changed.");
-#endif
+        #endif
 
         BOOL connected = [strongSelf headphonesAreConnected];
         [strongSelf updateBs2bForHeadphonesConnected:connected];
@@ -1384,12 +1384,12 @@ CoreAudioPlaybackState playbackState;
     BOOL connected = [self headphonesAreConnected];
     self.bs2bLastHeadphonesConnected = !connected;  // força tratamento como "borda"
     [self updateBs2bForHeadphonesConnected:connected];
-#endif
+    #endif
 }
 
 - (void)teardownBs2bHeadphoneMonitoring
 {
-#if ENABLE_BS2B_BRIDGE
+    #if ENABLE_BS2B_BRIDGE
     AudioObjectPropertyAddress addr = (AudioObjectPropertyAddress) {
         .mSelector = kAudioHardwarePropertyDefaultOutputDevice,
         .mScope    = kAudioObjectPropertyScopeGlobal,
@@ -1403,20 +1403,20 @@ CoreAudioPlaybackState playbackState;
                                              const AudioObjectPropertyAddress *inAddresses) {
                                                // Block must match; in prática o runtime trata disto.
                                            });
-#endif
+    #endif
 }
 
 - (void)pollBs2bHeadphones
 {
-#if ENABLE_BS2B_BRIDGE
+    #if ENABLE_BS2B_BRIDGE
     BOOL connected = [self headphonesAreConnected];
     [self updateBs2bForHeadphonesConnected:connected];
-#endif
+    #endif
 }
 
 - (void)startBs2bHeadphoneAutoStart
 {
-#if ENABLE_BS2B_BRIDGE
+    #if ENABLE_BS2B_BRIDGE
     if (self.bs2bHeadphonePollTimer) {
         return; // já está activo
     }
@@ -1431,15 +1431,15 @@ CoreAudioPlaybackState playbackState;
                                        selector:@selector(pollBs2bHeadphones)
                                        userInfo:nil
                                         repeats:YES];
-#endif
+    #endif
 }
 
 - (void)stopBs2bHeadphoneAutoStart
 {
-#if ENABLE_BS2B_BRIDGE
+    #if ENABLE_BS2B_BRIDGE
     [self.bs2bHeadphonePollTimer invalidate];
     self.bs2bHeadphonePollTimer = nil;
-#endif
+    #endif
 }
 
 - (void)startBs2bIfNeeded {
@@ -1524,6 +1524,8 @@ CoreAudioPlaybackState playbackState;
     self.bs2bTask = nil;
             #endif
 }
+
+#pragma mark - Recent Menu and Documents:
 
 - (void)setupOpenRecentMenu {
     // Get the recent documents URLs from NSDocumentController

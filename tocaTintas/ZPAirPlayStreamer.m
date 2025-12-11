@@ -250,7 +250,8 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
     self = [super init];
     if (self) {
         _ipAddress = ipAddress;
-        _latency = 44100; // Default latency
+        _latency = 132300; // 3 s of latency
+        //_latency = 44100; // Default latency
         _port = port;
         _audioEngine = [[AVAudioEngine alloc] init];
         _isStreaming = NO;
@@ -258,7 +259,8 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         [self setGainInDecibels2:replayGainValue]; // replayGainValue is in dB, convert it here
 
         // Initialize the circular buffer with 10 seconds of stereo audio
-        TPCircularBufferInit(&_circularBuffer, 44100 * 2 * 10);
+        //TPCircularBufferInit(&_circularBuffer, 44100 * 2 * 10); // Original value
+        TPCircularBufferInit(&_circularBuffer, 44100 * 10 * 4); // 1_764_000
 
         // Observe changes to the "SelectedAirPlayDevice" key
         [[NSNotificationCenter defaultCenter] addObserver:self
@@ -787,12 +789,13 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
     }
 
     // Configure the RAOP task
+    // Define the values for all the flags
     self.raopTask.launchPath = raopPlayPath;
     self.raopTask.arguments = @[
         @"-a", self.ipAddress,
         @"-p", self.port,
         @"-l", [NSString stringWithFormat:@"%ld", (long)self.latency],
-        @"-f", @"/var/tmp/raop_clock",
+        //@"-f", @"/var/tmp/raop_clock",
         @"-"
     ];
     self.raopTask.standardInput = self.inputPipe;
