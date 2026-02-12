@@ -2,7 +2,7 @@
 //  ZPAudioCapture.h
 //  tocaTintas
 //
-//  Created by J. Pedro Sousa do Amaral on 08/11/2024.
+//  Created by J. Pedro Sousa do Amaral on 08/11/2026.
 //
 
 #import <Foundation/Foundation.h>

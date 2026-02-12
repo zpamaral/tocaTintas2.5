@@ -37,9 +37,9 @@
 	<key>CFBundleExecutable</key>
 	<string>ZPQLiconwv</string>
 	<key>CFBundleVersion</key>
-	<string>2.5.5</string>
+	<string>2.5.6</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.5.5</string>
+	<string>2.5.6</string>
 	<key>CFBundleDisplayName</key>
 	<string>Mostrar ícones WavPack</string>
 	<key>LSMinimumSystemVersion</key>

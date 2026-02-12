@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2024 Zé Pedro do Amaral <amaral@mac.com>
+Copyright (c) 2026 Zé Pedro do Amaral <amaral@mac.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -23,7 +23,7 @@ SOFTWARE.
 //  M3UPlaylist.h
 //  tocaTintas
 //
-//  Created by Zé Pedro do Amaral on 14/09/2024.
+//  Created by Zé Pedro do Amaral on 14/09/2026.
 //
 
 #import <Foundation/Foundation.h>

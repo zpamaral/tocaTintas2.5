@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2025 Zé Pedro do Amaral <amaral@mac.com>
+Copyright (c) 2026 Zé Pedro do Amaral <amaral@mac.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -23,7 +23,7 @@ SOFTWARE.
 //  ViewController.m
 //  tocaTintas
 //
-//  Created by Zé Pedro do Amaral on 26/08/2024.
+//  Created by Zé Pedro do Amaral on 26/08/2026.
 //
 
 #include <wavpack/wavpack.h>   // For WAVpack playback
@@ -1659,7 +1659,7 @@ CoreAudioPlaybackState playbackState;
 
         // 4. Copyright / Credits (Centered)
         NSTextField *creditsLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(0, yOffset + 50, 250, 60)]; // Adjusted width to match the window size
-        [creditsLabel setStringValue:@"© 2025 Zé Pedro do Amaral"];
+        [creditsLabel setStringValue:@"© 2026 Zé Pedro do Amaral"];
         [creditsLabel setBezeled:NO];
         [creditsLabel setDrawsBackground:NO];
         [creditsLabel setEditable:NO];

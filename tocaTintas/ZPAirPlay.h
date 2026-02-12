@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2025 Zé Pedro do Amaral <amaral@mac.com>
+Copyright (c) 2026 Zé Pedro do Amaral <amaral@mac.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -23,7 +23,7 @@ SOFTWARE.
 //  ZPAirPlay.h
 //  tocaTintas
 //
-//  Created by J. Pedro Sousa do Amaral on 12/11/2024.
+//  Created by J. Pedro Sousa do Amaral on 12/11/2026.
 //
 
 #import <Foundation/Foundation.h>
