@@ -81,68 +81,121 @@ static NSString *const kDMAPPairingGUID = @"00000000-0008-2083-cd93-e7745ad24855
 // DMAP session and returns the headers printed by the tool as a dictionary.
 static NSDictionary *runPythonScriptAndParseJSON(NSString *deviceIP) {
     NSString *pyScript = [NSString stringWithFormat:
-        @"#!/usr/local/bin/python3\n"
+        @"#!/usr/bin/env python3\n"
         "# -*- coding: utf-8 -*-\n"
         "import subprocess\n"
         "import json\n"
         "import re\n"
         "import sys\n"
+        "import os\n"
+        "import shutil\n"
         "\n"
         "DEVICE_ID = \"B6534AF50FB3320F\"\n"
         "PROTOCOL = \"dmap\"\n"
         "ADDRESS = \"%@\"\n"
+        "PORT = 3689\n"
         "\n"
-        "# Caminho absoluto para atvremote\n"
-        "atv = \"/Users/amaral/.local/bin/atvremote\"\n"
+        "# Localização do atvremote: primeiro PATH, depois fallback (o teu caminho actual)\n"
+        "atv = shutil.which(\"atvremote\")\n"
+        "if not atv:\n"
+        "    atv = \"/Users/amaral/.local/bin/atvremote\"\n"
         "\n"
+        "if not atv or not os.path.exists(atv):\n"
+        "    print(\"[Acordar ATV] atvremote não encontrado (PATH e fallback falharam)\")\n"
+        "    sys.exit(1)\n"
+        "\n"
+        "# Forçar modo manual para evitar discovery (scan) falhar silenciosamente\n"
         "command = [\n"
         "    atv,\n"
-        "    '--id', DEVICE_ID,\n"
-        "    '--protocol', PROTOCOL,\n"
-        "    '--address', ADDRESS,\n"
-        "    'play',\n"
-        "    '--debug'\n"
+        "    \"--manual\",\n"
+        "    \"--address\", ADDRESS,\n"
+        "    \"--port\", str(PORT),\n"
+        "    \"--protocol\", PROTOCOL,\n"
+        "    \"--id\", DEVICE_ID,\n"
+        "    \"play\",\n"
+        "    \"--debug\",\n"
         "]\n"
         "\n"
         "try:\n"
-        "    proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)\n"
-        "    output, _ = proc.communicate()\n"
+        "    proc = subprocess.run(\n"
+        "        command,\n"
+        "        stdout=subprocess.PIPE,\n"
+        "        stderr=subprocess.STDOUT,\n"
+        "        text=True,\n"
+        "        timeout=8,\n"
+        "    )\n"
+        "    output = proc.stdout or \"\"\n"
+        "except subprocess.TimeoutExpired:\n"
+        "    print(\"[Acordar ATV] Timeout ao executar atvremote\")\n"
+        "    sys.exit(1)\n"
         "except Exception as e:\n"
-        "    print(f'[Acordar ATV] Erro ao executar atvremote: {e}')\n"
+        "    print(f\"[Acordar ATV] Erro ao executar atvremote: {e}\")\n"
+        "    sys.exit(1)\n"
+        "\n"
+        "if proc.returncode != 0:\n"
+        "    # Mantém output para diagnóstico\n"
+        "    print(f\"[Acordar ATV] atvremote terminou com erro (returncode={proc.returncode})\")\n"
+        "    print(output)\n"
         "    sys.exit(1)\n"
         "\n"
         "headers = {\n"
-        "    'Host': None,\n"
-        "    'Session-Id': None,\n"
-        "    'Active-Remote': None,\n"
-        "    'X-Apple-Device-Guid': DEVICE_ID\n"
+        "    \"Host\": None,\n"
+        "    \"Session-Id\": None,\n"
+        "    \"Active-Remote\": None,\n"
+        "    # Mantém compatibilidade: usa o mesmo valor que tinhas\n"
+        "    \"X-Apple-Device-Guid\": DEVICE_ID,\n"
         "}\n"
         "\n"
+        "# Regexes robustos para o formato actual (pyatv 0.17.x) e fallback para formatos antigos\n"
+        "re_url_host = re.compile(r\"URL:\\s+https?://([^/]+)\")\n"
+        "re_old_host = re.compile(r\"\\bat\\s+([^\\s]+)\")\n"
+        "re_session = re.compile(r\"\\bsession id\\s+(\\d+)\")\n"
+        "re_cmsr = re.compile(r\"\\bcmsr:\\s+(\\d+)\\b\")\n"
+        "\n"
         "for line in output.splitlines():\n"
-        "    if 'via Protocol.DMAP' in line and 'at' in line:\n"
-        "        match = re.search(r'at (\\d+\\.\\d+\\.\\d+\\.\\d+:\\d+)', line)\n"
-        "        if match:\n"
-        "            headers['Host'] = match.group(1)\n"
-        "    elif 'Logged in and got session id' in line:\n"
-        "        match = re.search(r'session id (\\d+)', line)\n"
-        "        if match:\n"
-        "            headers['Session-Id'] = match.group(1)\n"
-        "    elif 'cmsr:' in line:\n"
-        "        match = re.search(r'cmsr:\\s+(\\d+)', line)\n"
-        "        if match:\n"
-        "            headers['Active-Remote'] = match.group(1)\n"
+        "    if headers[\"Host\"] is None:\n"
+        "        m = re_url_host.search(line)\n"
+        "        if m:\n"
+        "            headers[\"Host\"] = m.group(1)\n"
+        "        elif \"via Protocol.DMAP\" in line and \" at \" in line:\n"
+        "            m2 = re_old_host.search(line)\n"
+        "            if m2:\n"
+        "                headers[\"Host\"] = m2.group(1)\n"
+        "\n"
+        "    if headers[\"Session-Id\"] is None and (\"session id\" in line):\n"
+        "        ms = re_session.search(line)\n"
+        "        if ms:\n"
+        "            headers[\"Session-Id\"] = ms.group(1)\n"
+        "\n"
+        "    if headers[\"Active-Remote\"] is None and (\"cmsr:\" in line):\n"
+        "        mr = re_cmsr.search(line)\n"
+        "        if mr:\n"
+        "            headers[\"Active-Remote\"] = mr.group(1)\n"
+        "\n"
+        "# Normalizar Host: se vier sem porta, acrescenta :3689\n"
+        "if headers[\"Host\"] and (\":\" not in headers[\"Host\"]):\n"
+        "    headers[\"Host\"] = f\"{headers['Host']}:{PORT}\"\n"
+        "\n"
+        "# Caminho portável (derivado de ~) + criação de pasta\n"
+        "app_support = os.path.join(os.path.expanduser(\"~\"), \"Library\", \"Application Support\", \"tocaTintas\")\n"
+        "os.makedirs(app_support, exist_ok=True)\n"
+        "json_path = os.path.join(app_support, \"acordar.json\")\n"
         "\n"
         "if all(headers.values()):\n"
         "    try:\n"
-        "        with open(\"/Users/amaral/Library/Application Support/tocaTintas/acordar.json\", \"w\", encoding=\"utf-8\") as f:\n"
+        "        tmp_path = json_path + \".tmp\"\n"
+        "        with open(tmp_path, \"w\", encoding=\"utf-8\") as f:\n"
         "            json.dump(headers, f, indent=2)\n"
+        "        os.replace(tmp_path, json_path)\n"
         "    except Exception as e:\n"
-        "        print(f'[Acordar ATV] Erro ao gravar JSON: {e}')\n"
+        "        print(f\"[Acordar ATV] Erro ao gravar JSON: {e}\")\n"
         "        sys.exit(1)\n"
         "    print(json.dumps(headers), flush=True)\n"
         "else:\n"
-        "    print('[Acordar ATV] Falha na extração dos cabeçalhos', headers)\n",
-        deviceIP];
+        "    print(\"[Acordar ATV] Falha na extração dos cabeçalhos\", headers)\n"
+        "    # Para diagnóstico, também imprime o output completo\n"
+        "    print(output)\n"
+        , deviceIP];
 
     NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"pyatv_embutido.py"];
     NSError *error = nil;
@@ -250,8 +303,8 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
     self = [super init];
     if (self) {
         _ipAddress = ipAddress;
-        _latency = 132300; // 3 s of latency
-        //_latency = 44100; // Default latency
+        //_latency = 132300; // 3 s of latency
+        _latency = 44100; // Default latency
         _port = port;
         _audioEngine = [[AVAudioEngine alloc] init];
         _isStreaming = NO;
@@ -259,8 +312,8 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         [self setGainInDecibels2:replayGainValue]; // replayGainValue is in dB, convert it here
 
         // Initialize the circular buffer with 10 seconds of stereo audio
-        //TPCircularBufferInit(&_circularBuffer, 44100 * 2 * 10); // Original value
-        TPCircularBufferInit(&_circularBuffer, 44100 * 10 * 4); // 1_764_000
+        TPCircularBufferInit(&_circularBuffer, 44100 * 2 * 10); // Original value
+        //TPCircularBufferInit(&_circularBuffer, 44100 * 4 * 10); // 1_764_000
 
         // Observe changes to the "SelectedAirPlayDevice" key
         [[NSNotificationCenter defaultCenter] addObserver:self
@@ -795,7 +848,7 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
         @"-a", self.ipAddress,
         @"-p", self.port,
         @"-l", [NSString stringWithFormat:@"%ld", (long)self.latency],
-        //@"-f", @"/var/tmp/raop_clock",
+        @"-f", @"/var/tmp/raop_clock",
         @"-"
     ];
     self.raopTask.standardInput = self.inputPipe;
