@@ -845,10 +845,11 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
     // Define the values for all the flags
     self.raopTask.launchPath = raopPlayPath;
     self.raopTask.arguments = @[
-        @"-a", self.ipAddress,
+        @"-a",
         @"-p", self.port,
         @"-l", [NSString stringWithFormat:@"%ld", (long)self.latency],
         @"-f", @"/var/tmp/raop_clock",
+        self.ipAddress,
         @"-"
     ];
     self.raopTask.standardInput = self.inputPipe;
