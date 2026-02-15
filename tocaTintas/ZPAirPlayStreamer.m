@@ -848,7 +848,7 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
         @"-a",
         @"-p", self.port,
         @"-l", [NSString stringWithFormat:@"%ld", (long)self.latency],
-        @"-f", @"/var/tmp/raop_clock",
+        //@"-f", @"/var/tmp/raop_clock",
         self.ipAddress,
         @"-"
     ];
