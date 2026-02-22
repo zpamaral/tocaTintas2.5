@@ -63,13 +63,24 @@ typedef struct {
     size_t pos;
 } MemoryBuffer;
 
-static int read_bytes(void *id, void *data, int bcount) {
+static int read_bytes(void *id, void *data, int bcount)
+{
+    if (!id || !data || bcount <= 0) return 0;
+
     MemoryBuffer *mem = (MemoryBuffer *)id;
+    if (!mem->data) return 0;
+
+    // Evitar underflow e leituras fora do fim
+    if (mem->pos >= mem->size) return 0;
+
     size_t remaining = mem->size - mem->pos;
-    if (bcount > remaining) bcount = (int)remaining;
-    memcpy(data, mem->data + mem->pos, bcount);
-    mem->pos += bcount;
-    return bcount;
+    size_t want = (size_t)bcount;
+    if (want > remaining) want = remaining;
+
+    memcpy(data, (const unsigned char *)mem->data + mem->pos, want);
+    mem->pos += want;
+
+    return (int)want;
 }
 
 static unsigned int get_pos(void *id) {
@@ -2667,6 +2678,9 @@ void flac_metadata_callback(const FLAC__StreamDecoder *decoder,
     }
 }
 
+static MemoryBuffer *gWvMemBuffer = NULL;
+static NSData *gWvKeptData = nil;
+
 // Start playback for the WavPack file and set up the timer to update progress
 - (void)playWavPack:(NSURL *)trackURL {
     [self startBs2bIfNeeded];
@@ -2687,72 +2701,85 @@ void flac_metadata_callback(const FLAC__StreamDecoder *decoder,
 
     char error[80];
     if (dataToUse) {
-        // Memory reader setup for WavPack
-        MemoryBuffer buffer = { .data = dataToUse.bytes, .size = dataToUse.length, .pos = 0 };
-        playbackState.wpc = WavpackOpenFileInputEx(&memoryReader, &buffer, NULL, error, 0, 0);
+        // FIX: MemoryBuffer não pode ser variável local (stack)
+        if (gWvMemBuffer) { free(gWvMemBuffer); gWvMemBuffer = NULL; }
+        gWvKeptData = nil;
+
+        // Garantir que os bytes vivem durante toda a reprodução
+        gWvKeptData = [NSData dataWithData:dataToUse];
+
+        // Memory reader setup para WavPack (HEAP, não stack)
+        gWvMemBuffer = (MemoryBuffer *)malloc(sizeof(MemoryBuffer));
+        gWvMemBuffer->data = gWvKeptData.bytes;
+        gWvMemBuffer->size = gWvKeptData.length;
+        gWvMemBuffer->pos  = 0;
+
+        playbackState.wpc = WavpackOpenFileInputEx(&memoryReader, gWvMemBuffer, NULL, error, 0, 0);
     } else {
         playbackState.wpc = WavpackOpenFileInput(filePath, error, 0, 0);
     }
+
     if (!playbackState.wpc) {
         #ifdef DEBUG
         NSLog(@"Error opening WAVPack file: %s", error);
         #endif
+        if (gWvMemBuffer) { free(gWvMemBuffer); gWvMemBuffer = NULL; }
+        gWvKeptData = nil;
         return;
     }
-    
+
     playbackState.client_data = self;
-    
+
     // Retrieve WAVPack file properties
-    int numChannels = WavpackGetNumChannels(playbackState.wpc);
-    int sampleRate = WavpackGetSampleRate(playbackState.wpc);
+    int numChannels   = WavpackGetNumChannels(playbackState.wpc);
+    int sampleRate    = WavpackGetSampleRate(playbackState.wpc);
     int bitsPerSample = WavpackGetBitsPerSample(playbackState.wpc);
-    int bytesPerSample = WavpackGetBytesPerSample(playbackState.wpc);
-    
+
     playbackState.numChannels = numChannels;
+
     #ifdef DEBUG
-    NSLog(@"WAVPack File Info: %d channels, %d Hz, %d bits/sample, %d bytes/sample",
-          numChannels, sampleRate, bitsPerSample, bytesPerSample);
+    NSLog(@"WAVPack File Info: %d channels, %d Hz, %d bits/sample",
+          numChannels, sampleRate, bitsPerSample);
     #endif
-    
+
     // Initialize audio format description
     AudioStreamBasicDescription audioFormat = {0};
     audioFormat.mSampleRate = sampleRate;
     audioFormat.mFormatID = kAudioFormatLinearPCM;
     audioFormat.mFramesPerPacket = 1;
     audioFormat.mChannelsPerFrame = numChannels;
-    audioFormat.mBitsPerChannel = bitsPerSample;
-    audioFormat.mBytesPerFrame = (bitsPerSample / 8) * numChannels;
+
+    // FIX: Saída da AudioQueue sempre em 16-bit signed integer packed (vamos converter int32->int16)
+    audioFormat.mBitsPerChannel = 16;
+    audioFormat.mBytesPerFrame  = (16 / 8) * numChannels;
     audioFormat.mBytesPerPacket = audioFormat.mBytesPerFrame;
+    audioFormat.mFormatFlags    = kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked;
     audioFormat.mReserved = 0;
-    
-    // Check if the WavPack file has floating-point audio
+
     if (WavpackGetMode(playbackState.wpc) & MODE_FLOAT) {
-        audioFormat.mFormatFlags = kLinearPCMFormatFlagIsFloat | kLinearPCMFormatFlagIsPacked;
         #ifdef DEBUG
-        NSLog(@"WAVPack file contains floating-point data.");
+        NSLog(@"WAVPack file contains floating-point data (nota: este caminho converte para int16).");
         #endif
-    } else {
-        audioFormat.mFormatFlags = kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked;
     }
-    
+
     // Cleanup previous playback if necessary
     [self cleanupCoreAudioPlayback];
-    
-    // Calculate the total bytes per frame (including all channels)
-    int bytesPerFrame = bytesPerSample * numChannels;
-    
-    // Calculate buffer size based on file properties (0.5 seconds of audio originally)
-    playbackState.bufferSize = sampleRate * bytesPerFrame * 2.0;
-    
-    // Allocate memory for the audio sample buffer
-    playbackState.sampleBuffer = malloc(playbackState.bufferSize);
-    
+
+    // FIX: bufferSize baseado na saída 16-bit (2 bytes) * canais
+    int bytesPerFrame = 2 * numChannels;
+    playbackState.bufferSize = (UInt32)(sampleRate * bytesPerFrame * 2.0);
+
+    // FIX: sampleBuffer para WavpackUnpackSamples tem de ser int32_t*
+    // O callback limita a 10000 amostras, por isso alocamos isso * canais.
+    uint32_t maxSamplesToDecode = 10000;
+    playbackState.sampleBuffer = malloc((size_t)maxSamplesToDecode * (size_t)numChannels * sizeof(int32_t));
+
     // Initialise fade-in flag
     playbackState.didApplyFadeIn = NO;
-    
+
     // Indicate that playback has started
     playbackState.isPlaying = YES;
-    
+
     // Create the new audio queue with the properly initialized format
     OSStatus status = AudioQueueNewOutput(&audioFormat, MyAudioQueueOutputCallback, &playbackState, NULL, NULL, 0, &playbackState.audioQueue);
     if (status != noErr) {
@@ -2760,11 +2787,17 @@ void flac_metadata_callback(const FLAC__StreamDecoder *decoder,
         NSLog(@"Error creating audio output queue: %d", (int)status);
         #endif
         free(playbackState.sampleBuffer);
-        WavpackCloseFile(playbackState.wpc);  // Close the WavPack file on error
-        playbackState.wpc = NULL;  // Reset to NULL after closing
+        playbackState.sampleBuffer = NULL;
+
+        WavpackCloseFile(playbackState.wpc);
+        playbackState.wpc = NULL;
+
+        if (gWvMemBuffer) { free(gWvMemBuffer); gWvMemBuffer = NULL; }
+        gWvKeptData = nil;
+
         return;
     }
-    
+
     // Allocate buffers and prime the queue
     for (int i = 0; i < NUM_BUFFERS; i++) {
         status = AudioQueueAllocateBuffer(playbackState.audioQueue, playbackState.bufferSize, &playbackState.buffers[i]);
@@ -2774,33 +2807,48 @@ void flac_metadata_callback(const FLAC__StreamDecoder *decoder,
             #ifdef DEBUG
             NSLog(@"Error allocating buffer: %d", (int)status);
             #endif
+
             free(playbackState.sampleBuffer);
-            WavpackCloseFile(playbackState.wpc);  // Close the WavPack file on error
-            playbackState.wpc = NULL;  // Reset to NULL after closing
+            playbackState.sampleBuffer = NULL;
+
+            WavpackCloseFile(playbackState.wpc);
+            playbackState.wpc = NULL;
+
+            if (gWvMemBuffer) { free(gWvMemBuffer); gWvMemBuffer = NULL; }
+            gWvKeptData = nil;
+
             return;
         }
     }
-    
+
     // Start playback
     status = AudioQueueStart(playbackState.audioQueue, NULL);
     if (status != noErr) {
         #ifdef DEBUG
         NSLog(@"Error starting audio queue: %d", (int)status);
         #endif
+
         free(playbackState.sampleBuffer);
+        playbackState.sampleBuffer = NULL;
+
         for (int i = 0; i < NUM_BUFFERS; i++) {
             AudioQueueFreeBuffer(playbackState.audioQueue, playbackState.buffers[i]);
         }
-        WavpackCloseFile(playbackState.wpc);  // Close the WavPack file on error
-        playbackState.wpc = NULL;  // Reset to NULL after closing
+
+        WavpackCloseFile(playbackState.wpc);
+        playbackState.wpc = NULL;
+
+        if (gWvMemBuffer) { free(gWvMemBuffer); gWvMemBuffer = NULL; }
+        gWvKeptData = nil;
+
         return;
     }
-    
+
     // Start the progress bar updates
     if (self.progressUpdateTimer) {
         [self.progressUpdateTimer invalidate];  // Stop any previous timer
     }
-    
+
     self.progressUpdateTimer = [NSTimer scheduledTimerWithTimeInterval:1.0
                                                                 target:self
                                                               selector:@selector(updateWavPackProgress)
@@ -2809,15 +2857,11 @@ void flac_metadata_callback(const FLAC__StreamDecoder *decoder,
 
     // Create a 5-second delay using dispatch_after
     if (self.isRepeatModeActive) {
-        // Clear the play count display on the main thread
         dispatch_block_t clearPlayCount = ^{
-            [self.playCountLabel setStringValue:@""]; // Clear the tally on display
+            [self.playCountLabel setStringValue:@""];
         };
-
-        // Dispatch the block asynchronously to the main queue
         dispatch_async(dispatch_get_main_queue(), clearPlayCount);
 
-        // Only execute this block if repeat mode is active
         if (originalTrackURL) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 [self incrementPlayCountForTrack:originalTrackURL];
@@ -2825,8 +2869,8 @@ void flac_metadata_callback(const FLAC__StreamDecoder *decoder,
             });
         }
     }
-
 }
+
 
 // Callback to handle audio buffer playback
 void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueueBufferRef inBuffer) {
@@ -2834,32 +2878,36 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 
     // Handling WAVPack decoding
     if (playbackState->wpc) {
-        // WAVPack decoding logic
-        int bytesPerSample = WavpackGetBytesPerSample(playbackState->wpc);
         int numChannels = playbackState->numChannels;
 
+        // AudioQueue output: 16-bit
+        const int outBytesPerSample = 2;
+
         // Determine the maximum number of samples that can be decoded into the buffer
-        uint32_t maxSamplesToDecode = MIN(inBuffer->mAudioDataBytesCapacity / (bytesPerSample * numChannels), 10000);
-        
-        // Decode WAVPack samples into the sample buffer
+        uint32_t maxSamplesToDecode = (uint32_t)(inBuffer->mAudioDataBytesCapacity / (outBytesPerSample * numChannels));
+        maxSamplesToDecode = MIN(maxSamplesToDecode, 10000);
+
+        // Decode WAVPack samples into the sample buffer (int32_t samples)
         int32_t samplesDecoded = WavpackUnpackSamples(playbackState->wpc, playbackState->sampleBuffer, maxSamplesToDecode);
 
         if (samplesDecoded > 0) {
-            size_t dataSize = samplesDecoded * bytesPerSample * numChannels;
+            // Converter int32 -> int16 no buffer da AudioQueue
+            int16_t *out = (int16_t *)inBuffer->mAudioData;
 
-            // Ensure buffer size fits the decoded data
-            if (dataSize > inBuffer->mAudioDataBytesCapacity) {
-                #ifdef DEBUG
-                NSLog(@"Warning: Data size exceeds buffer capacity. Truncating data.");
-                #endif
-                dataSize = inBuffer->mAudioDataBytesCapacity;
-            }
-            
-            // Interleave the samples correctly
-            for (uint32_t i = 0; i < samplesDecoded; i++) {
-                for (int channel = 0; channel < numChannels; channel++) {
-                    ((int16_t *)inBuffer->mAudioData)[i * numChannels + channel] =
-                        playbackState->sampleBuffer[i * numChannels + channel];
+            int bitsPerSample = WavpackGetBitsPerSample(playbackState->wpc);
+            int shift = 0;
+            if (bitsPerSample > 16) shift = bitsPerSample - 16;
+
+            for (uint32_t i = 0; i < (uint32_t)samplesDecoded; i++) {
+                for (int ch = 0; ch < numChannels; ch++) {
+                    int32_t s = ((int32_t *)playbackState->sampleBuffer)[i * numChannels + ch];
+
+                    if (shift > 0) s >>= shift;
+
+                    if (s > 32767) s = 32767;
+                    else if (s < -32768) s = -32768;
+
+                    out[i * numChannels + ch] = (int16_t)s;
                 }
             }
 
@@ -2869,26 +2917,34 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
                 [vc respondsToSelector:@selector(applyFadeInToAudioBuffer:totalSamples:numChannels:sampleRate:)])
             {
                 [vc applyFadeInToAudioBuffer:(int16_t *)inBuffer->mAudioData
-                                totalSamples:samplesDecoded
+                                totalSamples:(uint32_t)samplesDecoded
                                  numChannels:numChannels
                                   sampleRate:WavpackGetSampleRate(playbackState->wpc)];
 
-                playbackState->didApplyFadeIn = YES;          // não volta a aplicar
+                playbackState->didApplyFadeIn = YES;
             }
             /* ───────────────────────────────────── */
-            
+
+            size_t dataSize = (size_t)samplesDecoded * (size_t)outBytesPerSample * (size_t)numChannels;
+
+            if (dataSize > inBuffer->mAudioDataBytesCapacity) {
+                #ifdef DEBUG
+                NSLog(@"Warning: Data size exceeds buffer capacity. Truncating data.");
+                #endif
+                dataSize = inBuffer->mAudioDataBytesCapacity;
+            }
+
             inBuffer->mAudioDataByteSize = (UInt32)dataSize;
-            
-            // Enqueue buffer for playback
+
             OSStatus status = AudioQueueEnqueueBuffer(inAQ, inBuffer, 0, NULL);
             if (status != noErr) {
                 #ifdef DEBUG
-                NSLog(@"Error enqueuing buffer: %d", status);
+                NSLog(@"Error enqueuing buffer: %d", (int)status);
                 #endif
             }
         } else {
             // No more samples to decode, stop playback
-            AudioQueueStop(inAQ, false);
+            AudioQueueStop(inAQ, true);
             playbackState->isPlaying = NO;
             #ifdef DEBUG
             NSLog(@"WAVPack playback finished.");
@@ -2900,29 +2956,36 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
                 playbackState->wpc = NULL;
             }
 
+            // Libertar sampleBuffer (int32)
+            if (playbackState->sampleBuffer) {
+                free(playbackState->sampleBuffer);
+                playbackState->sampleBuffer = NULL;
+            }
+
+            // Libertar estado de memória do prefetch
+            if (gWvMemBuffer) { free(gWvMemBuffer); gWvMemBuffer = NULL; }
+            gWvKeptData = nil;
+
             // Handle repeat or transition to next song
             ViewController *viewController = playbackState->client_data;
             if (viewController.isRepeatModeActive) {
                 #ifdef DEBUG
                 NSLog(@"Repeat mode is active. Restarting the current WAVPack track.");
                 #endif
-                [viewController cleanupCoreAudioPlayback]; // Clean up the previous playback state
+                [viewController cleanupCoreAudioPlayback];
                 [viewController playWavPack:viewController.audioFiles[viewController.currentTrackIndex]];
             } else {
                 [viewController handlePlaybackCompletion];
             }
         }
-
-    // Handling Opus decoding
     } else if (playbackState->opusFile) {
-        // Opus decoding logic
-        int16_t pcmBuffer[4096 * 2]; // Stereo buffer for decoded samples
+        // Opus decoding logic (inalterado)
+        int16_t pcmBuffer[4096 * 2];
         int samplesDecoded = op_read_stereo(playbackState->opusFile, pcmBuffer, sizeof(pcmBuffer) / sizeof(pcmBuffer[0]));
 
         if (samplesDecoded > 0) {
-            size_t dataSize = samplesDecoded * sizeof(int16_t) * 2; // 2 channels
+            size_t dataSize = (size_t)samplesDecoded * sizeof(int16_t) * 2;
 
-            // Ensure buffer size fits the decoded data
             if (dataSize > inBuffer->mAudioDataBytesCapacity) {
                 #ifdef DEBUG
                 NSLog(@"Warning: Data size exceeds buffer capacity. Truncating data.");
@@ -2930,41 +2993,36 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
                 dataSize = inBuffer->mAudioDataBytesCapacity;
             }
 
-            // Copy the decoded data into the buffer
             memcpy(inBuffer->mAudioData, pcmBuffer, dataSize);
             inBuffer->mAudioDataByteSize = (UInt32)dataSize;
 
-            // Enqueue buffer for playback
             OSStatus status = AudioQueueEnqueueBuffer(inAQ, inBuffer, 0, NULL);
             if (status != noErr) {
                 #ifdef DEBUG
-                NSLog(@"Error enqueuing buffer: %d", status);
+                NSLog(@"Error enqueuing buffer: %d", (int)status);
                 #endif
             }
         } else {
-            // No more samples to decode, stop playback
             AudioQueueStop(inAQ, false);
             playbackState->isPlaying = NO;
             #ifdef DEBUG
             NSLog(@"Opus playback finished.");
             #endif
 
-            // Clean up Opus resources
             if (playbackState->opusFile) {
                 op_free(playbackState->opusFile);
                 playbackState->opusFile = NULL;
             }
 
-            // Handle repeat or transition to the next song
             ViewController *viewController = playbackState->client_data;
             if (viewController.isRepeatModeActive) {
                 #ifdef DEBUG
                 NSLog(@"Repeat mode is active. Restarting the current Opus track.");
                 #endif
-                [viewController cleanupCoreAudioPlayback]; // Clean up the previous playback state
+                [viewController cleanupCoreAudioPlayback];
                 [viewController handleOpusPlayback:viewController.audioFiles[viewController.currentTrackIndex]];
             } else {
-                [viewController handlePlaybackCompletion];  // Move to the next track in the playlist
+                [viewController handlePlaybackCompletion];
             }
         }
     } else {
@@ -2973,7 +3031,6 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
         #endif
     }
 }
-
 - (void)handlePlaybackCompletion {
     //self.replayGainValue = 0.0f;
     if (self.isShuffleModeActive) {
