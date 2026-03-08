@@ -5414,22 +5414,20 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 
                         float rg = [valueString floatValue];
                         // The old structure of the line below caused the distortions via AirPlay
-                        if (fabsf(rg) < 0.0005f || rg != 0.0f) {
-                            replayGainValue = rg;
-                            foundReplayGain = YES;
-                            #ifdef DEBUG
-                            NSLog(@"[ReplayGain] AAC/ALAC track replayGain: %f dB", replayGainValue);
-                            #endif
-                            self.replayGainValue = replayGainValue;
-                            [self.airPlayStreamer updateReplayGainValue:self.replayGainValue];
-                            break;
-                        }
-
                         if ([hay containsString:@"itunnorm"]) {
                             #ifdef DEBUG
                             NSLog(@"[ReplayGain] iTunNORM detectado (converter noutro passo).");
                             #endif
                         }
+                        replayGainValue = rg;
+                        foundReplayGain = YES;
+                        #ifdef DEBUG
+                        NSLog(@"[ReplayGain] AAC/ALAC track replayGain: %f dB", replayGainValue);
+                        #endif
+                        self.replayGainValue = replayGainValue;
+                        [self.airPlayStreamer updateReplayGainValue:self.replayGainValue];
+                        break;
+                        
                     }
 
                     // ---- ID3 fallback (MP3) ----

@@ -310,10 +310,11 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         _isStreaming = NO;
         _isRecording = NO;
         [self setGainInDecibels2:replayGainValue]; // replayGainValue is in dB, convert it here
+        //[self setGainInDecibels2:0.0f]; // Neutral gain (0 dB)
 
         // Initialize the circular buffer with 10 seconds of stereo audio
-        TPCircularBufferInit(&_circularBuffer, 44100 * 2 * 10); // Original value
-        //TPCircularBufferInit(&_circularBuffer, 44100 * 4 * 10); // 1_764_000
+        //TPCircularBufferInit(&_circularBuffer, 44100 * 2 * 10); // Original value
+        TPCircularBufferInit(&_circularBuffer, 44100 * 4 * 10); // 1_764_000
 
         // Observe changes to the "SelectedAirPlayDevice" key
         [[NSNotificationCenter defaultCenter] addObserver:self
@@ -848,7 +849,7 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
         @"-a", self.ipAddress,
         @"-p", self.port,
         @"-l", [NSString stringWithFormat:@"%ld", (long)self.latency],
-        //@"-f", @"/var/tmp/raop_clock",
+        @"-f", kRaopClockPath,
         @"-"
     ];
     self.raopTask.standardInput = self.inputPipe;
@@ -907,6 +908,21 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
 
     // Update streaming state
     self.isStreaming = YES;
+    
+    // Iniciar thread consumidor do tampão circular
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        while (self.isStreaming) {
+            uint32_t availableBytes = 0;
+            void *bufferPointer = TPCircularBufferTail(&self->_circularBuffer, &availableBytes);
+            if (availableBytes > 0) {
+                NSData *data = [NSData dataWithBytes:bufferPointer length:availableBytes];
+                [self->_inputPipe.fileHandleForWriting writeData:data];
+                TPCircularBufferConsume(&self->_circularBuffer, availableBytes);
+            } else {
+                [NSThread sleepForTimeInterval:0.005];
+            }
+        }
+    });
 
     // Initialize the GCD dispatch source timer for health checks
     [self setupHealthCheckTimer];
@@ -984,7 +1000,7 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
         #endif
     }
     // 5) Always recreate the fifo for a fresh start
-        unlink("/var/tmp/raop_clock");
+        unlink(kRaopClockPath.fileSystemRepresentation);
 
     // 6) Lockfile
     if (self.lockFileDescriptor >= 0) { // use >=0, not >0
@@ -1112,14 +1128,9 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
 #pragma mark - Original Audio Tap
 
 - (void)installAudioTap {
-    // Create a serial queue for streaming tasks
-    dispatch_queue_t streamingQueue = dispatch_queue_create("com.zpairplay.streaming", DISPATCH_QUEUE_SERIAL);
-
-    // Access the audio input node and its format
     AVAudioInputNode *inputNode = self.audioEngine.inputNode;
     AVAudioFormat *inputFormat = [inputNode inputFormatForBus:0];
 
-    // Validate input format
     if (!inputFormat || inputFormat.channelCount == 0 || inputFormat.sampleRate == 0) {
         #ifdef DEBUG
         NSLog(@"[Error] Invalid input format: sample rate %f, channels %d",
@@ -1128,131 +1139,79 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
         return;
     }
 
-    // Target format for processing (16-bit PCM, 44.1 kHz, 2 channels)
+    // Formato intermédio em float 32 bits para processamento de ganho sem perda
+    AVAudioFormat *floatFormat = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32
+                                                                  sampleRate:44100.0
+                                                                    channels:2
+                                                                 interleaved:NO];
+
+    // Formato final int16 para envio e gravação
     AVAudioFormat *targetFormat = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatInt16
                                                                    sampleRate:44100.0
                                                                      channels:2
                                                                   interleaved:YES];
 
-    // Define a reusable streaming block
-    void (^streamingBlock)(NSData *) = ^(NSData *data) {
-        dispatch_async(streamingQueue, ^{
-            if (!data || data.length == 0) return;
+    // Conversores criados uma vez e reutilizados em cada callback
+    AVAudioConverter *toFloatConverter = [[AVAudioConverter alloc] initFromFormat:inputFormat toFormat:floatFormat];
 
-            @try {
-                NSFileHandle *pipeWriteHandle = [self.inputPipe fileHandleForWriting];
-                if (pipeWriteHandle) {
-                    [pipeWriteHandle writeData:data];  // Potentially throws
-                } else {
-                    #ifdef DEBUG
-                    NSLog(@"[Streaming] Pipe write handle is invalid (nil).");
-                    #endif
-                }
-            } @catch (NSException *exception) {
-                if ([exception.name isEqualToString:NSFileHandleOperationException]) {
-                    // Check whether it's truly a broken/closed pipe
-                    if ([exception.reason containsString:@"Broken pipe"] ||
-                        [exception.reason containsString:@"closed file"]) {
-                        
-                        // Fatal: raop_play likely exited or pipe is irrecoverable
-                        #ifdef DEBUG
-                        NSLog(@"[Streaming] Broken or closed pipe, stopping streaming…");
-                        #endif
-                        [self stopStreaming];
-                        
-                    } else {
-                        // Possibly a transient or less-critical error
-                        #ifdef DEBUG
-                        NSLog(@"[Streaming] NSFileHandleOperationException, but not broken pipe: %@", exception.reason);
-                        #endif
-                        // **Skip this chunk**: do not retry, do not kill streaming,
-                        // just return so we effectively "lose" this chunk.
-                        // The next chunk will be processed on the next callback.
-                        #ifdef DEBUG
-                        NSLog(@"[Streaming] Skipping the current chunk due to transient error…");
-                        #endif
-                        return;
-                    }
-                } else {
-                    // Unknown exception: handle it as you see fit
-                    #ifdef DEBUG
-                    NSLog(@"[Streaming] Unknown exception writing to pipe: %@ (name=%@)",
-                          exception.reason, exception.name);
-                    #endif
-                    // You might choose to skip, or you might decide
-                    // to stopStreaming or rethrow. For example:
-                    // [self stopStreaming];
-                }
-            }
-        });
-    };
-
-    // Install audio tap
     [inputNode installTapOnBus:0
                     bufferSize:4096
                         format:inputFormat
                          block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
         if (!buffer || buffer.frameLength == 0) return;
 
-        dispatch_async(streamingQueue, ^{
-            NSError *error = nil;
+        NSError *error = nil;
 
-            // Convert audio buffer to the target format
-            AVAudioPCMBuffer *convertedBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:targetFormat frameCapacity:buffer.frameCapacity];
-            AVAudioConverter *converter = [[AVAudioConverter alloc] initFromFormat:inputFormat toFormat:targetFormat];
-            [converter convertToBuffer:convertedBuffer fromBuffer:buffer error:&error];
+        // Passo 1: converter para float 32 bits
+        AVAudioPCMBuffer *floatBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:floatFormat
+                                                                      frameCapacity:buffer.frameCapacity];
+        [toFloatConverter convertToBuffer:floatBuffer fromBuffer:buffer error:&error];
+        if (error) {
+            #ifdef DEBUG
+            NSLog(@"[Streaming] Error converting to float: %@", error.localizedDescription);
+            #endif
+            return;
+        }
 
-            if (error) {
+        // Passo 2: aplicar ganho em float — sem perda de precisão
+        float gainFactor = self.gainFactor2;
+        for (NSUInteger ch = 0; ch < floatFormat.channelCount; ch++) {
+            float *channelData = floatBuffer.floatChannelData[ch];
+            for (NSUInteger i = 0; i < floatBuffer.frameLength; i++) {
+                channelData[i] *= gainFactor;
+                channelData[i] = fmaxf(-1.0f, fminf(1.0f, channelData[i]));
+            }
+        }
+
+        // Passo 3: converter para int16 manualmente — controlo total da intercalação L/R
+        AVAudioPCMBuffer *convertedBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:targetFormat
+                                                                          frameCapacity:floatBuffer.frameCapacity];
+        convertedBuffer.frameLength = floatBuffer.frameLength;
+
+        float *leftChannel  = floatBuffer.floatChannelData[0];
+        float *rightChannel = floatBuffer.floatChannelData[1];
+        int16_t *pcmData = convertedBuffer.int16ChannelData[0];
+
+        for (NSUInteger i = 0; i < floatBuffer.frameLength; i++) {
+            pcmData[i * 2]     = (int16_t)(leftChannel[i]  * INT16_MAX);
+            pcmData[i * 2 + 1] = (int16_t)(rightChannel[i] * INT16_MAX);
+        }
+
+        NSUInteger byteCount = floatBuffer.frameLength * targetFormat.streamDescription->mBytesPerFrame;
+
+        // Passo 4: escrever no tampão circular
+        TPCircularBufferProduceBytes(&self->_circularBuffer, pcmData, (uint32_t)byteCount);
+
+        // Gravação — usa os dados int16 directamente, independente do tampão
+        if (self.isRecording) {
+            NSData *recordingData = [NSData dataWithBytes:pcmData length:byteCount];
+            NSInteger bytesWritten = [self.fileOutputStream write:recordingData.bytes maxLength:recordingData.length];
+            if (bytesWritten < 0) {
                 #ifdef DEBUG
-                NSLog(@"[Streaming] Error converting audio buffer: %@", error.localizedDescription);
+                NSLog(@"[Recording] Error writing to file: %@", self.fileOutputStream.streamError.localizedDescription);
                 #endif
-                return;
             }
-
-            // Apply gain to the audio data
-            int16_t *pcmData = convertedBuffer.int16ChannelData[0];
-            NSUInteger sampleCount = convertedBuffer.frameLength * targetFormat.channelCount;
-            for (NSUInteger i = 0; i < sampleCount; i++) {
-                int32_t scaledSample = (int32_t)(pcmData[i] * self.gainFactor2);
-                pcmData[i] = MAX(INT16_MIN, MIN(INT16_MAX, scaledSample));
-            }
-
-            // Write data to circular buffer
-            TPCircularBufferProduceBytes(&self->_circularBuffer, pcmData,
-                                         convertedBuffer.frameLength * targetFormat.streamDescription->mBytesPerFrame);
-
-            // Handle underflow by injecting silence
-            uint32_t availableBytes = 0;
-            TPCircularBufferTail(&self->_circularBuffer, &availableBytes);
-            if (availableBytes == 0) {
-                #ifdef DEBUG
-                NSLog(@"[Streaming] Buffer underflow detected. Writing silence.");
-                #endif
-                int16_t silence[44100] = {0}; // 1 second of silence
-                TPCircularBufferProduceBytes(&self->_circularBuffer, silence, sizeof(silence));
-            }
-
-            // Streaming logic
-            if (self.isStreaming) {
-                uint32_t availableBytes = 0;
-                void *bufferPointer = TPCircularBufferTail(&self->_circularBuffer, &availableBytes);
-                NSData *streamingData = [NSData dataWithBytes:bufferPointer length:availableBytes];
-                streamingBlock(streamingData);
-                TPCircularBufferConsume(&self->_circularBuffer, availableBytes);
-            }
-
-            // Recording logic
-            if (self.isRecording) {
-                NSData *recordingData = [NSData dataWithBytes:pcmData
-                                                       length:(convertedBuffer.frameLength * targetFormat.streamDescription->mBytesPerFrame)];
-                NSInteger bytesWritten = [self.fileOutputStream write:recordingData.bytes maxLength:recordingData.length];
-                if (bytesWritten < 0) {
-                    #ifdef DEBUG
-                    NSLog(@"[Recording] Error writing to file: %@", self.fileOutputStream.streamError.localizedDescription);
-                    #endif
-                }
-            }
-        });
+        }
     }];
 }
 
