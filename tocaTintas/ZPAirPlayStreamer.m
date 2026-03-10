@@ -767,13 +767,13 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
         return NO;
     }
     chmod(p, 0666);
-
+    
     // Mantém o FIFO aberto para evitar bloqueios de open()
-    int fd = open(p, O_RDWR | O_NONBLOCK);
-    if (fd < 0) {
+    int fd = open(p, O_RDONLY | O_NONBLOCK);
+    if (fd < 0 && errno != ENXIO) {
         if (error) *error = [NSError errorWithDomain:NSPOSIXErrorDomain
                                                 code:errno
-                                            userInfo:@{ NSFilePathErrorKey: path ?: @"" }];
+                                            userInfo:@{NSFilePathErrorKey: path ?: @""}];
         return NO;
     }
     if (fdOut) *fdOut = fd;
@@ -786,12 +786,12 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
     // Abort if the pending start was cancelled or device was deselected
     NSString *selectedDevice = [[NSUserDefaults standardUserDefaults] objectForKey:@"SelectedAirPlayDevice"];
     if (self.cancelPendingStart || !selectedDevice) {
-#ifdef DEBUG
+        #ifdef DEBUG
         NSLog(@"[Streaming] Start cancelled before wake-up completed.");
-#endif
+        #endif
         return;
     }
-    
+
     // Check if streaming is already active
     if (self.isStreaming) {
         #ifdef DEBUG
@@ -834,16 +834,19 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
         self.isStreaming = NO;
         return;
     }
-    
-    // Check the presence of the fifo file for raop_play
+
+    // Apagar FIFO antigo para começar de raiz
+    unlink(kRaopClockPath.fileSystemRepresentation);
+
+    // Criar o FIFO novo e abrir o lado leitor
     NSError *fifoErr = nil;
     if (![self ensureRaopClockAtPath:kRaopClockPath keepAliveFD:&_raopClockFD error:&fifoErr]) {
         NSLog(@"[RAOP] Falha a garantir FIFO %@: %@", kRaopClockPath, fifoErr);
-        return; // ou apresenta erro ao utilizador
+        self.isStreaming = NO;
+        return;
     }
 
     // Configure the RAOP task
-    // Define the values for all the flags
     self.raopTask.launchPath = raopPlayPath;
     self.raopTask.arguments = @[
         @"-a", self.ipAddress,
@@ -861,24 +864,18 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
         NSLog(@"[Streaming] RAOP task terminated. Reason: %ld, Status: %d",
               task.terminationReason, task.terminationStatus);
         #endif
-
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
 
-        // Cleanup lock file
         [ZPAirPlayStreamer cleanupRaopPlayLockFile];
 
-        // Check if a device is still selected
         NSString *selectedDevice = [[NSUserDefaults standardUserDefaults] objectForKey:@"SelectedAirPlayDevice"];
         if (selectedDevice) {
             #ifdef DEBUG
             NSLog(@"[Streaming] RAOP task terminated, but device (%@) is still selected. Restarting streaming.", selectedDevice);
             #endif
-
-            // Restart streaming
             [strongSelf startStreaming];
         } else {
-            // Finalize stop
             #ifdef DEBUG
             NSLog(@"[Streaming] No AirPlay device selected. Stopping streaming completely.");
             #endif
@@ -900,15 +897,13 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
         NSLog(@"[Streaming] Failed to start RAOP task: %@", exception.reason);
         #endif
         self.isStreaming = NO;
-
-        // Cleanup lock file on failure
         [ZPAirPlayStreamer cleanupRaopPlayLockFile];
         return;
     }
 
     // Update streaming state
     self.isStreaming = YES;
-    
+
     // Iniciar thread consumidor do tampão circular
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         while (self.isStreaming) {
@@ -916,7 +911,14 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
             void *bufferPointer = TPCircularBufferTail(&self->_circularBuffer, &availableBytes);
             if (availableBytes > 0) {
                 NSData *data = [NSData dataWithBytes:bufferPointer length:availableBytes];
-                [self->_inputPipe.fileHandleForWriting writeData:data];
+                @try {
+                    [self->_inputPipe.fileHandleForWriting writeData:data];
+                } @catch (NSException *exception) {
+                    #ifdef DEBUG
+                    NSLog(@"[Streaming] Pipe fechado, a terminar consumidor: %@", exception.reason);
+                    #endif
+                    return;
+                }
                 TPCircularBufferConsume(&self->_circularBuffer, availableBytes);
             } else {
                 [NSThread sleepForTimeInterval:0.005];
