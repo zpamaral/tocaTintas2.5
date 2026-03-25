@@ -1481,8 +1481,9 @@ CoreAudioPlaybackState playbackState;
 
     // To choose specific options:
     // task.arguments = @[@"--perfil", @"cmoy"];
-    task.arguments = @[@"--silencioso"];  // or any other default
-
+    // task.arguments = @[@"--silencioso"];  // or any other default
+    task.arguments = @[@"--perfil", @"cmoy", @"--silencioso"];
+    
     // To avoid spam in stdout, redirect to /dev/null
     task.standardOutput = [NSPipe pipe];
     task.standardError  = [NSPipe pipe];
