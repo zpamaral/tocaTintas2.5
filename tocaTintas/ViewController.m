@@ -1905,12 +1905,20 @@ CoreAudioPlaybackState playbackState;
     // Map the shuffled track URL to the original if necessary
     NSURL *originalTrackURL = self.shuffledToOriginalMap[trackURL] ?: trackURL;
 
-    // Start a new timer to increment the play count after 5 seconds
-    self.playCountTimer = [NSTimer scheduledTimerWithTimeInterval:5.0
-                                   target:self
-                                   selector:@selector(handlePlayCountIncrement:)
-                                   userInfo:originalTrackURL
-                                   repeats:NO];
+    // Guarantee the timer is always created on the main thread
+    dispatch_block_t scheduleBlock = ^{
+        // Start a new timer to increment the play count after 5 seconds
+        self.playCountTimer = [NSTimer scheduledTimerWithTimeInterval:5.0
+                                       target:self
+                                       selector:@selector(handlePlayCountIncrement:)
+                                       userInfo:originalTrackURL
+                                       repeats:NO];
+    };
+    if ([NSThread isMainThread]) {
+        scheduleBlock();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), scheduleBlock);
+    }
 }
 
 - (void)updatePlayCountLabelForTrack:(NSURL *)trackURL {
@@ -2685,7 +2693,7 @@ static NSData *gWvKeptData = nil;
 // Start playback for the WavPack file and set up the timer to update progress
 - (void)playWavPack:(NSURL *)trackURL {
     [self startBs2bIfNeeded];
-    NSURL *originalTrackURL = self.shuffledToOriginalMap[trackURL] ?: trackURL;  // Use original if available
+    NSURL *originalTrackURL = self.shuffledToOriginalMap[trackURL] ?: trackURL;
 
     // Convert the file URL path to a UTF-8 string for WavPack
     const char *filePath = [trackURL.path UTF8String];
@@ -2702,19 +2710,13 @@ static NSData *gWvKeptData = nil;
 
     char error[80];
     if (dataToUse) {
-        // FIX: MemoryBuffer não pode ser variável local (stack)
         if (gWvMemBuffer) { free(gWvMemBuffer); gWvMemBuffer = NULL; }
         gWvKeptData = nil;
-
-        // Garantir que os bytes vivem durante toda a reprodução
         gWvKeptData = [NSData dataWithData:dataToUse];
-
-        // Memory reader setup para WavPack (HEAP, não stack)
         gWvMemBuffer = (MemoryBuffer *)malloc(sizeof(MemoryBuffer));
         gWvMemBuffer->data = gWvKeptData.bytes;
         gWvMemBuffer->size = gWvKeptData.length;
         gWvMemBuffer->pos  = 0;
-
         playbackState.wpc = WavpackOpenFileInputEx(&memoryReader, gWvMemBuffer, NULL, error, 0, 0);
     } else {
         playbackState.wpc = WavpackOpenFileInput(filePath, error, 0, 0);
@@ -2731,57 +2733,37 @@ static NSData *gWvKeptData = nil;
 
     playbackState.client_data = self;
 
-    // Retrieve WAVPack file properties
     int numChannels   = WavpackGetNumChannels(playbackState.wpc);
     int sampleRate    = WavpackGetSampleRate(playbackState.wpc);
     int bitsPerSample = WavpackGetBitsPerSample(playbackState.wpc);
-
     playbackState.numChannels = numChannels;
-
     #ifdef DEBUG
     NSLog(@"WAVPack File Info: %d channels, %d Hz, %d bits/sample",
           numChannels, sampleRate, bitsPerSample);
     #endif
 
-    // Initialize audio format description
     AudioStreamBasicDescription audioFormat = {0};
     audioFormat.mSampleRate = sampleRate;
     audioFormat.mFormatID = kAudioFormatLinearPCM;
     audioFormat.mFramesPerPacket = 1;
     audioFormat.mChannelsPerFrame = numChannels;
-
-    // FIX: Saída da AudioQueue sempre em 16-bit signed integer packed (vamos converter int32->int16)
     audioFormat.mBitsPerChannel = 16;
     audioFormat.mBytesPerFrame  = (16 / 8) * numChannels;
     audioFormat.mBytesPerPacket = audioFormat.mBytesPerFrame;
     audioFormat.mFormatFlags    = kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked;
     audioFormat.mReserved = 0;
-
     if (WavpackGetMode(playbackState.wpc) & MODE_FLOAT) {
         #ifdef DEBUG
         NSLog(@"WAVPack file contains floating-point data (nota: este caminho converte para int16).");
         #endif
     }
-
-    // Cleanup previous playback if necessary
     [self cleanupCoreAudioPlayback];
-
-    // FIX: bufferSize baseado na saída 16-bit (2 bytes) * canais
     int bytesPerFrame = 2 * numChannels;
     playbackState.bufferSize = (UInt32)(sampleRate * bytesPerFrame * 2.0);
-
-    // FIX: sampleBuffer para WavpackUnpackSamples tem de ser int32_t*
-    // O callback limita a 10000 amostras, por isso alocamos isso * canais.
     uint32_t maxSamplesToDecode = 10000;
     playbackState.sampleBuffer = malloc((size_t)maxSamplesToDecode * (size_t)numChannels * sizeof(int32_t));
-
-    // Initialise fade-in flag
     playbackState.didApplyFadeIn = NO;
-
-    // Indicate that playback has started
     playbackState.isPlaying = YES;
-
-    // Create the new audio queue with the properly initialized format
     OSStatus status = AudioQueueNewOutput(&audioFormat, MyAudioQueueOutputCallback, &playbackState, NULL, NULL, 0, &playbackState.audioQueue);
     if (status != noErr) {
         #ifdef DEBUG
@@ -2789,17 +2771,12 @@ static NSData *gWvKeptData = nil;
         #endif
         free(playbackState.sampleBuffer);
         playbackState.sampleBuffer = NULL;
-
         WavpackCloseFile(playbackState.wpc);
         playbackState.wpc = NULL;
-
         if (gWvMemBuffer) { free(gWvMemBuffer); gWvMemBuffer = NULL; }
         gWvKeptData = nil;
-
         return;
     }
-
-    // Allocate buffers and prime the queue
     for (int i = 0; i < NUM_BUFFERS; i++) {
         status = AudioQueueAllocateBuffer(playbackState.audioQueue, playbackState.bufferSize, &playbackState.buffers[i]);
         if (status == noErr) {
@@ -2808,68 +2785,50 @@ static NSData *gWvKeptData = nil;
             #ifdef DEBUG
             NSLog(@"Error allocating buffer: %d", (int)status);
             #endif
-
             free(playbackState.sampleBuffer);
             playbackState.sampleBuffer = NULL;
-
             WavpackCloseFile(playbackState.wpc);
             playbackState.wpc = NULL;
-
             if (gWvMemBuffer) { free(gWvMemBuffer); gWvMemBuffer = NULL; }
             gWvKeptData = nil;
-
             return;
         }
     }
-
-    // Start playback
     status = AudioQueueStart(playbackState.audioQueue, NULL);
     if (status != noErr) {
         #ifdef DEBUG
         NSLog(@"Error starting audio queue: %d", (int)status);
         #endif
-
         free(playbackState.sampleBuffer);
         playbackState.sampleBuffer = NULL;
-
         for (int i = 0; i < NUM_BUFFERS; i++) {
             AudioQueueFreeBuffer(playbackState.audioQueue, playbackState.buffers[i]);
         }
-
         WavpackCloseFile(playbackState.wpc);
         playbackState.wpc = NULL;
-
         if (gWvMemBuffer) { free(gWvMemBuffer); gWvMemBuffer = NULL; }
         gWvKeptData = nil;
-
         return;
     }
 
-    // Start the progress bar updates
-    if (self.progressUpdateTimer) {
-        [self.progressUpdateTimer invalidate];  // Stop any previous timer
-    }
-
-    self.progressUpdateTimer = [NSTimer scheduledTimerWithTimeInterval:1.0
-                                                                target:self
-                                                              selector:@selector(updateWavPackProgress)
-                                                              userInfo:nil
-                                                               repeats:YES];
-
-    // Create a 5-second delay using dispatch_after
-    if (self.isRepeatModeActive) {
-        dispatch_block_t clearPlayCount = ^{
+    // Progress bar timer
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (self.progressUpdateTimer) {
+                [self.progressUpdateTimer invalidate];
+            }
+            self.progressUpdateTimer = [NSTimer scheduledTimerWithTimeInterval:1.0
+                                                                        target:self
+                                                                      selector:@selector(updateWavPackProgress)
+                                                                      userInfo:nil
+                                                                       repeats:YES];
+        });
+    // Now using the common scheduler
+        dispatch_async(dispatch_get_main_queue(), ^{
             [self.playCountLabel setStringValue:@""];
-        };
-        dispatch_async(dispatch_get_main_queue(), clearPlayCount);
-
+        });
         if (originalTrackURL) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [self incrementPlayCountForTrack:originalTrackURL];
-                [self updatePlayCountLabelForTrack:originalTrackURL];
-            });
+            [self schedulePlayCountIncrementForTrack:originalTrackURL];
         }
-    }
 }
 
 
@@ -3112,7 +3071,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
             if ([extension isEqualToString:@"wv"]) {
                 // WAVPack playback
                 dispatch_block_t playWavPackBlock = ^{
-                    [self playWavPack:nextTrackURL];
+                    [self handleWavPackPlayback:nextTrackURL];
                 };
                 dispatch_async(dispatch_get_main_queue(), playWavPackBlock);
 
@@ -3221,7 +3180,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 
             if ([extension isEqualToString:@"wv"]) {
                 dispatch_block_t playWavPackBlock = ^{
-                    [self playWavPack:nextTrackURL];
+                    [self handleWavPackPlayback:nextTrackURL];
                 };
                 dispatch_async(dispatch_get_main_queue(), playWavPackBlock);
 
@@ -3590,17 +3549,15 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     }
 
     // Invalidate the progress update timer
-    if (self.progressUpdateTimer) {
-        [self.progressUpdateTimer invalidate];
-        self.progressUpdateTimer = nil;
-    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.progressUpdateTimer) {
+            [self.progressUpdateTimer invalidate];
+            self.progressUpdateTimer = nil;
+        }
 
-    dispatch_block_t resetProgressBarBlock = ^{
+        // Execute the block asynchronously on the main thread
         [self.progressBar setDoubleValue:0.0];
-    };
-
-    // Execute the block asynchronously on the main thread
-    dispatch_async(dispatch_get_main_queue(), resetProgressBarBlock);
+    });
 
     // Free audio buffers
     for (int i = 0; i < NUM_BUFFERS; i++) {
