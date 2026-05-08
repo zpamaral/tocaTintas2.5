@@ -47,6 +47,16 @@ SOFTWARE.
 // Gain adjustment
 @property (assign, nonatomic) float gainFactor;
 
+// Reutilizados entre callbacks (criados uma vez por tap)
+@property (strong, nonatomic) AVAudioConverter *audioConverter;
+@property (strong, nonatomic) AVAudioPCMBuffer *convertedBuffer;
+
+// Fila serial para I/O fora do thread de áudio
+@property (strong, nonatomic) dispatch_queue_t ioQueue;
+
+// Observer da reconfiguração do engine
+@property (strong, nonatomic) id engineConfigObserver;
+
 @end
 
 @implementation ZPAudioCapture
@@ -59,6 +69,7 @@ SOFTWARE.
         _isRecording = NO;
         _isStreaming = NO;
         _gainFactor = 1.0; // Default gain factor (no gain adjustment)
+        _ioQueue = dispatch_queue_create("com.tocaTintas.audioCapture.io", DISPATCH_QUEUE_SERIAL);
     }
     return self;
 }
@@ -254,6 +265,10 @@ SOFTWARE.
 - (void)stopAudioCaptureIfNeeded {
     // Stop the audio engine if neither recording nor streaming is active
     if (!self.isRecording && !self.isStreaming) {
+        if (self.engineConfigObserver) {
+            [[NSNotificationCenter defaultCenter] removeObserver:self.engineConfigObserver];
+            self.engineConfigObserver = nil;
+        }
         if (self.audioEngine.isRunning) {
             [self.audioEngine.inputNode removeTapOnBus:0];
             [self.audioEngine stop];
@@ -272,14 +287,40 @@ SOFTWARE.
     AVAudioInputNode *inputNode = self.audioEngine.inputNode;
     AVAudioFormat *inputFormat = [inputNode inputFormatForBus:0];
 
-    // Configure the target format to 16-bit PCM, 44.1 kHz, 2 channels, interleaved
     AVAudioFormat *targetFormat = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatInt16
                                                                    sampleRate:44100.0
                                                                      channels:2
                                                                   interleaved:YES];
 
-    // Install a tap on the input node to capture audio data
-    __weak typeof(self) weakSelf = self; // Prevent retain cycles
+    self.audioConverter = [[AVAudioConverter alloc] initFromFormat:inputFormat toFormat:targetFormat];
+    // 8192 frames cobre o pior caso de upsampling (ex.: entrada a 32 kHz → saída a 44,1 kHz)
+    self.convertedBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:targetFormat frameCapacity:8192];
+
+    __weak typeof(self) weakSelf = self;
+
+    if (self.engineConfigObserver) {
+        [[NSNotificationCenter defaultCenter] removeObserver:self.engineConfigObserver];
+    }
+    self.engineConfigObserver = [[NSNotificationCenter defaultCenter]
+        addObserverForName:AVAudioEngineConfigurationChangeNotification
+                    object:self.audioEngine
+                     queue:nil
+                usingBlock:^(NSNotification *note) {
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        if (!strongSelf.isRecording && !strongSelf.isStreaming) return;
+        #ifdef DEBUG
+        NSLog(@"[Audio Capture] Reconfiguração do engine detectada — a reinstalar tap.");
+        #endif
+        [strongSelf installAudioTap];
+        NSError *engineError = nil;
+        if (![strongSelf.audioEngine startAndReturnError:&engineError]) {
+            #ifdef DEBUG
+            NSLog(@"[Audio Capture] Erro ao reiniciar engine após reconfiguração: %@", engineError.localizedDescription);
+            #endif
+        }
+    }];
+
     [inputNode installTapOnBus:0
                     bufferSize:4096
                         format:inputFormat
@@ -288,27 +329,19 @@ SOFTWARE.
         if (!strongSelf) return;
 
         if (buffer.frameLength > 0) {
-            // Apply gain if needed
             if (strongSelf.gainFactor != 1.0) {
                 for (AVAudioChannelCount channel = 0; channel < buffer.format.channelCount; channel++) {
                     float *channelData = buffer.floatChannelData[channel];
                     for (AVAudioFrameCount frame = 0; frame < buffer.frameLength; frame++) {
-                        // Apply gain
                         channelData[frame] *= strongSelf.gainFactor;
-
-                        // Clamp to 16-bit PCM range
                         if (channelData[frame] > 32767.0) channelData[frame] = 32767.0;
                         if (channelData[frame] < -32768.0) channelData[frame] = -32768.0;
                     }
                 }
             }
 
-            // Convert the buffer to the target format
-            AVAudioPCMBuffer *convertedBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:targetFormat frameCapacity:buffer.frameCapacity];
             NSError *error = nil;
-            AVAudioConverter *converter = [[AVAudioConverter alloc] initFromFormat:inputFormat toFormat:targetFormat];
-
-            [converter convertToBuffer:convertedBuffer fromBuffer:buffer error:&error];
+            [strongSelf.audioConverter convertToBuffer:strongSelf.convertedBuffer fromBuffer:buffer error:&error];
             if (error) {
                 #ifdef DEBUG
                 NSLog(@"[Audio Capture] Error converting audio buffer: %@", error.localizedDescription);
@@ -316,24 +349,29 @@ SOFTWARE.
                 return;
             }
 
-            // Prepare PCM data
-            NSData *pcmData = [NSData dataWithBytes:convertedBuffer.int16ChannelData[0]
-                                             length:(convertedBuffer.frameLength * targetFormat.streamDescription->mBytesPerFrame)];
+            // Copiar os bytes antes de sair do thread de áudio
+            NSUInteger dataLength = strongSelf.convertedBuffer.frameLength
+                                    * strongSelf.audioConverter.outputFormat.streamDescription->mBytesPerFrame;
+            NSData *pcmData = [NSData dataWithBytes:strongSelf.convertedBuffer.int16ChannelData[0]
+                                             length:dataLength];
 
-            // Write PCM data to the file if recording
-            if (strongSelf.isRecording && strongSelf.fileOutputStream) {
-                NSInteger bytesWritten = [strongSelf.fileOutputStream write:pcmData.bytes maxLength:pcmData.length];
-                if (bytesWritten < 0) {
-                    #ifdef DEBUG
-                    NSLog(@"[Audio Capture] Error writing to file: %@", strongSelf.fileOutputStream.streamError.localizedDescription);
-                    #endif
-                }
-            }
+            BOOL doRecord = strongSelf.isRecording;
+            BOOL doStream = strongSelf.isStreaming;
 
-            // Write PCM data to raop_play via the pipe if streaming
-            if (strongSelf.isStreaming && strongSelf.inputPipe) {
-                NSFileHandle *pipeWriteHandle = [strongSelf.inputPipe fileHandleForWriting];
-                [pipeWriteHandle writeData:pcmData];
+            if (doRecord || doStream) {
+                dispatch_async(strongSelf.ioQueue, ^{
+                    if (doRecord && strongSelf.fileOutputStream) {
+                        NSInteger bytesWritten = [strongSelf.fileOutputStream write:pcmData.bytes maxLength:pcmData.length];
+                        if (bytesWritten < 0) {
+                            #ifdef DEBUG
+                            NSLog(@"[Audio Capture] Error writing to file: %@", strongSelf.fileOutputStream.streamError.localizedDescription);
+                            #endif
+                        }
+                    }
+                    if (doStream && strongSelf.inputPipe) {
+                        [[strongSelf.inputPipe fileHandleForWriting] writeData:pcmData];
+                    }
+                });
             }
         }
     }];
