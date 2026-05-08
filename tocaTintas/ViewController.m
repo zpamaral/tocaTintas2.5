@@ -3778,6 +3778,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     __block NSString *albumName = @"";
     __block NSString *songTitle = @"";
     __block NSImage *coverArtImage = nil;
+    __block NSURL *trackURL = nil;
 
     // Access UI elements on the main thread
     dispatch_sync(dispatch_get_main_queue(), ^{
@@ -3785,7 +3786,11 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
         albumName = self.albumLabel.stringValue ?: @"";
         songTitle = self.titleLabel.stringValue ?: @"";
         coverArtImage = self.coverArtView.image;
+        trackURL = self.currentTrackURL;
     });
+
+    NSURL *originalTrackURL = self.shuffledToOriginalMap[trackURL] ?: trackURL;
+    NSNumber *playCount = [self.trackPlayCounts objectForKey:originalTrackURL.path];
 
     // Define the paths
     NSString *homeDirectory = NSHomeDirectory();
@@ -3975,6 +3980,11 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     @"            font-size: 14px;\n"
     @"            line-height: 1.2;\n"
     @"        }\n"
+    @"        .play-count {\n"
+    @"            margin: 5px;\n"
+    @"            font-size: 11px;\n"
+    @"            color: #888888;\n"
+    @"        }\n"
     @"    </style>\n"
     @"</head>\n"
     @"<body>\n"
@@ -3996,6 +4006,12 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     }
     if (songTitle.length > 0) {
         [htmlContent appendFormat:@"<!-- SONG -->\n<h3>%@</h3>\n", songTitle];
+    }
+    if (playCount && playCount.intValue > 0) {
+        NSString *playCountLabel = playCount.intValue == 1
+            ? NSLocalizedString(@"Played 1 time", @"Play count label when played at least once")
+            : [NSString stringWithFormat:NSLocalizedString(@"Played %@ times", @"Play count label when played more than once"), playCount];
+        [htmlContent appendFormat:@"<p class=\"play-count\">%@</p>\n", playCountLabel];
     }
 
     [htmlContent appendString:
