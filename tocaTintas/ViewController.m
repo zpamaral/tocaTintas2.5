@@ -1809,12 +1809,7 @@ CoreAudioPlaybackState playbackState;
     // Update combo box selection
     dispatch_async(dispatch_get_main_queue(), ^{
         [self createComboBox];
-        NSInteger selectedIndex = self.currentTrackIndex + 1; // Adjust for placeholder
-        if (selectedIndex >= 0 && selectedIndex < self.songComboBox.numberOfItems) {
-            [self.songComboBox selectItemAtIndex:selectedIndex];
-        } else {
-            [self.songComboBox selectItemAtIndex:0]; // Placeholder
-        }
+        [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
     });
     // Optionally start playback from the first track
     //if (self.audioFiles.count > 0) {
@@ -2097,12 +2092,7 @@ CoreAudioPlaybackState playbackState;
     dispatch_async(dispatch_get_main_queue(), ^{
         [self createComboBox];
         // Update combo box selection
-        NSInteger selectedIndex = self.currentTrackIndex + 1; // Adjust for placeholder
-        if (selectedIndex >= 0 && selectedIndex < self.songComboBox.numberOfItems) {
-            [self.songComboBox selectItemAtIndex:selectedIndex];
-        } else {
-            [self.songComboBox selectItemAtIndex:0]; // Placeholder
-        }
+        [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
         // Do not start playing the first track automatically
         //[self playAudio];
     });
@@ -4165,6 +4155,27 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 
 #pragma mark - Combo Box Setup
 
+// The combo box rows follow self.audioFiles order; in shuffle mode
+// currentTrackIndex points into shuffledTracks, so the selected row
+// must be derived from the current track URL, not from the index.
+- (NSInteger)comboBoxIndexForCurrentTrack {
+    NSURL *trackURL = self.currentTrackURL;
+    if (!trackURL && self.currentTrackIndex >= 0) {
+        if (self.isShuffleModeActive) {
+            if (self.currentTrackIndex < (NSInteger)self.shuffledTracks.count) {
+                trackURL = self.shuffledTracks[self.currentTrackIndex];
+            }
+        } else if (self.currentTrackIndex < (NSInteger)self.audioFiles.count) {
+            trackURL = self.audioFiles[self.currentTrackIndex];
+        }
+    }
+    if (!trackURL) {
+        return 0; // Placeholder
+    }
+    NSUInteger index = [self.audioFiles indexOfObject:trackURL];
+    return (index != NSNotFound) ? (NSInteger)(index + 1) : 0;
+}
+
 - (void)createComboBox {
     if (!self.audioFiles || self.audioFiles.count == 0) {
         #ifdef DEBUG
@@ -4216,12 +4227,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
         // Reload the combo box data
         [self.songComboBox reloadData];
 
-        NSInteger selectedIndex = self.currentTrackIndex + 1; // Adjust for placeholder
-        if (selectedIndex >= 0 && selectedIndex < self.displayNames.count) {
-            [self.songComboBox selectItemAtIndex:selectedIndex];
-        } else {
-            [self.songComboBox selectItemAtIndex:0]; // Placeholder
-        }
+        [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
     } else {
         self.songComboBox = [[NSComboBox alloc] initWithFrame:NSMakeRect(20, 20, 190, 26)];
 
@@ -4230,12 +4236,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
         self.songComboBox.dataSource = self;
 
         [self.songComboBox setNumberOfVisibleItems:40];
-        NSInteger selectedIndex = self.currentTrackIndex + 1; // Adjust for placeholder
-        if (selectedIndex >= 0 && selectedIndex < displayNames.count) {
-            [self.songComboBox selectItemAtIndex:selectedIndex];
-        } else {
-            [self.songComboBox selectItemAtIndex:0]; // Placeholder
-        }
+        [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
         [self.songComboBox setTarget:self];
         [self.songComboBox setAction:@selector(comboBoxSelectionChanged:)];
         self.songComboBox.delegate = self;
@@ -4772,8 +4773,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
             [self createComboBox];
 
             if (currentTrackExists) {
-                NSInteger selectedIndex = self.currentTrackIndex + 1; // Adjust for placeholder
-                [self.songComboBox selectItemAtIndex:selectedIndex];
+                [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
             } else {
                 [self.songComboBox selectItemAtIndex:0]; // Select placeholder
                 // Stop playback since the current track was removed

@@ -60,6 +60,9 @@ SOFTWARE.
 @property (nonatomic, strong) dispatch_source_t healthCheckTimer;
 @property (nonatomic, assign) int lockFileDescriptor; // File descriptor for the lock file
 
+// Observer da reconfiguração do engine (mudanças de dispositivos de áudio)
+@property (nonatomic, strong) id engineConfigObserver;
+
 // Private helper used to send a DMAP "play" command
 - (void)sendPlayCommandToDeviceWithIP:(NSString *)deviceIP
                                   port:(NSInteger)port
@@ -70,6 +73,11 @@ SOFTWARE.
 
 // Continuation of streaming setup executed after the wake-up call
 - (void)startStreamingAfterWakeUp;
+
+// Repõe o estado interno e relança o streaming depois de uma falha
+// (morte do raop_play ou perda do tap). Sem isto, startStreaming aborta
+// em "Already streaming" porque isStreaming nunca volta a NO.
+- (void)restartStreamingAfterFailure;
 
 @end
 
@@ -321,6 +329,39 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
                                                  selector:@selector(userDefaultsDidChange:)
                                                      name:NSUserDefaultsDidChangeNotification
                                                    object:nil];
+
+        // Quando a topologia de áudio muda (auscultadores, AirPods, sleep do
+        // monitor, mudança de frequência), o AVAudioEngine pára e o tap morre
+        // em silêncio — o raop_play continua vivo mas sem dados. Reinstalar o
+        // tap e reiniciar o engine recupera a captura sem intervenção manual.
+        __weak typeof(self) weakSelf = self;
+        _engineConfigObserver = [[NSNotificationCenter defaultCenter]
+            addObserverForName:AVAudioEngineConfigurationChangeNotification
+                        object:_audioEngine
+                         queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(NSNotification *note) {
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+
+            #ifdef DEBUG
+            NSLog(@"[Streaming] Reconfiguração do engine de áudio detectada (mudança de dispositivos).");
+            #endif
+
+            if (!strongSelf.isStreaming && !strongSelf.isRecording) return;
+
+            [strongSelf installAudioTap];
+
+            NSError *engineError = nil;
+            if (![strongSelf.audioEngine startAndReturnError:&engineError]) {
+                #ifdef DEBUG
+                NSLog(@"[Streaming] Erro ao reiniciar engine após reconfiguração: %@", engineError.localizedDescription);
+                #endif
+            } else {
+                #ifdef DEBUG
+                NSLog(@"[Streaming] Engine reiniciado com sucesso após reconfiguração.");
+                #endif
+            }
+        }];
     }
     return self;
 }
@@ -330,6 +371,10 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
     [[NSNotificationCenter defaultCenter] removeObserver:self
                                                     name:NSUserDefaultsDidChangeNotification
                                                   object:nil];
+    if (_engineConfigObserver) {
+        [[NSNotificationCenter defaultCenter] removeObserver:_engineConfigObserver];
+        _engineConfigObserver = nil;
+    }
     TPCircularBufferCleanup(&_circularBuffer);
 }
 
@@ -512,7 +557,7 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         #endif
 
         // Restart streaming
-        [self startStreaming];
+        [self restartStreamingAfterFailure];
         return;
     }
 
@@ -543,7 +588,7 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         #endif
 
         // Restart streaming
-        [self startStreaming];
+        [self restartStreamingAfterFailure];
     } else {
         // Process is running, no action needed
         #ifdef DEBUG
@@ -552,7 +597,42 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
     }
 }
 
+- (void)restartStreamingAfterFailure {
+    #ifdef DEBUG
+    NSLog(@"[Streaming] A repor o estado interno antes de relançar o streaming.");
+    #endif
+
+    // Sem este reset, startStreamingAfterWakeUp vê isStreaming == YES e
+    // aborta com "Already streaming" — era por isto que o auto-restart
+    // nunca funcionava e era preciso re-seleccionar o alvo à mão.
+    self.isStreaming = NO;
+
+    // Fecha o fd do FIFO antigo para não vazar quando o restart criar outro
+    int fd = self.raopClockFD;
+    self.raopClockFD = -1;
+    if (fd >= 0) {
+        while (close(fd) == -1 && errno == EINTR) { /* retry */ }
+    }
+
+    self.inputPipe = nil;
+    self.raopTask = nil;
+
+    // Pequena pausa para não entrar em ciclo apertado se o alvo estiver
+    // mesmo inacessível (cada tentativa também passa pelo wake-up)
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        [weakSelf startStreaming];
+    });
+}
+
 - (void)setupHealthCheckTimer {
+    // Cancela um timer anterior para não acumular timers em cada restart
+    if (self.healthCheckTimer) {
+        dispatch_source_cancel(self.healthCheckTimer);
+        self.healthCheckTimer = nil;
+    }
+
     // Create a dispatch queue for the timer
     dispatch_queue_t queue = dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0);
 
@@ -874,7 +954,7 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
             #ifdef DEBUG
             NSLog(@"[Streaming] RAOP task terminated, but device (%@) is still selected. Restarting streaming.", selectedDevice);
             #endif
-            [strongSelf startStreaming];
+            [strongSelf restartStreamingAfterFailure];
         } else {
             #ifdef DEBUG
             NSLog(@"[Streaming] No AirPlay device selected. Stopping streaming completely.");
@@ -906,10 +986,45 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
 
     // Iniciar thread consumidor do tampão circular
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        // int16 estéreo a 44,1 kHz
+        const uint32_t bytesPerSecond = 44100 * 4;
+        // Os relógios da captura e do receptor AirPlay derivam um do outro.
+        // Sem limite, o tampão enche durante minutos/horas até transbordar e
+        // descartar um bloco inteiro (soluço audível) — e a latência cresce
+        // até 10 s. Acima da marca de água alta fazemos um corte controlado
+        // para o nível alvo: um único salto, registado, em vez de descartes
+        // aleatórios no produtor.
+        const uint32_t highWatermark = bytesPerSecond * 6; // 6 s
+        const uint32_t targetLevel   = bytesPerSecond * 2; // 2 s
+
+        NSTimeInterval lastLevelLog = [NSDate timeIntervalSinceReferenceDate];
+        NSTimeInterval starvedSince = 0;
+
         while (self.isStreaming) {
             uint32_t availableBytes = 0;
             void *bufferPointer = TPCircularBufferTail(&self->_circularBuffer, &availableBytes);
+
+            NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+            #ifdef DEBUG
+            if (now - lastLevelLog >= 10.0) {
+                NSLog(@"[Streaming] Nível do tampão circular: %u bytes (%.2f s).",
+                      availableBytes, availableBytes / (double)bytesPerSecond);
+                lastLevelLog = now;
+            }
+            #endif
+
+            if (availableBytes > highWatermark) {
+                uint32_t excess = availableBytes - targetLevel;
+                TPCircularBufferConsume(&self->_circularBuffer, excess);
+                #ifdef DEBUG
+                NSLog(@"[Streaming] Deriva de relógio: tampão acima de %.0f s — descartados %u bytes (%.2f s) para repor a latência.",
+                      highWatermark / (double)bytesPerSecond, excess, excess / (double)bytesPerSecond);
+                #endif
+                continue;
+            }
+
             if (availableBytes > 0) {
+                starvedSince = 0;
                 NSData *data = [NSData dataWithBytes:bufferPointer length:availableBytes];
                 @try {
                     [self->_inputPipe.fileHandleForWriting writeData:data];
@@ -921,6 +1036,17 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
                 }
                 TPCircularBufferConsume(&self->_circularBuffer, availableBytes);
             } else {
+                // Tampão vazio: normal por instantes, mas prolongado indica
+                // que o tap/engine deixou de produzir (captura morta)
+                if (starvedSince == 0) {
+                    starvedSince = now;
+                } else if (now - starvedSince >= 5.0) {
+                    #ifdef DEBUG
+                    NSLog(@"[Streaming] Tampão circular vazio há %.0f s — a captura parou de produzir dados?",
+                          now - starvedSince);
+                    #endif
+                    starvedSince = now;
+                }
                 [NSThread sleepForTimeInterval:0.005];
             }
         }
@@ -1131,6 +1257,11 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
 
 - (void)installAudioTap {
     AVAudioInputNode *inputNode = self.audioEngine.inputNode;
+
+    // Remover um tap anterior antes de instalar — instalar sobre um tap
+    // existente lança excepção (relevante na reinstalação após reconfiguração)
+    [inputNode removeTapOnBus:0];
+
     AVAudioFormat *inputFormat = [inputNode inputFormatForBus:0];
 
     if (!inputFormat || inputFormat.channelCount == 0 || inputFormat.sampleRate == 0) {
@@ -1201,8 +1332,13 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
 
         NSUInteger byteCount = floatBuffer.frameLength * targetFormat.streamDescription->mBytesPerFrame;
 
-        // Passo 4: escrever no tampão circular
-        TPCircularBufferProduceBytes(&self->_circularBuffer, pcmData, (uint32_t)byteCount);
+        // Passo 4: escrever no tampão circular. Se estiver cheio, o bloco é
+        // descartado — regista-se para correlacionar com soluços audíveis.
+        if (!TPCircularBufferProduceBytes(&self->_circularBuffer, pcmData, (uint32_t)byteCount)) {
+            #ifdef DEBUG
+            NSLog(@"[Streaming] Tampão circular cheio — descartados %lu bytes do tap.", (unsigned long)byteCount);
+            #endif
+        }
 
         // Gravação — usa os dados int16 directamente, independente do tampão
         if (self.isRecording) {
