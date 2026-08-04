@@ -31,6 +31,7 @@ SOFTWARE.
 #include <FLAC/stream_decoder.h>   // Also for FLAC playback
 #include <opus/opusfile.h>  // For Ogg Opus playback
 #include <string.h>
+#include <stdatomic.h>   // For the silence-analysis generation counter
 
 #import <TPCircularBuffer/TPCircularBuffer.h>
 
@@ -55,6 +56,67 @@ SOFTWARE.
 #define ENABLE_BS2B_BRIDGE 1 // Running bs2b_bridge
 
 static NSString * const kBS2BHeadphonesNameSubstring = @"Auscultadores externos";
+
+#pragma mark - Salto automático de silêncios longos (constantes e utilitários)
+
+// Só saltamos silêncios com mais do que esta duração
+static const double kZPSilenceMinimumGapDuration    = 10.0;
+// Resolução da análise (blocos de 50 ms)
+static const double kZPSilenceAnalysisBlockDuration = 0.05;
+// Limiar de silêncio: RMS por bloco, ≈ -55 dBFS
+static const double kZPSilenceThreshold             = 0.0018;
+// Margem deixada antes do reinício da música, para não cortar o ataque
+static const double kZPSilenceSkipPreRoll           = 0.25;
+
+// Um intervalo de silêncio dentro da faixa, em segundos desde o início do ficheiro
+typedef struct {
+    double start;
+    double end;
+} ZPSilenceGap;
+
+// Cada faixa que arranca incrementa este contador; as análises em curso que já não
+// correspondem ao valor actual são abandonadas e os seus resultados descartados.
+static _Atomic(uint64_t) gSilenceAnalysisGeneration = 0;
+
+// Fila série onde decorre a análise, fora da thread de reprodução
+static dispatch_queue_t ZPSilenceAnalysisQueue(void) {
+    static dispatch_queue_t queue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        dispatch_queue_attr_t attributes = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0);
+        queue = dispatch_queue_create("com.tocatintas.analise-silencio", attributes);
+    });
+    return queue;
+}
+
+// Acumula o resultado de um bloco de análise. Quando um bloco com som fecha uma
+// sequência de silêncio suficientemente longa, essa lacuna é registada.
+// Passando blockIsSilent = NO com blockStartFrame = total de frames fecha o ficheiro.
+static void ZPSilenceAccumulate(BOOL blockIsSilent,
+                                int64_t blockStartFrame,
+                                double sampleRate,
+                                int64_t *silenceStartFrame,
+                                NSMutableArray<NSValue *> *gaps) {
+    if (blockIsSilent) {
+        if (*silenceStartFrame < 0) {
+            *silenceStartFrame = blockStartFrame;
+        }
+        return;
+    }
+
+    if (*silenceStartFrame < 0) {
+        return;
+    }
+
+    ZPSilenceGap gap;
+    gap.start = (double)(*silenceStartFrame) / sampleRate;
+    gap.end   = (double)blockStartFrame / sampleRate;
+    *silenceStartFrame = -1;
+
+    if (gap.end - gap.start > kZPSilenceMinimumGapDuration) {
+        [gaps addObject:[NSValue valueWithBytes:&gap objCType:@encode(ZPSilenceGap)]];
+    }
+}
 
 // Helper structures and callbacks for reading WavPack data from memory
 typedef struct {
@@ -206,6 +268,10 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) ZPAirPlayStreamer *airPlayStreamer;
 @property (nonatomic, assign) BOOL isProgrammaticChange;
 
+// Silêncios longos detectados na faixa actual (NSValue com ZPSilenceGap), por ordem
+// crescente de início. Escrita na thread principal, lida pelos temporizadores.
+@property (copy) NSArray<NSValue *> *silenceGaps;
+
 // To implement s2b when using headphones (or line out)
 @property (strong, nonatomic) NSTask *bs2bTask;
 @property (strong, nonatomic) NSTimer *bs2bHeadphonePollTimer;
@@ -229,6 +295,11 @@ typedef struct {
     double totalDuration;  // Track the duration of the current track
     double sampleRate;  // Add sampleRate to track the sample rate of the Opus file
     BOOL didApplyFadeIn;
+    // Salto de silêncios: pedido feito pela thread principal (frame de destino na
+    // fonte, 0 = sem pedido) e aplicado pelo callback do descodificador.
+    volatile int64_t pendingSeekFrame;
+    // Total de frames saltadas, para compensar o relógio da AudioQueue
+    volatile double skippedFrames;
 } CoreAudioPlaybackState;
 
 CoreAudioPlaybackState playbackState;
@@ -1806,6 +1877,37 @@ CoreAudioPlaybackState playbackState;
         [self initializeShuffledTrackList];
     }
 
+    // Search for the current track in the new directory. -loadAudioFiles já repõe o
+    // índice, mas a baralhação acima cria uma ordem nova, pelo que é preciso voltar
+    // a localizar a faixa em reprodução.
+    NSInteger newIndex = NSNotFound;
+    if (currentTrackPath) {
+        NSArray<NSURL *> *searchArray = self.isShuffleModeActive ? self.shuffledTracks : self.audioFiles;
+        for (NSInteger i = 0; i < (NSInteger)searchArray.count; i++) {
+            NSString *trackPath = [searchArray[i].path stringByStandardizingPath];
+            if ([trackPath compare:currentTrackPath options:NSCaseInsensitiveSearch] == NSOrderedSame) {
+                newIndex = i;
+                break;
+            }
+        }
+    }
+
+    if (newIndex != NSNotFound) {
+        // A faixa em reprodução também existe na nova directoria: continua sem
+        // interrupção e a faixa seguinte é a que lhe sucede na nova lista.
+        self.currentTrackIndex = newIndex;
+    } else {
+        // A faixa deixou de existir na nova directoria; a reprodução actual não é
+        // interrompida, mas a lista recomeça do princípio.
+        self.currentTrackIndex = 0;
+    }
+
+    #ifdef DEBUG
+    NSLog(@"Directory changed: current track %@ (index %ld)",
+          (newIndex != NSNotFound) ? @"preserved" : @"not found in the new directory",
+          (long)self.currentTrackIndex);
+    #endif
+
     // Update combo box selection
     dispatch_async(dispatch_get_main_queue(), ^{
         [self createComboBox];
@@ -2265,6 +2367,9 @@ CoreAudioPlaybackState playbackState;
     // Step 10: Start the queue
     AudioQueueStart(playbackState.audioQueue, NULL);
 
+    // Procura de silêncios longos nesta faixa
+    [self beginSilenceAnalysisForTrack:trackURL];
+
     // Step 11: Start progress updates using AudioQueueGetCurrentTime for more accuracy
     if (self.progressUpdateTimer) {
         [self.progressUpdateTimer invalidate];
@@ -2307,11 +2412,14 @@ CoreAudioPlaybackState playbackState;
             // Ensure correct sample rate from playback state
             double sampleRate = playbackState.sampleRate > 0 ? playbackState.sampleRate : 48000.0;
 
-            // Calculate the current time in seconds
-            double currentTime = timeStamp.mSampleTime / sampleRate;
+            // Calculate the current time in seconds. A AudioQueue só conta o que
+            // reproduziu, por isso somam-se as frames saltadas nos silêncios.
+            double currentTime = (timeStamp.mSampleTime + playbackState.skippedFrames) / sampleRate;
 
             // Ensure totalDuration is correctly initialized
-            if (playbackState.totalDuration > 0 && currentTime <= playbackState.totalDuration) {
+            if (playbackState.totalDuration > 0) {
+                currentTime = MIN(currentTime, playbackState.totalDuration);
+
                 // Calculate progress percentage
                 double progress = (currentTime / playbackState.totalDuration) * 100.0;
 
@@ -2332,6 +2440,9 @@ CoreAudioPlaybackState playbackState;
             // Optionally handle discontinuity (e.g., reset progress, pause, etc.)
         }
     }
+
+    // Verifica se estamos dentro de um silêncio longo e, se for o caso, salta-o
+    [self checkForSilenceAndSkip];
 }
 
 - (void)terminateOpusPlayback {
@@ -2657,23 +2768,40 @@ void flac_metadata_callback(const FLAC__StreamDecoder *decoder,
 // Add this method to update the progress bar based on WavPack playback progress
 - (void)updateWavPackProgress {
     if (playbackState.wpc && playbackState.isPlaying) {
-        // Retrieve the progress of the current WavPack file
-        double progress = WavpackGetProgress(playbackState.wpc);
-        
-        if (progress >= 0.0 && progress <= 1.0) {
-            // Create a dispatch block for updating the progress bar
-            dispatch_block_t updateProgressBar = ^{
-                // Convert progress to a percentage and update the progress bar
-                [self.progressBar setDoubleValue:progress * 100.0];
-            };
-            
-            // Dispatch the block to the main thread to update the UI
-            dispatch_async(dispatch_get_main_queue(), updateProgressBar);
-        } else {
-            #ifdef DEBUG
-            NSLog(@"Unknown progress.");
-            #endif
-        }
+        [self updateProgressBarForWavPack];
+    }
+
+    // Verifica se estamos dentro de um silêncio longo e, se for o caso, salta-o
+    [self checkForSilenceAndSkip];
+}
+
+// Progresso do WavPack a partir do relógio da AudioQueue (que já contabiliza os
+// silêncios saltados). WavpackGetProgress fica como reserva para os ficheiros cujo
+// número total de amostras não é conhecido.
+- (void)updateProgressBarForWavPack {
+    double currentTime = 0.0;
+    double duration = 0.0;
+    double progress = -1.0;
+
+    if ([self currentPlaybackTime:&currentTime duration:&duration] && duration > 0.0) {
+        progress = MIN(currentTime / duration, 1.0);
+    } else if (playbackState.wpc) {
+        progress = WavpackGetProgress(playbackState.wpc);
+    }
+
+    if (progress >= 0.0 && progress <= 1.0) {
+        // Create a dispatch block for updating the progress bar
+        dispatch_block_t updateProgressBar = ^{
+            // Convert progress to a percentage and update the progress bar
+            [self.progressBar setDoubleValue:progress * 100.0];
+        };
+
+        // Dispatch the block to the main thread to update the UI
+        dispatch_async(dispatch_get_main_queue(), updateProgressBar);
+    } else {
+        #ifdef DEBUG
+        NSLog(@"Unknown progress.");
+        #endif
     }
 }
 
@@ -2727,6 +2855,12 @@ static NSData *gWvKeptData = nil;
     int sampleRate    = WavpackGetSampleRate(playbackState.wpc);
     int bitsPerSample = WavpackGetBitsPerSample(playbackState.wpc);
     playbackState.numChannels = numChannels;
+
+    // Relógio da faixa, usado pela barra de progresso e pelo salto de silêncios
+    playbackState.sampleRate = sampleRate;
+    int64_t totalSamples = WavpackGetNumSamples64(playbackState.wpc);
+    playbackState.totalDuration = (totalSamples > 0 && sampleRate > 0) ? (double)totalSamples / (double)sampleRate : 0.0;
+
     #ifdef DEBUG
     NSLog(@"WAVPack File Info: %d channels, %d Hz, %d bits/sample",
           numChannels, sampleRate, bitsPerSample);
@@ -2801,6 +2935,9 @@ static NSData *gWvKeptData = nil;
         return;
     }
 
+    // Procura de silêncios longos nesta faixa
+    [self beginSilenceAnalysisForTrack:trackURL];
+
     // Progress bar timer
         dispatch_async(dispatch_get_main_queue(), ^{
             if (self.progressUpdateTimer) {
@@ -2828,6 +2965,18 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 
     // Handling WAVPack decoding
     if (playbackState->wpc) {
+        // Salto de um silêncio longo pedido pelo temporizador de progresso: é
+        // aplicado aqui porque libwavpack só pode ser usada nesta thread.
+        int64_t seekFrame = playbackState->pendingSeekFrame;
+        if (seekFrame > 0) {
+            int64_t currentFrame = WavpackGetSampleIndex64(playbackState->wpc);
+            if (seekFrame > currentFrame && WavpackSeekSample64(playbackState->wpc, seekFrame)) {
+                playbackState->skippedFrames += (double)(seekFrame - currentFrame);
+                playbackState->didApplyFadeIn = NO;  // fade-in curto ao retomar a música
+            }
+            playbackState->pendingSeekFrame = 0;
+        }
+
         int numChannels = playbackState->numChannels;
 
         // AudioQueue output: 16-bit
@@ -2929,6 +3078,17 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
             }
         }
     } else if (playbackState->opusFile) {
+        // Salto de um silêncio longo pedido pelo temporizador de progresso: é
+        // aplicado aqui porque libopusfile só pode ser usada nesta thread.
+        int64_t seekFrame = playbackState->pendingSeekFrame;
+        if (seekFrame > 0) {
+            int64_t currentFrame = op_pcm_tell(playbackState->opusFile);
+            if (seekFrame > currentFrame && op_pcm_seek(playbackState->opusFile, seekFrame) == 0) {
+                playbackState->skippedFrames += (double)(seekFrame - currentFrame);
+            }
+            playbackState->pendingSeekFrame = 0;
+        }
+
         // Opus decoding logic (inalterado)
         int16_t pcmBuffer[4096 * 2];
         int samplesDecoded = op_read_stereo(playbackState->opusFile, pcmBuffer, sizeof(pcmBuffer) / sizeof(pcmBuffer[0]));
@@ -4909,6 +5069,9 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     // Set the delegate to self to handle playback completion
     self.audioPlayer.delegate = self;
 
+    // Procura de silêncios longos nesta faixa
+    [self beginSilenceAnalysisForTrack:trackURL];
+
     // Start playback
     [self.audioPlayer play];
 
@@ -4952,6 +5115,9 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     }
 
     self.audioPlayer.delegate = self;  // Ensure delegate is set
+
+    // Procura de silêncios longos nesta faixa
+    [self beginSilenceAnalysisForTrack:trackURL];
 
     [self.audioPlayer play];
     #ifdef DEBUG
@@ -5010,11 +5176,410 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 
     // Handle WAVPack file progress
     if (playbackState.wpc && playbackState.isPlaying) {
-        double progress = WavpackGetProgress(playbackState.wpc) * 100.0;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self.progressBar setDoubleValue:progress];
-        });
+        [self updateProgressBarForWavPack];
     }
+
+    // Verifica se estamos dentro de um silêncio longo e, se for o caso, salta-o
+    [self checkForSilenceAndSkip];
+}
+
+#pragma mark - Salto automático de silêncios longos
+
+// Arranca, em segundo plano, a análise da faixa à procura de silêncios com mais de
+// kZPSilenceMinimumGapDuration segundos. O resultado fica em self.silenceGaps e é
+// consumido por -checkForSilenceAndSkip a partir dos temporizadores de progresso.
+// Pode ser chamado de qualquer thread (o modo de repetição chama-o do callback áudio).
+- (void)beginSilenceAnalysisForTrack:(NSURL *)trackURL {
+    // Invalida qualquer análise anterior ainda em curso
+    uint64_t generation = atomic_fetch_add(&gSilenceAnalysisGeneration, 1) + 1;
+
+    self.silenceGaps = nil;
+
+    // O relógio de salto pertence à faixa que agora arranca
+    playbackState.pendingSeekFrame = 0;
+    playbackState.skippedFrames = 0.0;
+
+    if (!trackURL.isFileURL) {
+        return;
+    }
+
+    dispatch_async(ZPSilenceAnalysisQueue(), ^{
+        NSArray<NSValue *> *gaps = [self silenceGapsForTrackAtURL:trackURL generation:generation];
+        if (gaps.count == 0) {
+            return;
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            // A faixa pode ter mudado enquanto a análise decorria
+            if (atomic_load(&gSilenceAnalysisGeneration) != generation) {
+                return;
+            }
+
+            self.silenceGaps = gaps;
+
+            #ifdef DEBUG
+            NSLog(@"Silêncios longos detectados em %@: %lu", trackURL.lastPathComponent, (unsigned long)gaps.count);
+            for (NSValue *value in gaps) {
+                ZPSilenceGap gap;
+                [value getValue:&gap size:sizeof(gap)];
+                NSLog(@"  %.2f s → %.2f s (%.2f s)", gap.start, gap.end, gap.end - gap.start);
+            }
+            #endif
+        });
+    });
+}
+
+// Descarta a análise e o estado de salto (usado ao parar a reprodução)
+- (void)cancelSilenceAnalysis {
+    atomic_fetch_add(&gSilenceAnalysisGeneration, 1);
+    self.silenceGaps = nil;
+    playbackState.pendingSeekFrame = 0;
+    playbackState.skippedFrames = 0.0;
+}
+
+// Método chamado pelos temporizadores de progresso: se a reprodução entrou num
+// silêncio com mais de 10 segundos, avança directamente para o reinício da música.
+- (void)checkForSilenceAndSkip {
+    NSArray<NSValue *> *gaps = self.silenceGaps;
+    if (gaps.count == 0) {
+        return;
+    }
+
+    // Um salto anterior ainda não foi aplicado pelo descodificador
+    if (playbackState.pendingSeekFrame > 0) {
+        return;
+    }
+
+    double currentTime = 0.0;
+    double duration = 0.0;
+    if (![self currentPlaybackTime:&currentTime duration:&duration]) {
+        return;
+    }
+
+    for (NSValue *value in gaps) {
+        ZPSilenceGap gap;
+        [value getValue:&gap size:sizeof(gap)];
+
+        // A lista está ordenada: as restantes lacunas ainda estão à frente
+        if (gap.start > currentTime) {
+            break;
+        }
+
+        // Já passámos esta lacuna (ou estamos no seu final)
+        if (currentTime >= gap.end - kZPSilenceSkipPreRoll) {
+            continue;
+        }
+
+        // Se o silêncio se estende até ao fim do ficheiro, o salto leva-nos ao
+        // final da faixa e a transição normal para a faixa seguinte encarrega-se
+        // do resto.
+        double target = MAX(gap.start, gap.end - kZPSilenceSkipPreRoll);
+        #ifdef DEBUG
+        NSLog(@"Silêncio de %.2f s em %.2f s: a avançar para %.2f s", gap.end - gap.start, currentTime, target);
+        #endif
+        [self skipSilenceToTime:target duration:duration];
+        return;
+    }
+}
+
+// Posição de reprodução audível e duração total da faixa, para qualquer dos motores
+- (BOOL)currentPlaybackTime:(double *)outTime duration:(double *)outDuration {
+    // WavPack e Opus: relógio da AudioQueue, corrigido pelas frames já saltadas
+    if (playbackState.audioQueue && playbackState.isPlaying &&
+        (playbackState.wpc || playbackState.opusFile)) {
+
+        if (playbackState.totalDuration <= 0.0) {
+            return NO;
+        }
+
+        AudioTimeStamp timeStamp;
+        Boolean discontinuity = false;
+        OSStatus status = AudioQueueGetCurrentTime(playbackState.audioQueue, NULL, &timeStamp, &discontinuity);
+        if (status != noErr || timeStamp.mSampleTime < 0) {
+            return NO;
+        }
+
+        double sampleRate = playbackState.sampleRate > 0 ? playbackState.sampleRate : 48000.0;
+        if (outTime) {
+            *outTime = (timeStamp.mSampleTime + playbackState.skippedFrames) / sampleRate;
+        }
+        if (outDuration) {
+            *outDuration = playbackState.totalDuration;
+        }
+        return YES;
+    }
+
+    // FLAC e formatos padrão
+    if (self.audioPlayer && self.audioPlayer.duration > 0.0) {
+        if (outTime) {
+            *outTime = self.audioPlayer.currentTime;
+        }
+        if (outDuration) {
+            *outDuration = self.audioPlayer.duration;
+        }
+        return YES;
+    }
+
+    return NO;
+}
+
+// Avança a reprodução para targetTime, respeitando o relógio de cada motor, e
+// actualiza imediatamente a barra de progresso.
+- (void)skipSilenceToTime:(double)targetTime duration:(double)duration {
+    if (duration <= 0.0) {
+        return;
+    }
+
+    double target = MAX(0.0, MIN(targetTime, duration));
+
+    if (playbackState.audioQueue && (playbackState.wpc || playbackState.opusFile)) {
+        // O salto é aplicado no callback do descodificador, na thread onde este
+        // corre; libwavpack e libopusfile não podem ser usados a partir daqui.
+        double sampleRate = playbackState.sampleRate > 0 ? playbackState.sampleRate : 48000.0;
+        int64_t frame = (int64_t)llround(target * sampleRate);
+        if (frame <= 0) {
+            return;
+        }
+        playbackState.pendingSeekFrame = frame;
+    } else if (self.audioPlayer) {
+        BOOL wasPlaying = self.audioPlayer.isPlaying;
+        self.audioPlayer.currentTime = target;
+        if (wasPlaying && !self.audioPlayer.isPlaying) {
+            [self.audioPlayer play];
+        }
+    } else {
+        return;
+    }
+
+    double progress = MIN(target / duration, 1.0) * 100.0;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self.progressBar setDoubleValue:progress];
+    });
+}
+
+#pragma mark - Análise de silêncio por formato
+
+- (NSArray<NSValue *> *)silenceGapsForTrackAtURL:(NSURL *)url generation:(uint64_t)generation {
+    NSString *extension = url.pathExtension.lowercaseString;
+
+    if ([extension isEqualToString:@"wv"]) {
+        return [self silenceGapsInWavPackFileAtURL:url generation:generation];
+    }
+    if ([extension isEqualToString:@"opus"]) {
+        return [self silenceGapsInOpusFileAtURL:url generation:generation];
+    }
+    return [self silenceGapsInDecodableFileAtURL:url generation:generation];
+}
+
+// FLAC, MP3, WAV, AIFF, AAC… — tudo o que a AVFoundation sabe descodificar
+- (NSArray<NSValue *> *)silenceGapsInDecodableFileAtURL:(NSURL *)url generation:(uint64_t)generation {
+    NSError *error = nil;
+    AVAudioFile *file = [[AVAudioFile alloc] initForReading:url error:&error];
+    if (!file) {
+        #ifdef DEBUG
+        NSLog(@"Análise de silêncio: não foi possível ler %@ (%@)", url.lastPathComponent, error.localizedDescription);
+        #endif
+        return nil;
+    }
+
+    AVAudioFormat *format = file.processingFormat;
+    double sampleRate = format.sampleRate;
+    AVAudioChannelCount channels = format.channelCount;
+    if (sampleRate <= 0.0 || channels == 0) {
+        return nil;
+    }
+
+    AVAudioFrameCount blockFrames = (AVAudioFrameCount)MAX(1.0, round(sampleRate * kZPSilenceAnalysisBlockDuration));
+    AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:format frameCapacity:blockFrames * 20];
+    if (!buffer) {
+        return nil;
+    }
+
+    BOOL interleaved = format.isInterleaved;
+    NSMutableArray<NSValue *> *gaps = [NSMutableArray array];
+    int64_t silenceStartFrame = -1;
+    int64_t frameIndex = 0;
+
+    while (atomic_load(&gSilenceAnalysisGeneration) == generation) {
+        if (![file readIntoBuffer:buffer error:&error]) {
+            #ifdef DEBUG
+            NSLog(@"Análise de silêncio interrompida em %@: %@", url.lastPathComponent, error.localizedDescription);
+            #endif
+            break;
+        }
+
+        AVAudioFrameCount available = buffer.frameLength;
+        if (available == 0) {
+            break;
+        }
+
+        float * const *channelData = buffer.floatChannelData;
+        if (!channelData) {
+            return nil;
+        }
+
+        for (AVAudioFrameCount offset = 0; offset < available; offset += blockFrames) {
+            AVAudioFrameCount count = MIN(blockFrames, available - offset);
+            double sum = 0.0;
+
+            if (interleaved) {
+                const float *samples = channelData[0] + (size_t)offset * channels;
+                for (AVAudioFrameCount i = 0; i < count * channels; i++) {
+                    sum += (double)samples[i] * (double)samples[i];
+                }
+            } else {
+                for (AVAudioChannelCount channel = 0; channel < channels; channel++) {
+                    const float *samples = channelData[channel] + offset;
+                    for (AVAudioFrameCount i = 0; i < count; i++) {
+                        sum += (double)samples[i] * (double)samples[i];
+                    }
+                }
+            }
+
+            double rms = sqrt(sum / (double)((size_t)count * channels));
+            ZPSilenceAccumulate(rms < kZPSilenceThreshold, frameIndex + offset, sampleRate, &silenceStartFrame, gaps);
+        }
+
+        frameIndex += available;
+    }
+
+    if (atomic_load(&gSilenceAnalysisGeneration) != generation) {
+        return nil;
+    }
+
+    // Fecha um eventual silêncio final
+    ZPSilenceAccumulate(NO, frameIndex, sampleRate, &silenceStartFrame, gaps);
+    return gaps;
+}
+
+- (NSArray<NSValue *> *)silenceGapsInWavPackFileAtURL:(NSURL *)url generation:(uint64_t)generation {
+    char error[80] = {0};
+    WavpackContext *context = WavpackOpenFileInput([url.path UTF8String], error, 0, 0);
+    if (!context) {
+        #ifdef DEBUG
+        NSLog(@"Análise de silêncio: não foi possível abrir %@ (%s)", url.lastPathComponent, error);
+        #endif
+        return nil;
+    }
+
+    int numChannels = WavpackGetNumChannels(context);
+    int bitsPerSample = WavpackGetBitsPerSample(context);
+    double sampleRate = WavpackGetSampleRate(context);
+    BOOL isFloat = (WavpackGetMode(context) & MODE_FLOAT) != 0;
+
+    if (numChannels <= 0 || sampleRate <= 0.0 || bitsPerSample <= 0) {
+        WavpackCloseFile(context);
+        return nil;
+    }
+
+    uint32_t blockFrames = (uint32_t)MAX(1.0, round(sampleRate * kZPSilenceAnalysisBlockDuration));
+    int32_t *samples = malloc((size_t)blockFrames * (size_t)numChannels * sizeof(int32_t));
+    if (!samples) {
+        WavpackCloseFile(context);
+        return nil;
+    }
+
+    double scale = 1.0 / (double)(1LL << (bitsPerSample - 1));
+    NSMutableArray<NSValue *> *gaps = [NSMutableArray array];
+    int64_t silenceStartFrame = -1;
+    int64_t frameIndex = 0;
+
+    while (atomic_load(&gSilenceAnalysisGeneration) == generation) {
+        uint32_t decoded = WavpackUnpackSamples(context, samples, blockFrames);
+        if (decoded == 0) {
+            break;
+        }
+
+        size_t total = (size_t)decoded * (size_t)numChannels;
+        double sum = 0.0;
+        for (size_t i = 0; i < total; i++) {
+            double value;
+            if (isFloat) {
+                float sample;
+                memcpy(&sample, &samples[i], sizeof(sample));
+                value = (double)sample;
+            } else {
+                value = (double)samples[i] * scale;
+            }
+            sum += value * value;
+        }
+
+        double rms = sqrt(sum / (double)total);
+        ZPSilenceAccumulate(rms < kZPSilenceThreshold, frameIndex, sampleRate, &silenceStartFrame, gaps);
+        frameIndex += decoded;
+    }
+
+    BOOL cancelled = (atomic_load(&gSilenceAnalysisGeneration) != generation);
+
+    free(samples);
+    WavpackCloseFile(context);
+
+    if (cancelled) {
+        return nil;
+    }
+
+    // Fecha um eventual silêncio final
+    ZPSilenceAccumulate(NO, frameIndex, sampleRate, &silenceStartFrame, gaps);
+    return gaps;
+}
+
+- (NSArray<NSValue *> *)silenceGapsInOpusFileAtURL:(NSURL *)url generation:(uint64_t)generation {
+    int error = 0;
+    OggOpusFile *opusFile = op_open_file([url.path UTF8String], &error);
+    if (error != 0 || opusFile == NULL) {
+        #ifdef DEBUG
+        NSLog(@"Análise de silêncio: não foi possível abrir %@ (%d)", url.lastPathComponent, error);
+        #endif
+        return nil;
+    }
+
+    // O Opus descodifica sempre a 48 kHz; op_read_stereo entrega dois canais.
+    const double sampleRate = 48000.0;
+    const int numChannels = 2;
+    int blockFrames = (int)MAX(1.0, round(sampleRate * kZPSilenceAnalysisBlockDuration));
+    int bufferSamples = blockFrames * numChannels;
+    int16_t *samples = malloc((size_t)bufferSamples * sizeof(int16_t));
+    if (!samples) {
+        op_free(opusFile);
+        return nil;
+    }
+
+    NSMutableArray<NSValue *> *gaps = [NSMutableArray array];
+    int64_t silenceStartFrame = -1;
+    int64_t frameIndex = 0;
+
+    while (atomic_load(&gSilenceAnalysisGeneration) == generation) {
+        // Devolve o número de frames por canal; pode ser menos do que o pedido,
+        // o que apenas torna o bloco de análise mais curto.
+        int decoded = op_read_stereo(opusFile, samples, bufferSamples);
+        if (decoded <= 0) {
+            break;
+        }
+
+        size_t total = (size_t)decoded * (size_t)numChannels;
+        double sum = 0.0;
+        for (size_t i = 0; i < total; i++) {
+            double value = (double)samples[i] / 32768.0;
+            sum += value * value;
+        }
+
+        double rms = sqrt(sum / (double)total);
+        ZPSilenceAccumulate(rms < kZPSilenceThreshold, frameIndex, sampleRate, &silenceStartFrame, gaps);
+        frameIndex += decoded;
+    }
+
+    BOOL cancelled = (atomic_load(&gSilenceAnalysisGeneration) != generation);
+
+    free(samples);
+    op_free(opusFile);
+
+    if (cancelled) {
+        return nil;
+    }
+
+    // Fecha um eventual silêncio final
+    ZPSilenceAccumulate(NO, frameIndex, sampleRate, &silenceStartFrame, gaps);
+    return gaps;
 }
 
 // Go back to the previous track in the directory
@@ -5056,6 +5621,9 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 
 // Ensure the timer is invalidated if playback is stopped or a new track is played
 - (void)stopAudio {
+    // Descartar a análise de silêncios da faixa que estava a tocar
+    [self cancelSilenceAnalysis];
+
     // Invalidate the previous progress update timer
     if (self.progressUpdateTimer) {
         [self.progressUpdateTimer invalidate];
