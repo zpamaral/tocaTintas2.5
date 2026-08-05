@@ -36,6 +36,7 @@ SOFTWARE.
 #import <TPCircularBuffer/TPCircularBuffer.h>
 
 #import <Cocoa/Cocoa.h>
+#import <CoreServices/CoreServices.h>   // FSEvents, para vigiar a pasta de músicas
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "ViewController.h"   // Objective-C header
 #import "M3UPlaylist.h"
@@ -239,6 +240,15 @@ static WavpackStreamReader memoryReader = {
 // Properties to cache the directory modification date and audio files
 @property (nonatomic, strong) NSDate *directoryModificationDate;
 @property (nonatomic, strong) NSArray<NSURL *> *cachedAudioFiles;
+
+// Vigilância da pasta de músicas. O mtime da raiz só muda quando se cria ou apaga
+// algo diretamente dentro dela, pelo que copiar um álbum para uma pasta de artista
+// já existente passava despercebido. O FSEvents cobre a árvore toda.
+@property (nonatomic, assign) FSEventStreamRef directoryEventStream;
+@property (nonatomic, copy) NSString *watchedDirectoryPath;
+@property (nonatomic, assign) BOOL audioLibraryNeedsReload;
+@property (nonatomic, assign) BOOL hasCompletedInitialScan;
+@property (nonatomic, assign) NSUInteger pendingReloadGeneration;
 @property (nonatomic, assign) BOOL isPlaylistModeActive; // Indicates if an M3U8 playlist is loaded
 
 @property (nonatomic, strong) NSArray<NSURL *> *audioFiles;
@@ -554,6 +564,7 @@ CoreAudioPlaybackState playbackState;
     [self requestNotificationPermission];
     [self loadTrackPlayCounts];
     [self loadAudioFilesCache];
+    [self startWatchingSongsDirectory];
     [self loadAudioFiles];
     [self readFifoDirectly];
     [self setupUI];
@@ -1828,6 +1839,9 @@ CoreAudioPlaybackState playbackState;
 }
 
 - (void)dealloc {
+    // O FSEventStream guarda um ponteiro não retido para self; tem de ser parado aqui.
+    [self stopWatchingSongsDirectory];
+
     [[NSNotificationCenter defaultCenter] removeObserver:self
                                                     name:@"SongsDirectoryPathChanged"
                                                   object:nil];
@@ -1865,6 +1879,10 @@ CoreAudioPlaybackState playbackState;
     // Clear cached audio files and modification date
     self.cachedAudioFiles = nil;
     self.directoryModificationDate = nil;
+    self.hasCompletedInitialScan = NO;
+
+    // Passar a vigiar a pasta nova
+    [self startWatchingSongsDirectory];
 
     // Exit playlist mode after preserving the current track
     self.isPlaylistModeActive = NO;
@@ -4758,6 +4776,109 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     }
 }
 
+#pragma mark - Vigilância da pasta de músicas
+
+// Callback do FSEvents: qualquer alteração dentro da pasta de músicas, a qualquer
+// profundidade, marca a lista como suja e força uma releitura. É chamado na fila
+// principal (ver -startWatchingSongsDirectory).
+static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
+                                           void *clientCallBackInfo,
+                                           size_t numEvents,
+                                           void *eventPaths,
+                                           const FSEventStreamEventFlags eventFlags[],
+                                           const FSEventStreamEventId eventIds[]) {
+    ViewController *controller = (__bridge ViewController *)clientCallBackInfo;
+    if (!controller || numEvents == 0) {
+        return;
+    }
+
+    #ifdef DEBUG
+    NSLog(@"FSEvents: %zu alteração(ões) na pasta de músicas.", numEvents);
+    #endif
+
+    controller.audioLibraryNeedsReload = YES;
+
+    // A releitura percorre a árvore toda na thread principal, por isso convém
+    // esperar que a cópia (ou a extracção de um CD) assente antes de a fazer.
+    // Cada evento adia a leitura; só a última geração agendada é que lê.
+    controller.pendingReloadGeneration = controller.pendingReloadGeneration + 1;
+    NSUInteger generation = controller.pendingReloadGeneration;
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        if (generation != controller.pendingReloadGeneration) {
+            return;   // chegaram mais alterações entretanto
+        }
+        [controller loadAudioFiles];
+    });
+}
+
+// Começa a vigiar a pasta de músicas actual. Se já estiver a vigiar essa mesma
+// pasta, não faz nada.
+- (void)startWatchingSongsDirectory {
+    NSString *directoryPath = [self loadSongsDirectoryPath];
+    if (directoryPath.length == 0) {
+        return;
+    }
+
+    if (self.directoryEventStream && [self.watchedDirectoryPath isEqualToString:directoryPath]) {
+        return;
+    }
+
+    [self stopWatchingSongsDirectory];
+
+    FSEventStreamContext context = {0, (__bridge void *)self, NULL, NULL, NULL};
+    // kFSEventStreamCreateFlagWatchRoot avisa-nos se a própria pasta for movida,
+    // renomeada, ou se o volume for desmontado e voltar a montar.
+    FSEventStreamCreateFlags flags = kFSEventStreamCreateFlagUseCFTypes |
+                                     kFSEventStreamCreateFlagNoDefer |
+                                     kFSEventStreamCreateFlagWatchRoot;
+
+    FSEventStreamRef stream = FSEventStreamCreate(kCFAllocatorDefault,
+                                                  &ZPSongsDirectoryEventsCallback,
+                                                  &context,
+                                                  (__bridge CFArrayRef)@[directoryPath],
+                                                  kFSEventStreamEventIdSinceNow,
+                                                  2.0,   // segundos de latência, para agrupar cópias grandes
+                                                  flags);
+    if (!stream) {
+        #ifdef DEBUG
+        NSLog(@"Não foi possível criar o FSEventStream para: %@", directoryPath);
+        #endif
+        return;
+    }
+
+    FSEventStreamSetDispatchQueue(stream, dispatch_get_main_queue());
+
+    if (!FSEventStreamStart(stream)) {
+        #ifdef DEBUG
+        NSLog(@"Não foi possível iniciar o FSEventStream para: %@", directoryPath);
+        #endif
+        FSEventStreamInvalidate(stream);
+        FSEventStreamRelease(stream);
+        return;
+    }
+
+    self.directoryEventStream = stream;
+    self.watchedDirectoryPath = directoryPath;
+
+    #ifdef DEBUG
+    NSLog(@"A vigiar alterações em: %@", directoryPath);
+    #endif
+}
+
+- (void)stopWatchingSongsDirectory {
+    if (!self.directoryEventStream) {
+        return;
+    }
+
+    FSEventStreamStop(self.directoryEventStream);
+    FSEventStreamInvalidate(self.directoryEventStream);
+    FSEventStreamRelease(self.directoryEventStream);
+    self.directoryEventStream = NULL;
+    self.watchedDirectoryPath = nil;
+}
+
 // Optimized method to load audio files with correct sorting
 - (void)loadAudioFiles {
     // Check if we are in playlist mode
@@ -4767,7 +4888,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     }
 
     // Load the directory path from user defaults or use a default path
-    NSString *directoryPath = [[NSUserDefaults standardUserDefaults] stringForKey:@"songsDirectoryPath"] ?: @"/Users/amaral/Downloads/CDs";
+    NSString *directoryPath = [self loadSongsDirectoryPath];
     NSURL *directoryURL = [NSURL fileURLWithPath:directoryPath];
     NSFileManager *fileManager = [NSFileManager defaultManager];
 
@@ -4782,14 +4903,27 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     }
     NSDate *modificationDate = attributes[NSFileModificationDate];
 
-    // If the directory hasn't changed, use the cached audio files
-    if ([self.directoryModificationDate isEqualToDate:modificationDate] && self.cachedAudioFiles) {
+    // Só se pode confiar na cache quando todas estas condições se verificam:
+    //   - já houve uma leitura completa nesta sessão (a cache lida do disco pode
+    //     estar desactualizada em relação a alterações feitas com a app fechada);
+    //   - o FSEvents está activo, ou seja, teríamos sido avisados de alterações em
+    //     qualquer subpasta — o mtime da raiz sozinho não as detecta;
+    //   - não há nenhuma alteração por processar;
+    //   - o mtime da raiz continua igual.
+    BOOL canTrustCache = self.cachedAudioFiles &&
+                         self.hasCompletedInitialScan &&
+                         self.directoryEventStream != NULL &&
+                         !self.audioLibraryNeedsReload &&
+                         [self.directoryModificationDate isEqualToDate:modificationDate];
+
+    if (canTrustCache) {
         self.audioFiles = self.cachedAudioFiles;
         return;
     }
 
     // Update the cached modification date
     self.directoryModificationDate = modificationDate;
+    self.audioLibraryNeedsReload = NO;
 
     // Define the keys to prefetch
     NSArray<NSURLResourceKey> *keys = @[NSURLIsRegularFileKey, NSURLNameKey, NSURLPathKey];
@@ -4884,12 +5018,16 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
         }
     }
 
-    // Update the cached audio files and refresh the UI if there are changes
-    if (![self.cachedAudioFiles isEqualToArray:sortedAudioFiles]) {
-        self.cachedAudioFiles = sortedAudioFiles;
-        self.audioFiles = sortedAudioFiles;
-        [self saveAudioFilesCache];
+    // Guardar sempre a cache, mesmo quando a lista não mudou: assim a data gravada
+    // em disco acompanha a da pasta e não fica a divergir da que está em memória.
+    BOOL fileListChanged = ![self.cachedAudioFiles isEqualToArray:sortedAudioFiles];
+    self.cachedAudioFiles = sortedAudioFiles;
+    self.audioFiles = sortedAudioFiles;
+    self.hasCompletedInitialScan = YES;
+    [self saveAudioFilesCache];
 
+    // Refresh the UI only if there are changes
+    if (fileListChanged) {
         // Recreate shuffled tracks if shuffle mode is active
         if (self.isShuffleModeActive) {
             [self initializeShuffledTrackList]; // Ensure this method is up to date
