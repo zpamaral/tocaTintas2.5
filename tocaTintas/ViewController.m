@@ -203,6 +203,10 @@ static WavpackStreamReader memoryReader = {
 - (void)loadTrackPlayCounts;
 - (void)saveTrackPlayCounts;
 - (void)schedulePlayCountIncrementForTrack:(NSURL *)trackURL;
+- (void)beginPlayCountTrackingForTrack:(NSURL *)trackURL forceNewPlayback:(BOOL)forceNewPlayback;
+- (void)suspendPlayCountTracking;
+- (void)resumePlayCountTracking;
+- (void)resetPlayCountTracking;
 - (void)comboBoxSelectionChanged:(NSComboBox *)comboBox;
 
 @property (nonatomic, strong) NSImageView *coverArtView;
@@ -258,7 +262,14 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSTimer *progressUpdateTimer;  // Timer to update progress bar
 
 @property (strong, nonatomic) NSPanel *aboutPanel; // This makes the panel accessible in your methods
+// Contagem de reproduções. Uma faixa conta uma única vez por reprodução, ao fim de
+// kPlayCountThreshold segundos de audição efectiva. Avançar antes disso não conta;
+// pausar e retomar não volta a contar.
 @property (nonatomic, strong) NSTimer *playCountTimer; // Timer to delay play count increment
+@property (nonatomic, copy) NSString *playCountTrackPath;   // faixa da sessão de contagem actual
+@property (nonatomic, assign) BOOL playCountAlreadyCounted; // já contou nesta reprodução?
+@property (nonatomic, strong) NSDate *playCountDeadline;    // instante em que deve contar
+@property (nonatomic, assign) NSTimeInterval playCountRemaining; // tempo em falta, enquanto suspenso
 @property (nonatomic, strong) NSURL *currentTrackURL; // To keep track of the current playing track
 @property (nonatomic, strong) NSMutableDictionary<NSURL *, NSURL *> *shuffledToOriginalMap;
 
@@ -1967,27 +1978,34 @@ CoreAudioPlaybackState playbackState;
 
 #pragma mark - Play count
 
+// Segundos de audição a partir dos quais uma faixa conta como tocada.
+static const NSTimeInterval kPlayCountThreshold = 5.0;
+
 // Play count methods
 // New method to handle play count increment after the timer fires
 - (void)handlePlayCountIncrement:(NSTimer *)timer {
-    NSURL *trackURL = (NSURL *)timer.userInfo;
-    
-    // Ensure the track is still the one being played, and map it to its original counterpart
-    NSURL *originalTrackURL = self.shuffledToOriginalMap[trackURL] ?: trackURL;
-    #ifdef DEBUG
-    NSURL *mappedURL = self.shuffledToOriginalMap[trackURL];
+    NSString *trackPath = (NSString *)timer.userInfo;
 
-    NSLog(@"Mapped URL: %@", mappedURL);
-    NSLog(@"Track URL: %@", trackURL);
-    NSLog(@"Original Track URL: %@", originalTrackURL);
-    #endif
+    self.playCountTimer = nil;
+    self.playCountDeadline = nil;
+
+    // Só conta se a faixa acompanhada ainda for esta (não se avançou entretanto) e
+    // se esta reprodução ainda não tiver sido contada.
+    if (![trackPath isKindOfClass:[NSString class]] ||
+        ![trackPath isEqualToString:self.playCountTrackPath] ||
+        self.playCountAlreadyCounted) {
+        #ifdef DEBUG
+        NSLog(@"Contagem ignorada para %@ (faixa acompanhada: %@, já contada: %d)",
+              trackPath, self.playCountTrackPath, self.playCountAlreadyCounted);
+        #endif
+        return;
+    }
+
+    self.playCountAlreadyCounted = YES;
+    self.playCountRemaining = 0.0;
 
     // Increment the play count and update the label for the original track URL
-    [self incrementPlayCountForTrack:originalTrackURL];
-    [self updatePlayCountLabelForTrack:originalTrackURL];
-
-    // Clear the timer
-    self.playCountTimer = nil;
+    [self incrementPlayCountForTrack:[NSURL fileURLWithPath:trackPath]];
 }
 
 // Counting playback times
@@ -2010,60 +2028,137 @@ CoreAudioPlaybackState playbackState;
     [self updatePlayCountLabelForTrack:trackURL];
 }
 
+// Ponto de entrada usado por quem inicia reprodução. Não força uma contagem nova:
+// se for a mesma faixa que já está a ser acompanhada, trata-se de uma retoma.
 - (void)schedulePlayCountIncrementForTrack:(NSURL *)trackURL {
-    // Invalidate any existing timer
-    if (self.playCountTimer) {
-        [self.playCountTimer invalidate];
-        self.playCountTimer = nil;
+    [self beginPlayCountTrackingForTrack:trackURL forceNewPlayback:NO];
+}
+
+// Inicia — ou retoma — o acompanhamento da contagem de uma faixa.
+//
+// forceNewPlayback: YES quando a mesma faixa recomeça de facto do início (modo de
+// repetição depois de terminar), e por isso deve poder voltar a contar. NO nos
+// restantes casos: se a faixa acompanhada não mudou, isto é uma retoma e o estado
+// existente é preservado — nem se volta a contar, nem se reinicia o prazo.
+- (void)beginPlayCountTrackingForTrack:(NSURL *)trackURL forceNewPlayback:(BOOL)forceNewPlayback {
+    NSURL *originalTrackURL = self.shuffledToOriginalMap[trackURL] ?: trackURL;
+    NSString *trackPath = originalTrackURL.path;
+    if (trackPath.length == 0) {
+        return;
     }
 
-    // Map the shuffled track URL to the original if necessary
-    NSURL *originalTrackURL = self.shuffledToOriginalMap[trackURL] ?: trackURL;
+    dispatch_block_t beginBlock = ^{
+        if (!forceNewPlayback && [self.playCountTrackPath isEqualToString:trackPath]) {
+            // Mesma faixa: retoma. Se o prazo ainda não tinha terminado, continua
+            // de onde ficou; se já contou, não conta outra vez.
+            #ifdef DEBUG
+            NSLog(@"Retoma de %@ — contagem mantida (já contada: %d, faltam %.1f s)",
+                  trackPath.lastPathComponent, self.playCountAlreadyCounted, self.playCountRemaining);
+            #endif
+            [self resumePlayCountTracking];
+
+            // Repor o rótulo: quem chamou pode tê-lo limpado ao reiniciar a
+            // reprodução, e esta faixa já tem a contagem feita.
+            if (self.playCountAlreadyCounted) {
+                [self updatePlayCountLabelForTrack:originalTrackURL];
+            }
+            return;
+        }
+
+        // Faixa nova (ou reprodução genuinamente nova): começar do zero.
+        [self resetPlayCountTracking];
+        self.playCountTrackPath = trackPath;
+        self.playCountRemaining = kPlayCountThreshold;
+        [self resumePlayCountTracking];
+    };
 
     // Guarantee the timer is always created on the main thread
-    dispatch_block_t scheduleBlock = ^{
-        // Start a new timer to increment the play count after 5 seconds
-        self.playCountTimer = [NSTimer scheduledTimerWithTimeInterval:5.0
-                                       target:self
-                                       selector:@selector(handlePlayCountIncrement:)
-                                       userInfo:originalTrackURL
-                                       repeats:NO];
-    };
     if ([NSThread isMainThread]) {
-        scheduleBlock();
+        beginBlock();
     } else {
-        dispatch_async(dispatch_get_main_queue(), scheduleBlock);
+        dispatch_async(dispatch_get_main_queue(), beginBlock);
     }
+}
+
+// Suspende a contagem decrescente sem perder o estado: o prazo é de audição, não
+// de relógio, por isso uma pausa longa não pode fazer a faixa contar sozinha.
+- (void)suspendPlayCountTracking {
+    if (!self.playCountTimer) {
+        return;
+    }
+
+    // Mínimo positivo: um prazo já esgotado tem de contar assim que se retomar, e
+    // não pode ser confundido com "estado por iniciar" em -resumePlayCountTracking.
+    self.playCountRemaining = MAX(0.01, self.playCountDeadline.timeIntervalSinceNow);
+    [self.playCountTimer invalidate];
+    self.playCountTimer = nil;
+    self.playCountDeadline = nil;
+}
+
+// Volta a armar o temporizador com o tempo que faltava.
+- (void)resumePlayCountTracking {
+    if (self.playCountTimer || self.playCountAlreadyCounted || self.playCountTrackPath.length == 0) {
+        return;
+    }
+
+    NSTimeInterval remaining = self.playCountRemaining > 0.0 ? self.playCountRemaining : kPlayCountThreshold;
+    self.playCountDeadline = [NSDate dateWithTimeIntervalSinceNow:remaining];
+    self.playCountTimer = [NSTimer scheduledTimerWithTimeInterval:remaining
+                                                           target:self
+                                                         selector:@selector(handlePlayCountIncrement:)
+                                                         userInfo:self.playCountTrackPath
+                                                          repeats:NO];
+}
+
+// Esquece a faixa acompanhada. A reprodução seguinte, mesmo que seja da mesma
+// faixa, passa a ser uma reprodução nova e volta a poder contar.
+- (void)resetPlayCountTracking {
+    [self.playCountTimer invalidate];
+    self.playCountTimer = nil;
+    self.playCountDeadline = nil;
+    self.playCountTrackPath = nil;
+    self.playCountAlreadyCounted = NO;
+    self.playCountRemaining = kPlayCountThreshold;
 }
 
 - (void)updatePlayCountLabelForTrack:(NSURL *)trackURL {
     // Map the shuffled track URL to the original if necessary
     NSURL *originalTrackURL = self.shuffledToOriginalMap[trackURL] ?: trackURL;
+    NSString *trackPath = originalTrackURL.path;
 
-    // In order to modify playCount inside the block, declare it with __block
-    __block NSNumber *playCount = [self.trackPlayCounts objectForKey:originalTrackURL.path];
+    dispatch_block_t updateBlock = ^{
+        // Não escrever no rótulo se entretanto se passou a acompanhar outra faixa:
+        // caso contrário mostrava-se a contagem de uma música que já não está a tocar.
+        if (self.playCountTrackPath.length > 0 && ![self.playCountTrackPath isEqualToString:trackPath]) {
+            #ifdef DEBUG
+            NSLog(@"Rótulo de contagem ignorado para %@ (a acompanhar %@)",
+                  trackPath.lastPathComponent, self.playCountTrackPath.lastPathComponent);
+            #endif
+            return;
+        }
 
-    // Perform the task in a background queue to avoid blocking the main thread
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        
-        #ifdef DEBUG
-        NSLog(@"Mapped originalTrackURL2: %@", originalTrackURL);
-        NSLog(@"Mapped trackURL2: %@", trackURL);
-        #endif
+        // Ler a contagem no momento de a mostrar, e não uma cópia tirada antes.
+        NSNumber *playCount = [self.trackPlayCounts objectForKey:trackPath];
 
-        // Ensure UI updates are performed on the main thread after a 5-second delay
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!playCount || playCount.integerValue <= 0) {
+            [self.playCountLabel setStringValue:@""];
+        } else if (playCount.integerValue == 1) {
+            [self.playCountLabel setStringValue:NSLocalizedString(@"Played 1 time", @"Play count label when played at least once")];
+        } else {
+            [self.playCountLabel setStringValue:[NSString stringWithFormat:NSLocalizedString(@"Played %@ times", @"Play count label when played more than once"), playCount]];
+        }
 
-            // Now update the UI based on the updated play count
-            if (!playCount || playCount.intValue <= 1) {
-                [self.playCountLabel setStringValue:NSLocalizedString(@"Played 1 time", @"Play count label when played at least once")];
-            } else {
-                [self.playCountLabel setStringValue:[NSString stringWithFormat:NSLocalizedString(@"Played %@ times", @"Play count label when played more than once"), playCount]];
-            }
-        });
         // Call generateNowPlayingPage to update the “Now Playing” webpage
-        [self generateNowPlayingPage];
-    });
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            [self generateNowPlayingPage];
+        });
+    };
+
+    if ([NSThread isMainThread]) {
+        updateBlock();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), updateBlock);
+    }
 }
 
 - (void)loadTrackPlayCounts {
@@ -2237,8 +2332,6 @@ CoreAudioPlaybackState playbackState;
 // Add Ogg Opus support
 - (void)handleOpusPlayback:(NSURL *)trackURL {
     [self startBs2bIfNeeded];
-    // Ensure the current track maps to its original counterpart
-    NSURL *originalTrackURL = self.shuffledToOriginalMap[self.currentTrackURL] ?: self.currentTrackURL;
 
     // Step 1: Clean up previous playback if necessary
     [self terminateOpusPlayback];
@@ -2406,17 +2499,10 @@ CoreAudioPlaybackState playbackState;
     // Dispatch to the main thread to clear the play count label immediately
     dispatch_async(dispatch_get_main_queue(), updateLabelBlock);
 
-    // Create a 5-second delay using dispatch_after
-    if (self.isRepeatModeActive) {
-        // Only execute this block if repeat mode is active
-        if (originalTrackURL) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [self incrementPlayCountForTrack:originalTrackURL];
-                [self updatePlayCountLabelForTrack:originalTrackURL];
-            });
-        }
-    }
-
+    // A contagem é tratada pelo acompanhamento comum, armado por -playAudio e por
+    // -playNextTrack. Aqui havia um dispatch_after que incrementava directamente em
+    // modo de repetição: não era cancelável ao avançar de faixa e, como o caminho
+    // comum também contava, a mesma reprodução era contada duas vezes.
 }
 
 // Add this method to update the progress bar based on Opus playback progress
@@ -2506,6 +2592,9 @@ CoreAudioPlaybackState playbackState;
 
     // Check if repeat mode is active, replay the current track if it is
     if (self.isRepeatModeActive) {
+        // A faixa chegou ao fim: a repetição é uma reprodução nova e deve contar
+        // outra vez, ao contrário de uma simples retoma.
+        [self resetPlayCountTracking];
         [self playAudio];  // Replay the same track
     } else {
     // Otherwise, move to the next track
@@ -3283,21 +3372,16 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
                                                                            repeats:YES];
             }
 
-            // Schedule play count increment
-            dispatch_time_t delay = dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC);
-            dispatch_after(delay, dispatch_get_main_queue(), ^{
-                dispatch_block_t clearPlayCount = ^{
-                    [self.playCountLabel setStringValue:@""]; // Clear the tally on display
-                };
-
-                // Dispatch the block asynchronously to the main queue
-                dispatch_async(dispatch_get_main_queue(), clearPlayCount);
-
-                dispatch_block_t updatePlayCountBlock = ^{
-                    [self schedulePlayCountIncrementForTrack:nextTrackURL];
-                };
-                dispatch_async(dispatch_get_main_queue(), updatePlayCountBlock);
-            });
+            // Schedule play count increment.
+            // Isto tem de ser feito já, e não dentro de um dispatch_after: um atraso
+            // aqui deixava a faixa anterior a ser armada depois de já se ter mudado
+            // de música, contando-a mesmo tendo-se avançado, e roubando o
+            // temporizador à faixa nova.
+            dispatch_block_t updatePlayCountBlock = ^{
+                [self.playCountLabel setStringValue:@""]; // Clear the tally on display
+                [self schedulePlayCountIncrementForTrack:nextTrackURL];
+            };
+            dispatch_async(dispatch_get_main_queue(), updatePlayCountBlock);
 
             // Force UI updates
             dispatch_block_t forceUIUpdateBlock = ^{
@@ -3472,11 +3556,10 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     NSLog(@"Playing track URL: %@", trackURL.absoluteString);
     #endif
 
-    // Cancel any previous play count increment timer
-    if (self.playCountTimer) {
-        [self.playCountTimer invalidate];
-        self.playCountTimer = nil;
-    }
+    // Suspender o temporizador anterior sem perder o tempo já decorrido. Invalidá-lo
+    // à mão aqui deitava fora essa contabilidade, e -schedulePlayCountIncrementForTrack:
+    // logo a seguir decide se isto é faixa nova ou retoma.
+    [self suspendPlayCountTracking];
 
     // Clear the play count display on the main thread
     dispatch_block_t clearPlayCount = ^{
@@ -4631,30 +4714,23 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
             dispatch_async(dispatch_get_main_queue(), clearMetadataBlock);
         }
 
-        // Increment the play count and update the label
-        NSURL *originalTrackURL = self.shuffledToOriginalMap[self.currentTrackURL] ?: self.currentTrackURL;
-
         // Move to the next track or repeat the current one
         if (self.isRepeatModeActive) {
             #ifdef DEBUG
             NSLog(@"Repeat mode is active. Replaying the current track.");
             #endif
+            // A faixa terminou: a repetição conta como reprodução nova.
+            [self resetPlayCountTracking];
             [self playAudio];
-            
-            // Clear the play count label
+
+            // Clear the play count label. O rótulo volta a ser preenchido pelo
+            // acompanhamento da contagem, quando esta reprodução contar.
             dispatch_block_t updateLabelBlock = ^{
                 [self.playCountLabel setStringValue:@""];
             };
 
             // Dispatch to the main thread to clear the play count label immediately
             dispatch_async(dispatch_get_main_queue(), updateLabelBlock);
-
-            // Delay the label update by 5 seconds
-            dispatch_time_t delay = dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC);
-            dispatch_after(delay, dispatch_get_main_queue(), ^{
-                // Update the play count label after 5 seconds
-                [self updatePlayCountLabelForTrack:originalTrackURL];
-            });
         } else {
             #ifdef DEBUG
             NSLog(@"Playing next track.");
@@ -5801,11 +5877,11 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
         [self.progressBar setDoubleValue:0.0];
     });
 
-    // Invalidate the play count timer
-    if (self.playCountTimer) {
-        [self.playCountTimer invalidate];
-        self.playCountTimer = nil;
-    }
+    // Suspender — e não descartar — o acompanhamento da contagem. -playAudio chama
+    // -stopAudio antes de arrancar, incluindo quando se carrega em Play para
+    // retomar a mesma faixa; se aqui se esquecesse a faixa acompanhada, essa retoma
+    // parecia uma reprodução nova e voltava a contar.
+    [self suspendPlayCountTracking];
 
     // Clear the play count label
     dispatch_block_t updateLabelBlock = ^{
@@ -5850,12 +5926,18 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
             #endif
         }
 
+        // Suspender a contagem: o prazo conta audição, não tempo de relógio.
+        [self suspendPlayCountTracking];
+
         // Update button appearance to indicate it's paused
         [self updatePauseButtonAppearance:YES];
 
     } else if (self.audioPlayer.isPlaying) {
         // Handle AVAudioPlayer pause
         [self.audioPlayer pause];
+
+        // Suspender a contagem enquanto está em pausa
+        [self suspendPlayCountTracking];
 
         // Invalidate the progress update timer
         if (self.progressUpdateTimer) {
@@ -5883,6 +5965,9 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
             #ifdef DEBUG
             NSLog(@"WAVPack audio resumed.");
             #endif
+            // Retomar a contagem com o tempo que faltava, sem voltar a contar
+            [self resumePlayCountTracking];
+
             // Update button appearance to indicate it's playing
             [self updatePauseButtonAppearance:NO];
 
@@ -5900,6 +5985,9 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
             #ifdef DEBUG
             NSLog(@"Opus audio resumed.");
             #endif
+            // Retomar a contagem com o tempo que faltava, sem voltar a contar
+            [self resumePlayCountTracking];
+
             // Update button appearance to indicate it's playing
             [self updatePauseButtonAppearance:NO];
 
@@ -5916,6 +6004,9 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
             #ifdef DEBUG
             NSLog(@"AudioPlayer resumed.");
             #endif
+            // Retomar a contagem com o tempo que faltava, sem voltar a contar
+            [self resumePlayCountTracking];
+
             // Update button appearance to indicate it's playing
             [self updatePauseButtonAppearance:NO];
         }
