@@ -207,7 +207,11 @@ static WavpackStreamReader memoryReader = {
 - (void)suspendPlayCountTracking;
 - (void)resumePlayCountTracking;
 - (void)resetPlayCountTracking;
+- (void)refreshPlayCountLabel;
 - (void)comboBoxSelectionChanged:(NSComboBox *)comboBox;
+- (void)playButtonPressed;
+- (BOOL)resumePlayback;
+- (void)updatePauseButtonAppearance:(BOOL)isActive;
 
 @property (nonatomic, strong) NSImageView *coverArtView;
 @property (nonatomic, strong) NSTextField *artistLabel;
@@ -270,6 +274,9 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, assign) BOOL playCountAlreadyCounted; // já contou nesta reprodução?
 @property (nonatomic, strong) NSDate *playCountDeadline;    // instante em que deve contar
 @property (nonatomic, assign) NSTimeInterval playCountRemaining; // tempo em falta, enquanto suspenso
+// Reprodução suspensa pelo botão ⏸️. É o estado que dá a selecção verde ao botão e
+// que permite ao botão ▶️ retomar onde ficou, em vez de recomeçar a faixa.
+@property (nonatomic, assign) BOOL isPlaybackPaused;
 @property (nonatomic, strong) NSURL *currentTrackURL; // To keep track of the current playing track
 @property (nonatomic, strong) NSMutableDictionary<NSURL *, NSURL *> *shuffledToOriginalMap;
 
@@ -2023,9 +2030,14 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
     
     // Save play count changes
     [self saveTrackPlayCounts];
-    
+
     // Always update the play count label, even if repeat is toggled off
-    [self updatePlayCountLabelForTrack:trackURL];
+    [self refreshPlayCountLabel];
+
+    // Update the “Now Playing” webpage with the new tally
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        [self generateNowPlayingPage];
+    });
 }
 
 // Ponto de entrada usado por quem inicia reprodução. Não força uma contagem nova:
@@ -2059,9 +2071,7 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
 
             // Repor o rótulo: quem chamou pode tê-lo limpado ao reiniciar a
             // reprodução, e esta faixa já tem a contagem feita.
-            if (self.playCountAlreadyCounted) {
-                [self updatePlayCountLabelForTrack:originalTrackURL];
-            }
+            [self refreshPlayCountLabel];
             return;
         }
 
@@ -2070,6 +2080,9 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
         self.playCountTrackPath = trackPath;
         self.playCountRemaining = kPlayCountThreshold;
         [self resumePlayCountTracking];
+
+        // Faixa nova ainda não contada: o rótulo fica vazio até o prazo terminar.
+        [self refreshPlayCountLabel];
     };
 
     // Guarantee the timer is always created on the main thread
@@ -2121,19 +2134,21 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
     self.playCountRemaining = kPlayCountThreshold;
 }
 
-- (void)updatePlayCountLabelForTrack:(NSURL *)trackURL {
-    // Map the shuffled track URL to the original if necessary
-    NSURL *originalTrackURL = self.shuffledToOriginalMap[trackURL] ?: trackURL;
-    NSString *trackPath = originalTrackURL.path;
-
+// O rótulo é sempre derivado do estado do acompanhamento: mostra a contagem da
+// faixa acompanhada, e só depois de esta reprodução já ter contado.
+//
+// Por ser derivado, pode ser chamado em qualquer altura — ao pausar, ao retomar, ao
+// reiniciar o descodificador — sem apagar o que já lá estava. É isso que garante
+// que o texto, uma vez visível, se mantém enquanto a faixa estiver carregada:
+// antes, cada sítio limpava o rótulo à mão com um dispatch_async, e essas limpezas
+// chegavam a correr *depois* de o texto ter sido reposto, deixando-o vazio.
+- (void)refreshPlayCountLabel {
     dispatch_block_t updateBlock = ^{
-        // Não escrever no rótulo se entretanto se passou a acompanhar outra faixa:
-        // caso contrário mostrava-se a contagem de uma música que já não está a tocar.
-        if (self.playCountTrackPath.length > 0 && ![self.playCountTrackPath isEqualToString:trackPath]) {
-            #ifdef DEBUG
-            NSLog(@"Rótulo de contagem ignorado para %@ (a acompanhar %@)",
-                  trackPath.lastPathComponent, self.playCountTrackPath.lastPathComponent);
-            #endif
+        NSString *trackPath = self.playCountTrackPath;
+
+        // Sem faixa acompanhada, ou reprodução ainda por contar: nada a mostrar.
+        if (trackPath.length == 0 || !self.playCountAlreadyCounted) {
+            [self.playCountLabel setStringValue:@""];
             return;
         }
 
@@ -2147,11 +2162,6 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
         } else {
             [self.playCountLabel setStringValue:[NSString stringWithFormat:NSLocalizedString(@"Played %@ times", @"Play count label when played more than once"), playCount]];
         }
-
-        // Call generateNowPlayingPage to update the “Now Playing” webpage
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            [self generateNowPlayingPage];
-        });
     };
 
     if ([NSThread isMainThread]) {
@@ -2491,13 +2501,9 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
                                                               userInfo:nil
                                                                repeats:YES];
     // Step 12: Count updates
-    // Clear the play count label
-    dispatch_block_t updateLabelBlock = ^{
-        [self.playCountLabel setStringValue:@""];
-    };
-
-    // Dispatch to the main thread to clear the play count label immediately
-    dispatch_async(dispatch_get_main_queue(), updateLabelBlock);
+    // O rótulo segue o estado do acompanhamento: numa faixa nova fica vazio, numa
+    // retoma mantém a contagem que já estava visível.
+    [self refreshPlayCountLabel];
 
     // A contagem é tratada pelo acompanhamento comum, armado por -playAudio e por
     // -playNextTrack. Aqui havia um dispatch_after que incrementava directamente em
@@ -3057,12 +3063,10 @@ static NSData *gWvKeptData = nil;
                                                                        repeats:YES];
         });
     // Now using the common scheduler
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self.playCountLabel setStringValue:@""];
-        });
         if (originalTrackURL) {
             [self schedulePlayCountIncrementForTrack:originalTrackURL];
         }
+        [self refreshPlayCountLabel];
 }
 
 
@@ -3378,8 +3382,8 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
             // de música, contando-a mesmo tendo-se avançado, e roubando o
             // temporizador à faixa nova.
             dispatch_block_t updatePlayCountBlock = ^{
-                [self.playCountLabel setStringValue:@""]; // Clear the tally on display
                 [self schedulePlayCountIncrementForTrack:nextTrackURL];
+                [self refreshPlayCountLabel];
             };
             dispatch_async(dispatch_get_main_queue(), updatePlayCountBlock);
 
@@ -3515,6 +3519,18 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 }
 
 - (void)playAudio {
+    // Arrancar uma faixa nunca deixa o tocador em pausa: a selecção verde sai,
+    // venha o pedido do botão ▶️, da lista de músicas ou do fim da faixa anterior.
+    dispatch_block_t clearPauseSelection = ^{
+        self.isPlaybackPaused = NO;
+        [self updatePauseButtonAppearance:NO];
+    };
+    if ([NSThread isMainThread]) {
+        clearPauseSelection();
+    } else {
+        dispatch_async(dispatch_get_main_queue(), clearPauseSelection);
+    }
+
     [self startBs2bIfNeeded];
     //self.replayGainValue = 0.0f;
 
@@ -3561,19 +3577,15 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     // logo a seguir decide se isto é faixa nova ou retoma.
     [self suspendPlayCountTracking];
 
-    // Clear the play count display on the main thread
-    dispatch_block_t clearPlayCount = ^{
-        [self.playCountLabel setStringValue:@""]; // Clear the tally on display
-    };
-
-    // Dispatch the block asynchronously to the main queue
-    dispatch_async(dispatch_get_main_queue(), clearPlayCount);
-    
     // Update the current track URL
     self.currentTrackURL = trackURL;
 
     // Schedule the play count increment for the original track URL
     [self schedulePlayCountIncrementForTrack:originalTrackURL];
+
+    // Só depois de o acompanhamento estar armado é que o rótulo é reposto: numa
+    // faixa nova fica vazio, numa retoma da mesma faixa mantém a contagem.
+    [self refreshPlayCountLabel];
 
     // Update the combo box to reflect the current track being played
     NSInteger index = [self.audioFiles indexOfObject:self.currentTrackURL];
@@ -3919,7 +3931,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     self.playButton.alignment = NSTextAlignmentCenter;
     self.playButton.title = @"▶️";
     self.playButton.target = self;
-    self.playButton.action = @selector(playAudio);
+    self.playButton.action = @selector(playButtonPressed);
     [self.view addSubview:self.playButton];
 
     // ⏸️
@@ -4723,14 +4735,9 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
             [self resetPlayCountTracking];
             [self playAudio];
 
-            // Clear the play count label. O rótulo volta a ser preenchido pelo
-            // acompanhamento da contagem, quando esta reprodução contar.
-            dispatch_block_t updateLabelBlock = ^{
-                [self.playCountLabel setStringValue:@""];
-            };
-
-            // Dispatch to the main thread to clear the play count label immediately
-            dispatch_async(dispatch_get_main_queue(), updateLabelBlock);
+            // O rótulo volta a ser preenchido pelo acompanhamento da contagem,
+            // quando esta nova reprodução contar.
+            [self refreshPlayCountLabel];
         } else {
             #ifdef DEBUG
             NSLog(@"Playing next track.");
@@ -5883,14 +5890,15 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     // parecia uma reprodução nova e voltava a contar.
     [self suspendPlayCountTracking];
 
-    // Clear the play count label
-    dispatch_block_t updateLabelBlock = ^{
-        [self.playCountLabel setStringValue:@""];
-    };
+    // O rótulo acompanha esse estado: a faixa continua carregada, por isso a
+    // contagem que já estivesse visível mantém-se.
+    [self refreshPlayCountLabel];
 
-    // Now dispatch it on the main thread
-    dispatch_async(dispatch_get_main_queue(), updateLabelBlock);
-
+    // Parar não é pausar: a selecção verde do botão de pausa tem de sair.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        self.isPlaybackPaused = NO;
+        [self updatePauseButtonAppearance:NO];
+    });
 }
 
 // Also update `pauseAudio` to manage the timer appropriately
@@ -5930,6 +5938,7 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
         [self suspendPlayCountTracking];
 
         // Update button appearance to indicate it's paused
+        self.isPlaybackPaused = YES;
         [self updatePauseButtonAppearance:YES];
 
     } else if (self.audioPlayer.isPlaying) {
@@ -5948,69 +5957,95 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
         NSLog(@"AudioPlayer paused.");
         #endif
         // Update button appearance to indicate it's paused
+        self.isPlaybackPaused = YES;
         [self updatePauseButtonAppearance:YES];
 
     } else {
-        // Resume playback for WAVPack
-        if (playbackState.wpc && playbackState.audioQueue) {
-            AudioQueueStart(playbackState.audioQueue, NULL); // Resume the AudioQueue
-            playbackState.isPlaying = YES;
-
-            // Restart the progress update timer
-            self.progressUpdateTimer = [NSTimer scheduledTimerWithTimeInterval:1.0
-                                                                        target:self
-                                                                      selector:@selector(updateProgressBar)
-                                                                      userInfo:nil
-                                                                       repeats:YES];
-            #ifdef DEBUG
-            NSLog(@"WAVPack audio resumed.");
-            #endif
-            // Retomar a contagem com o tempo que faltava, sem voltar a contar
-            [self resumePlayCountTracking];
-
-            // Update button appearance to indicate it's playing
-            [self updatePauseButtonAppearance:NO];
-
-        } else if (playbackState.opusFile && playbackState.audioQueue) {
-            // Resume playback for Opus
-            AudioQueueStart(playbackState.audioQueue, NULL); // Resume the Opus AudioQueue
-            playbackState.isPlaying = YES;
-
-            // Restart the progress update timer
-            self.progressUpdateTimer = [NSTimer scheduledTimerWithTimeInterval:1.0
-                                                                        target:self
-                                                                      selector:@selector(updateProgressBar)
-                                                                      userInfo:nil
-                                                                       repeats:YES];
-            #ifdef DEBUG
-            NSLog(@"Opus audio resumed.");
-            #endif
-            // Retomar a contagem com o tempo que faltava, sem voltar a contar
-            [self resumePlayCountTracking];
-
-            // Update button appearance to indicate it's playing
-            [self updatePauseButtonAppearance:NO];
-
-        } else if (self.audioPlayer) {
-            // Resume AVAudioPlayer playback
-            [self.audioPlayer play];
-
-            // Restart the progress update timer
-            self.progressUpdateTimer = [NSTimer scheduledTimerWithTimeInterval:1.0
-                                                                        target:self
-                                                                      selector:@selector(updateProgressBar)
-                                                                      userInfo:nil
-                                                                       repeats:YES];
-            #ifdef DEBUG
-            NSLog(@"AudioPlayer resumed.");
-            #endif
-            // Retomar a contagem com o tempo que faltava, sem voltar a contar
-            [self resumePlayCountTracking];
-
-            // Update button appearance to indicate it's playing
-            [self updatePauseButtonAppearance:NO];
-        }
+        // Já estava em pausa: o próprio botão ⏸️ retoma.
+        [self resumePlayback];
     }
+}
+
+// O botão ▶️. Se a reprodução está apenas em pausa, retoma no ponto onde ficou —
+// tal como o botão ⏸️ — em vez de recomeçar a faixa; caso contrário arranca a
+// faixa seleccionada. Em qualquer dos casos a selecção verde do botão de pausa
+// sai, porque em nenhum deles se fica em pausa.
+- (void)playButtonPressed {
+    if (self.isPlaybackPaused) {
+        [self resumePlayback];
+    } else {
+        [self playAudio];
+    }
+}
+
+// Retoma a reprodução suspensa, no formato que estiver carregado. Devolve NO se
+// não houver nada para retomar (nesse caso a pausa deixa de fazer sentido e a
+// selecção do botão sai à mesma).
+- (BOOL)resumePlayback {
+    BOOL resumed = NO;
+
+    // Resume playback for WAVPack
+    if (playbackState.wpc && playbackState.audioQueue) {
+        AudioQueueStart(playbackState.audioQueue, NULL); // Resume the AudioQueue
+        playbackState.isPlaying = YES;
+
+        // Restart the progress update timer
+        self.progressUpdateTimer = [NSTimer scheduledTimerWithTimeInterval:1.0
+                                                                    target:self
+                                                                  selector:@selector(updateProgressBar)
+                                                                  userInfo:nil
+                                                                   repeats:YES];
+        #ifdef DEBUG
+        NSLog(@"WAVPack audio resumed.");
+        #endif
+        resumed = YES;
+
+    } else if (playbackState.opusFile && playbackState.audioQueue) {
+        // Resume playback for Opus
+        AudioQueueStart(playbackState.audioQueue, NULL); // Resume the Opus AudioQueue
+        playbackState.isPlaying = YES;
+
+        // Restart the progress update timer
+        self.progressUpdateTimer = [NSTimer scheduledTimerWithTimeInterval:1.0
+                                                                    target:self
+                                                                  selector:@selector(updateProgressBar)
+                                                                  userInfo:nil
+                                                                   repeats:YES];
+        #ifdef DEBUG
+        NSLog(@"Opus audio resumed.");
+        #endif
+        resumed = YES;
+
+    } else if (self.audioPlayer) {
+        // Resume AVAudioPlayer playback
+        [self.audioPlayer play];
+
+        // Restart the progress update timer
+        self.progressUpdateTimer = [NSTimer scheduledTimerWithTimeInterval:1.0
+                                                                    target:self
+                                                                  selector:@selector(updateProgressBar)
+                                                                  userInfo:nil
+                                                                   repeats:YES];
+        #ifdef DEBUG
+        NSLog(@"AudioPlayer resumed.");
+        #endif
+        resumed = YES;
+    }
+
+    if (resumed) {
+        // Retomar a contagem com o tempo que faltava, sem voltar a contar
+        [self resumePlayCountTracking];
+
+        // A contagem já feita continua visível; a que faltava retoma o prazo.
+        [self refreshPlayCountLabel];
+    }
+
+    // Quer se tenha retomado, quer não houvesse nada para retomar, já não se está
+    // em pausa: desligar a selecção verde do botão.
+    self.isPlaybackPaused = NO;
+    [self updatePauseButtonAppearance:NO];
+
+    return resumed;
 }
 
 - (void)extractAndDisplayMetadataFromURL:(NSURL *)url {
