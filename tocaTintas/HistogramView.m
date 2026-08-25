@@ -126,15 +126,23 @@ SOFTWARE.
 }
 
 - (void)updateHistogramWithLeftChannel:(NSArray<NSNumber *> *)leftChannel rightChannel:(NSArray<NSNumber *> *)rightChannel {
-    self.leftChannelValues = leftChannel;
-    self.rightChannelValues = rightChannel;
-
+    // Chamado a partir da fila que lê o FIFO. As propriedades só são tocadas no
+    // thread principal, para não competirem com o desenho.
     dispatch_async(dispatch_get_main_queue(), ^{
+        self.leftChannelValues = leftChannel;
+        self.rightChannelValues = rightChannel;
         [self updateBars];
     });
 }
 
 - (void)updateBars {
+    // Sem isto, cada atribuição de -path dispara a animação implícita de 0,25 s do
+    // CoreAnimation. Com 30 barras a mudar 20 vezes por segundo ficam sempre 30
+    // animações a interpolar em simultâneo — é a maior fatia do CPU e é o que dá
+    // às barras aquele arrastamento elástico.
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+
     CGFloat totalBars = self.leftChannelValues.count + self.rightChannelValues.count;
     CGFloat columnWidth = self.bounds.size.width / totalBars;
     CGFloat maxHeight = self.bounds.size.height;
@@ -142,6 +150,7 @@ SOFTWARE.
     // Ensure leftBarLayers has enough layers
     while (self.leftBarLayers.count < self.leftChannelValues.count) {
         CAShapeLayer *barLayer = [CAShapeLayer layer];
+        barLayer.actions = @{@"path": [NSNull null]};   // nunca animar as barras
         barLayer.fillColor = [[NSColor colorWithCalibratedRed:0.2 green:0.2 blue:0.2 alpha:1.0] CGColor];
         [self.layer addSublayer:barLayer];
         [self.leftBarLayers addObject:barLayer];
@@ -162,6 +171,7 @@ SOFTWARE.
     // Ensure rightBarLayers has enough layers
     while (self.rightBarLayers.count < self.rightChannelValues.count) {
         CAShapeLayer *barLayer = [CAShapeLayer layer];
+        barLayer.actions = @{@"path": [NSNull null]};   // nunca animar as barras
         barLayer.fillColor = [[NSColor colorWithCalibratedRed:0.5 green:0.5 blue:0.5 alpha:1.0] CGColor];
         [self.layer addSublayer:barLayer];
         [self.rightBarLayers addObject:barLayer];
@@ -195,6 +205,8 @@ SOFTWARE.
         }
         [self.rightBarLayers removeObjectsInRange:NSMakeRange(self.rightChannelValues.count, self.rightBarLayers.count - self.rightChannelValues.count)];
     }
+
+    [CATransaction commit];
 }
 
 @end

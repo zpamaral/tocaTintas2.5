@@ -1258,39 +1258,35 @@ CoreAudioPlaybackState playbackState;
     healthCheckTimer = [NSTimer scheduledTimerWithTimeInterval:30.0
                                                         repeats:YES
                                                           block:^(NSTimer * _Nonnull timer) {
-        // Inline health check logic
-        #ifdef DEBUG
-        NSLog(@"Performing health check for cava…");
-        #endif
-        char *dynamicBuffer = (char *)malloc(128); // Dynamically allocate buffer
-        if (!dynamicBuffer) {
+        // O popen faz fork+exec: corrido no thread principal, bloqueia o runloop
+        // uns milissegundos de 30 em 30 segundos, o que se vê como um solavanco
+        // periódico no histograma. Vai para uma fila de fundo.
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             #ifdef DEBUG
-            NSLog(@"Failed to allocate memory for buffer.");
+            NSLog(@"Performing health check for cava…");
             #endif
-            return;
-        }
-        FILE *innerPipe = popen([checkCommand UTF8String], "r");
-        if (!innerPipe) {
-            #ifdef DEBUG
-            NSLog(@"Failed to check cava status during health check.");
-            #endif
-            free(dynamicBuffer); // Free allocated memory
-            return;
-        }
-        BOOL isRunning = fgets(dynamicBuffer, 128, innerPipe) != NULL;
-        pclose(innerPipe);
-        free(dynamicBuffer); // Free allocated memory
+            char healthBuffer[128];
+            FILE *innerPipe = popen([checkCommand UTF8String], "r");
+            if (!innerPipe) {
+                #ifdef DEBUG
+                NSLog(@"Failed to check cava status during health check.");
+                #endif
+                return;
+            }
+            BOOL isRunning = fgets(healthBuffer, sizeof(healthBuffer), innerPipe) != NULL;
+            pclose(innerPipe);
 
-        if (!isRunning) {
-            #ifdef DEBUG
-            NSLog(@"Cava is not running. Restarting…");
-            #endif
-            [self startCava];
-        } else {
-            #ifdef DEBUG
-            NSLog(@"Cava is running normally.");
-            #endif
-        }
+            if (!isRunning) {
+                #ifdef DEBUG
+                NSLog(@"Cava is not running. Restarting…");
+                #endif
+                [self startCava];
+            } else {
+                #ifdef DEBUG
+                NSLog(@"Cava is running normally.");
+                #endif
+            }
+        });
     }];
 }
 
@@ -4526,10 +4522,23 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     #endif
 }
 
+// Formato do fluxo escrito pelo cava (output method = raw, data_format = binary,
+// bit_format = 16bit, channels = stereo, bars = 30 no config_fifo): cada trama são
+// exactamente 30 uint16 nativos — os primeiros 15 do canal esquerdo, os últimos 15
+// do direito — sem qualquer delimitador entre tramas. Como o cava escreve barra a
+// barra (write() de 2 bytes), o FIFO pode ser lido a meio de uma trama; é por isso
+// que a leitura tem de manter o alinhamento entre chamadas, senão as barras aparecem
+// rodadas (o espectro «desliza» para a esquerda ou para a direita).
+enum {
+    kCavaBars           = 30,
+    kCavaBarsPerChannel = kCavaBars / 2,
+    kCavaFrameBytes     = kCavaBars * 2
+};
+
 // Read data from the FIFO file and update the histogram
 - (void)readFifoDirectly {
     NSString *fifoPath = @"/var/tmp/cava_fifo";
-    
+
     int fileDescriptor = open([fifoPath UTF8String], O_RDONLY | O_NONBLOCK);
     if (fileDescriptor < 0) {
         perror("[FIFO] Failed to open FIFO file");
@@ -4542,70 +4551,105 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     NSLog(@"[FIFO] FIFO file opened successfully.");
     #endif
     dispatch_queue_t fifoQueue = dispatch_queue_create("com.example.cavahistogram.fifoqueue", DISPATCH_QUEUE_SERIAL);
-    
+
     dispatch_async(fifoQueue, ^{
-        while (1) {
-            uint16_t buffer[31];  // Reading as 16-bit unsigned integers
-            ssize_t size = read(fileDescriptor, buffer, sizeof(buffer));
+        uint8_t chunk[kCavaFrameBytes * 64];   // bloco de leitura
+        uint8_t partial[kCavaFrameBytes];      // trama incompleta guardada entre leituras
+        size_t partialCount = 0;
+        uint16_t frame[kCavaBars];             // última trama completa lida
+        NSTimeInterval lastUpdateTime = 0;
 
-            if (size > 0) {
-                #ifdef DEBUG
-                NSLog(@"[FIFO] Data read from FIFO: %ld bytes", size);
-                #endif
-                if (size == sizeof(buffer)) {
-                    NSMutableArray<NSNumber *> *parsedLeftValues = [NSMutableArray array];
-                    NSMutableArray<NSNumber *> *parsedRightValues = [NSMutableArray array];
-                    
-                    for (NSUInteger i = 0; i < 15; i++) {
-                        uint16_t rawValue = buffer[i];
-                        uint16_t scaledValue = (rawValue * 1000) / 65535;
-                        [parsedLeftValues addObject:@(scaledValue)];
-                    }
-                    for (NSUInteger i = 15; i < 30; i++) {
-                        uint16_t rawValue = buffer[i];
-                        uint16_t scaledValue = (rawValue * 1000) / 65535;
-                        [parsedRightValues addObject:@(scaledValue)];
-                    }
+        while (1) { @autoreleasepool {
+            ssize_t size = read(fileDescriptor, chunk, sizeof(chunk));
 
-                    // Debounce to prevent jittery updates
-                    static NSTimeInterval lastUpdateTime = 0;
-                    NSTimeInterval currentTime = [NSDate timeIntervalSinceReferenceDate];
-                    if (currentTime - lastUpdateTime > 0.05) {  // Update every 50ms
-                        dispatch_async(dispatch_get_main_queue(), ^{
-                            HistogramView *histogramView = (HistogramView *)self.histogramView;
-                            [histogramView updateHistogramWithLeftChannel:parsedLeftValues rightChannel:parsedRightValues];
-                            [histogramView setNeedsDisplay:YES];
-                            [histogramView displayIfNeeded];
-                        });
-                        lastUpdateTime = currentTime;
-                    }
-                } else {
-                    #ifdef DEBUG
-                    NSLog(@"[FIFO] Warning: Incomplete data chunk received.");
-                    #endif
+            if (size < 0) {
+                if (errno == EINTR) {
+                    continue;
                 }
-            } else if (size == 0) {
-                #ifdef DEBUG
-                NSLog(@"[FIFO] No data available, sleeping…");
-                #endif
-                [NSThread sleepForTimeInterval:0.1];
-            } else {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
                     #ifdef DEBUG
                     NSLog(@"[FIFO] No data available yet, continuing to read…");
                     #endif
-                    [NSThread sleepForTimeInterval:0.1];
+                    // Este intervalo não pode ser igual ao do debounce: com os dois a
+                    // 50 ms entravam em batimento, e de vez em quando a trama chegava
+                    // uns microssegundos cedo de mais, era descartada, e a imagem
+                    // ficava parada 100 ms. A 20 ms acordamos a meio do passo de
+                    // 40 ms, portanto nenhuma actualização se perde por arredondamento.
+                    [NSThread sleepForTimeInterval:0.02];
                     continue;
-                } else {
-                    perror("[FIFO] Failed to read from FIFO");
-                    #ifdef DEBUG
-                    NSLog(@"[FIFO] Failed to read from FIFO");
-                    #endif
-                    break;
+                }
+                perror("[FIFO] Failed to read from FIFO");
+                #ifdef DEBUG
+                NSLog(@"[FIFO] Failed to read from FIFO");
+                #endif
+                break;
+            }
+
+            if (size == 0) {
+                // O cava fechou o FIFO (por exemplo, foi reiniciado). O fluxo
+                // recomeça numa fronteira de trama, portanto deita-se fora o resto.
+                #ifdef DEBUG
+                NSLog(@"[FIFO] No data available, sleeping…");
+                #endif
+                partialCount = 0;
+                [NSThread sleepForTimeInterval:0.1];
+                continue;
+            }
+
+            #ifdef DEBUG
+            NSLog(@"[FIFO] Data read from FIFO: %ld bytes", size);
+            #endif
+
+            // Consumir só tramas completas e guardar o resto para a leitura
+            // seguinte: é isto que mantém a correspondência barra/contentor.
+            const uint8_t *cursor = chunk;
+            size_t remaining = (size_t)size;
+            BOOL haveFrame = NO;
+
+            while (remaining > 0) {
+                size_t take = MIN((size_t)kCavaFrameBytes - partialCount, remaining);
+                memcpy(partial + partialCount, cursor, take);
+                partialCount += take;
+                cursor += take;
+                remaining -= take;
+
+                if (partialCount == kCavaFrameBytes) {
+                    memcpy(frame, partial, kCavaFrameBytes);   // fica a mais recente
+                    partialCount = 0;
+                    haveFrame = YES;
                 }
             }
-        }
-        
+
+            if (!haveFrame) {
+                continue;   // ainda não chegou uma trama inteira
+            }
+
+            // Limitar as actualizações a ~25 por segundo. O limiar (35 ms) fica
+            // entre um e dois períodos de espera (20 ms), portanto o ritmo engata
+            // em «uma em cada duas» sem ficar dependente de arredondamentos.
+            NSTimeInterval currentTime = [NSDate timeIntervalSinceReferenceDate];
+            if (currentTime - lastUpdateTime < 0.035) {
+                continue;
+            }
+            lastUpdateTime = currentTime;
+
+            NSMutableArray<NSNumber *> *parsedLeftValues = [NSMutableArray arrayWithCapacity:kCavaBarsPerChannel];
+            NSMutableArray<NSNumber *> *parsedRightValues = [NSMutableArray arrayWithCapacity:kCavaBarsPerChannel];
+
+            for (NSUInteger i = 0; i < kCavaBarsPerChannel; i++) {
+                [parsedLeftValues addObject:@((frame[i] * 1000) / 65535)];
+            }
+            for (NSUInteger i = kCavaBarsPerChannel; i < kCavaBars; i++) {
+                [parsedRightValues addObject:@((frame[i] * 1000) / 65535)];
+            }
+
+            // As barras são CAShapeLayers: basta actualizar os paths. Forçar aqui um
+            // -setNeedsDisplay:/-displayIfNeeded redesenhava a view inteira 20 vezes
+            // por segundo só para repintar um fundo que nunca muda.
+            [(HistogramView *)self.histogramView updateHistogramWithLeftChannel:parsedLeftValues
+                                                                   rightChannel:parsedRightValues];
+        }}
+
         close(fileDescriptor);
     });
 }
@@ -4861,9 +4905,22 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 
 #pragma mark - Vigilância da pasta de músicas
 
-// Callback do FSEvents: qualquer alteração dentro da pasta de músicas, a qualquer
-// profundidade, marca a lista como suja e força uma releitura. É chamado na fila
-// principal (ver -startWatchingSongsDirectory).
+// Extensões que a biblioteca reconhece. Partilhado entre o filtro do FSEvents e
+// -loadAudioFiles, para que os dois não possam divergir.
+static NSSet<NSString *> *ZPSupportedAudioExtensions(void) {
+    static NSSet<NSString *> *extensions = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        extensions = [NSSet setWithObjects:@"mp3", @"m4a", @"wav", @"aac", @"flac", @"wv", @"opus", @"aiff", nil];
+    });
+    return extensions;
+}
+
+// Callback do FSEvents: chamado na fila principal (ver -startWatchingSongsDirectory).
+// Só as alterações que possam mexer na *lista* de faixas é que forçam uma releitura.
+// Reler a árvore custa centenas de milissegundos de thread principal, portanto vale
+// a pena olhar bem para os eventos antes de o fazer: um script a escrever um ficheiro
+// de somas MD5 dentro da pasta, artwork, .DS_Store ou logs não mudam nada para nós.
 static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
                                            void *clientCallBackInfo,
                                            size_t numEvents,
@@ -4872,6 +4929,57 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
                                            const FSEventStreamEventId eventIds[]) {
     ViewController *controller = (__bridge ViewController *)clientCallBackInfo;
     if (!controller || numEvents == 0) {
+        return;
+    }
+
+    NSArray<NSString *> *paths = (__bridge NSArray<NSString *> *)eventPaths;
+    NSSet<NSString *> *audioExtensions = ZPSupportedAudioExtensions();
+
+    // Estas obrigam a reler sem sequer olhar para os caminhos: perdemos eventos, a
+    // raiz mudou de sítio, ou o volume foi montado/desmontado.
+    const FSEventStreamEventFlags mustReloadFlags = kFSEventStreamEventFlagMustScanSubDirs |
+                                                    kFSEventStreamEventFlagRootChanged |
+                                                    kFSEventStreamEventFlagMount |
+                                                    kFSEventStreamEventFlagUnmount |
+                                                    kFSEventStreamEventFlagUserDropped |
+                                                    kFSEventStreamEventFlagKernelDropped;
+
+    // Só estas mexem na lista. Escrever dentro de um ficheiro que já existe, ou
+    // mudar-lhe metadados, atributos estendidos ou dono, deixa a lista igual.
+    const FSEventStreamEventFlags listChangingFlags = kFSEventStreamEventFlagItemCreated |
+                                                      kFSEventStreamEventFlagItemRemoved |
+                                                      kFSEventStreamEventFlagItemRenamed;
+
+    BOOL affectsLibrary = NO;
+    for (size_t i = 0; i < numEvents; i++) {
+        FSEventStreamEventFlags flags = eventFlags[i];
+
+        if (flags & mustReloadFlags) {
+            affectsLibrary = YES;
+            break;
+        }
+        if (!(flags & listChangingFlags)) {
+            continue;
+        }
+
+        if (flags & kFSEventStreamEventFlagItemIsDir) {
+            // Uma pasta de artista, álbum ou CD apareceu, desapareceu ou mudou de nome.
+            affectsLibrary = YES;
+            break;
+        }
+        if (flags & kFSEventStreamEventFlagItemIsFile) {
+            NSString *path = (i < paths.count) ? paths[i] : nil;
+            if (path && [audioExtensions containsObject:path.pathExtension.lowercaseString]) {
+                affectsLibrary = YES;
+                break;
+            }
+        }
+    }
+
+    if (!affectsLibrary) {
+        #ifdef DEBUG
+        NSLog(@"FSEvents: %zu alteração(ões) sem efeito na lista de faixas; ignorada(s).", numEvents);
+        #endif
         return;
     }
 
@@ -4884,10 +4992,14 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     // A releitura percorre a árvore toda na thread principal, por isso convém
     // esperar que a cópia (ou a extracção de um CD) assente antes de a fazer.
     // Cada evento adia a leitura; só a última geração agendada é que lê.
+    // O adiamento TEM de ser maior do que a latência do FSEventStream (2 s): com
+    // 1,5 s, uma cópia demorada — que entrega um lote de eventos de 2 em 2
+    // segundos — disparava uma releitura completa a cada lote, em vez de as
+    // agrupar todas numa só no fim.
     controller.pendingReloadGeneration = controller.pendingReloadGeneration + 1;
     NSUInteger generation = controller.pendingReloadGeneration;
 
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         if (generation != controller.pendingReloadGeneration) {
             return;   // chegaram mais alterações entretanto
@@ -4913,9 +5025,14 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     FSEventStreamContext context = {0, (__bridge void *)self, NULL, NULL, NULL};
     // kFSEventStreamCreateFlagWatchRoot avisa-nos se a própria pasta for movida,
     // renomeada, ou se o volume for desmontado e voltar a montar.
+    // kFSEventStreamCreateFlagFileEvents é o que faz chegar um evento por ficheiro,
+    // com as flags kFSEventStreamEventFlagItem*. Sem ela os caminhos entregues são
+    // de pastas e as flags de item vêm a zero — o filtro do callback não teria por
+    // onde decidir e teríamos de reler a árvore a cada alteração, fosse qual fosse.
     FSEventStreamCreateFlags flags = kFSEventStreamCreateFlagUseCFTypes |
                                      kFSEventStreamCreateFlagNoDefer |
-                                     kFSEventStreamCreateFlagWatchRoot;
+                                     kFSEventStreamCreateFlagWatchRoot |
+                                     kFSEventStreamCreateFlagFileEvents;
 
     FSEventStreamRef stream = FSEventStreamCreate(kCFAllocatorDefault,
                                                   &ZPSongsDirectoryEventsCallback,
@@ -5023,7 +5140,7 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     }];
 
     NSMutableArray<NSURL *> *foundAudioFiles = [NSMutableArray array];
-    NSSet *allowedExtensions = [NSSet setWithObjects:@"mp3", @"m4a", @"wav", @"aac", @"flac", @"wv", @"opus", @"aiff", nil];
+    NSSet<NSString *> *allowedExtensions = ZPSupportedAudioExtensions();
 
     // Filter and collect audio files
     for (NSURL *fileURL in enumerator) {
@@ -5042,54 +5159,50 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
         }
     }
 
-    // Sort the audio files by artist name, album name, CD number, and track name
-    NSArray<NSURL *> *sortedAudioFiles = [foundAudioFiles sortedArrayUsingComparator:^NSComparisonResult(NSURL *url1, NSURL *url2) {
-        // Get path components
-        NSArray<NSString *> *directoryComponents = directoryURL.pathComponents;
-        NSInteger baseIndex = directoryComponents.count;
+    // Ordenar por artista, álbum, número de CD e nome da faixa. As chaves são
+    // calculadas uma única vez por ficheiro: dentro do comparador custavam dois
+    // -pathComponents e duas extracções de número de CD por comparação, ou seja
+    // O(n log n) alocações. Com alguns milhares de faixas isso são segundos de
+    // thread principal bloqueada de cada vez que o FSEvents pede uma releitura —
+    // e é durante esses segundos que o histograma fica parado.
+    NSInteger baseIndex = directoryURL.pathComponents.count;
+    NSMutableArray<NSArray *> *decoratedFiles = [NSMutableArray arrayWithCapacity:foundAudioFiles.count];
+    for (NSURL *fileURL in foundAudioFiles) {
+        NSArray<NSString *> *components = fileURL.pathComponents;
+        NSString *artist = (components.count > baseIndex)     ? components[baseIndex]     : @"";
+        NSString *album  = (components.count > baseIndex + 1) ? components[baseIndex + 1] : @"";
+        NSString *cdDir  = (components.count > baseIndex + 2) ? components[baseIndex + 2] : @"";
+        [decoratedFiles addObject:@[fileURL,
+                                    artist,
+                                    album,
+                                    [self extractCDNumberFromString:cdDir],
+                                    fileURL.lastPathComponent]];
+    }
 
-        NSArray<NSString *> *pathComponents1 = url1.pathComponents;
-        NSArray<NSString *> *pathComponents2 = url2.pathComponents;
-
-        // Extract artist names
-        NSString *artist1 = (pathComponents1.count > baseIndex) ? pathComponents1[baseIndex] : @"";
-        NSString *artist2 = (pathComponents2.count > baseIndex) ? pathComponents2[baseIndex] : @"";
-
-        // Compare artist names
-        NSComparisonResult artistComparison = [artist1 compare:artist2 options:NSCaseInsensitiveSearch];
+    [decoratedFiles sortUsingComparator:^NSComparisonResult(NSArray *entry1, NSArray *entry2) {
+        NSComparisonResult artistComparison = [entry1[1] compare:entry2[1] options:NSCaseInsensitiveSearch];
         if (artistComparison != NSOrderedSame) {
             return artistComparison;
         }
 
-        // Extract album names
-        NSString *album1 = (pathComponents1.count > baseIndex + 1) ? pathComponents1[baseIndex + 1] : @"";
-        NSString *album2 = (pathComponents2.count > baseIndex + 1) ? pathComponents2[baseIndex + 1] : @"";
-
-        // Compare album names
-        NSComparisonResult albumComparison = [album1 compare:album2 options:NSCaseInsensitiveSearch];
+        NSComparisonResult albumComparison = [entry1[2] compare:entry2[2] options:NSCaseInsensitiveSearch];
         if (albumComparison != NSOrderedSame) {
             return albumComparison;
         }
 
-        // Extract CD directories (if any)
-        NSString *cd1 = (pathComponents1.count > baseIndex + 2) ? pathComponents1[baseIndex + 2] : @"";
-        NSString *cd2 = (pathComponents2.count > baseIndex + 2) ? pathComponents2[baseIndex + 2] : @"";
-
-        // Extract CD numbers
-        NSString *cdNumber1 = [self extractCDNumberFromString:cd1];
-        NSString *cdNumber2 = [self extractCDNumberFromString:cd2];
-
-        // Compare CD numbers numerically
-        NSComparisonResult cdComparison = [cdNumber1 compare:cdNumber2 options:NSNumericSearch];
+        NSComparisonResult cdComparison = [entry1[3] compare:entry2[3] options:NSNumericSearch];
         if (cdComparison != NSOrderedSame) {
             return cdComparison;
         }
 
-        // Compare track names numerically and case-insensitively
-        NSString *track1 = url1.lastPathComponent;
-        NSString *track2 = url2.lastPathComponent;
-        return [track1 compare:track2 options:NSCaseInsensitiveSearch | NSNumericSearch];
+        return [entry1[4] compare:entry2[4] options:NSCaseInsensitiveSearch | NSNumericSearch];
     }];
+
+    NSMutableArray<NSURL *> *sortedFiles = [NSMutableArray arrayWithCapacity:decoratedFiles.count];
+    for (NSArray *entry in decoratedFiles) {
+        [sortedFiles addObject:entry[0]];
+    }
+    NSArray<NSURL *> *sortedAudioFiles = sortedFiles;
 
     // Preserve the current track URL
     NSURL *currentTrackURL = nil;
@@ -5171,8 +5284,14 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
         return @"0";
     }
 
-    // Regular expression to match 'CD' followed by optional space(s) and a number
-    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^CD\\s*(\\d+)$" options:NSRegularExpressionCaseInsensitive error:nil];
+    // Compilar a expressão uma única vez: este método é chamado uma vez por pasta
+    // de CD durante a leitura da biblioteca, e compilar a regex de cada vez era
+    // uma das partes mais caras da releitura.
+    static NSRegularExpression *regex = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        regex = [NSRegularExpression regularExpressionWithPattern:@"^CD\\s*(\\d+)$" options:NSRegularExpressionCaseInsensitive error:nil];
+    });
     NSTextCheckingResult *match = [regex firstMatchInString:cdString options:0 range:NSMakeRange(0, cdString.length)];
 
     if (match && match.numberOfRanges >= 2) {
