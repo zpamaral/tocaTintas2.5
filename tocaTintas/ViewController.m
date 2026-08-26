@@ -212,6 +212,8 @@ static WavpackStreamReader memoryReader = {
 - (void)playButtonPressed;
 - (BOOL)resumePlayback;
 - (void)updatePauseButtonAppearance:(BOOL)isActive;
+- (BOOL)isPlaybackEngaged;
+- (NSInteger)randomShuffledStartIndex;
 
 @property (nonatomic, strong) NSImageView *coverArtView;
 @property (nonatomic, strong) NSTextField *artistLabel;
@@ -3560,7 +3562,19 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     }
 
     // Determine the track to play based on the current mode (shuffle or not)
-    NSURL *trackURL = self.isShuffleModeActive ? self.shuffledTracks[self.currentTrackIndex] : self.audioFiles[self.currentTrackIndex];
+    NSArray<NSURL *> *playbackList = self.isShuffleModeActive ? self.shuffledTracks : self.audioFiles;
+    if (playbackList.count == 0) {
+        #ifdef DEBUG
+        NSLog(NSLocalizedString(@"no_audio_files_to_play", @"No audio files to play."));
+        #endif
+        return;
+    }
+    // Índice fora da lista (biblioteca recarregada, ficheiros removidos): em modo
+    // aleatório sorteia-se uma faixa, em modo sequencial recomeça-se do princípio.
+    if (self.currentTrackIndex < 0 || self.currentTrackIndex >= (NSInteger)playbackList.count) {
+        self.currentTrackIndex = self.isShuffleModeActive ? [self randomShuffledStartIndex] : 0;
+    }
+    NSURL *trackURL = playbackList[self.currentTrackIndex];
     NSURL *originalTrackURL = self.shuffledToOriginalMap[trackURL] ?: trackURL;  // Use original if available
 
     NSString *extension = trackURL.pathExtension.lowercaseString;
@@ -4795,6 +4809,22 @@ enum {
     }
 }
 
+// Há faixa em curso — a tocar ou apenas em pausa — que não deva ser interrompida?
+// Serve para distinguir "ligar o aleatório a meio de uma música" de "ligar o
+// aleatório com o tocador parado".
+- (BOOL)isPlaybackEngaged {
+    return playbackState.isPlaying || self.audioPlayer.isPlaying || self.isPlaybackPaused;
+}
+
+// Sorteia uma posição da lista baralhada. Todas as faixas têm a mesma
+// probabilidade de sair, incluindo a que calhou em primeiro lugar.
+- (NSInteger)randomShuffledStartIndex {
+    if (self.shuffledTracks.count == 0) {
+        return 0;
+    }
+    return (NSInteger)arc4random_uniform((uint32_t)self.shuffledTracks.count);
+}
+
 // Shuffle tracks method: Initialize and shuffle the track list
 - (void)shuffleTracks {
     if (self.audioFiles.count == 0) {
@@ -4824,14 +4854,25 @@ enum {
         // Initialize shuffled track list
         [self initializeShuffledTrackList];
 
-        // Set currentTrackIndex to the corresponding index in shuffledTracks
-        if (self.currentTrackIndex >= 0 && self.currentTrackIndex < self.audioFiles.count) {
-            NSURL *currentTrackURL = self.audioFiles[self.currentTrackIndex];
-            NSUInteger shuffledIndex = [self.shuffledTracks indexOfObject:currentTrackURL];
-            self.currentTrackIndex = (shuffledIndex != NSNotFound) ? shuffledIndex : 0;
-        } else {
-            self.currentTrackIndex = 0;
+        // Com faixa em curso, ligar o modo aleatório não a interrompe: passa-se
+        // apenas a apontar para a posição que lhe calhou na lista baralhada.
+        // Com o tocador parado, a faixa de arranque é sorteada. Preservar o
+        // índice às cegas fazia com que a primeira música do modo aleatório
+        // fosse sempre a primeira da lista (índice 0 de origem), com
+        // probabilidade de 100 %, quando devia ter 1/N como qualquer outra.
+        NSURL *playingTrackURL = nil;
+        if ([self isPlaybackEngaged]) {
+            playingTrackURL = self.currentTrackURL;
+            if (!playingTrackURL && self.currentTrackIndex >= 0 &&
+                self.currentTrackIndex < (NSInteger)self.audioFiles.count) {
+                playingTrackURL = self.audioFiles[self.currentTrackIndex];
+            }
         }
+
+        NSUInteger shuffledIndex = playingTrackURL ? [self.shuffledTracks indexOfObject:playingTrackURL]
+                                                  : NSNotFound;
+        self.currentTrackIndex = (shuffledIndex != NSNotFound) ? (NSInteger)shuffledIndex
+                                                              : [self randomShuffledStartIndex];
 
         // Start playing from the shuffled list
         if (self.shuffledTracks.count > 0) {
