@@ -306,6 +306,11 @@ static WavpackStreamReader memoryReader = {
 @property (strong, nonatomic) NSTask *bs2bTask;
 @property (strong, nonatomic) NSTimer *bs2bHeadphonePollTimer;
 @property (assign, nonatomic) BOOL bs2bLastHeadphonesConnected;
+// Botão que liga e desliga o filtro. O estado que manda é o bs2bUserEnabled;
+// o botão é só o espelho dele — desenha-se a partir daí, nunca ao contrário.
+@property (strong, nonatomic) NSButton *bs2bToggleButton;
+@property (assign, nonatomic) BOOL bs2bUserEnabled;
+- (void)updateBs2bToggleButtonAppearance;
 
 @end
 
@@ -1441,11 +1446,15 @@ CoreAudioPlaybackState playbackState;
 - (void)updateBs2bForHeadphonesConnected:(BOOL)connected
 {
     #if ENABLE_BS2B_BRIDGE
-    // Borda ascendente: passaram de desligados → ligados
+    // Borda ascendente: passaram de desligados → ligados.
+    // Ligar a cavilha selecciona o botão automaticamente, que é o comportamento
+    // de sempre; a partir daí o utilizador pode desligá-lo à mão.
     if (connected && !self.bs2bLastHeadphonesConnected) {
         #ifdef DEBUG
         NSLog(@"[bs2b] Headphones plugged in — starting bs2b_bridge if needed.");
         #endif
+        self.bs2bUserEnabled = YES;
+        [self updateBs2bToggleButtonAppearance];
         [self startBs2bIfNeeded];
     }
 
@@ -1454,10 +1463,85 @@ CoreAudioPlaybackState playbackState;
         #ifdef DEBUG
         NSLog(@"[bs2b] Headphones unplugged — stopping bs2b_bridge.");
         #endif
+        self.bs2bUserEnabled = NO;
+        [self updateBs2bToggleButtonAppearance];
         [self stopBs2bIfRunning];
     }
 
     self.bs2bLastHeadphonesConnected = connected;
+    #endif
+}
+
+// Repõe o aspecto do botão a partir do bs2bUserEnabled. Símbolo SF sem borda,
+// o mesmo molde do botão de AirPlay desta janela: desenha-se sempre. O radio
+// sem etiqueta que aqui estava antes não pintava nada aos 16 px.
+- (void)updateBs2bToggleButtonAppearance
+{
+    NSButton *botao = self.bs2bToggleButton;
+    if (!botao) {
+        return;
+    }
+
+    BOOL ligado = self.bs2bUserEnabled;
+    NSString *nomeSimbolo = ligado ? @"headphones.circle.fill" : @"headphones";
+    NSImage *icone = [NSImage imageWithSystemSymbolName:nomeSimbolo
+                                accessibilityDescription:@"Filtro de áudio"];
+    if (icone) {
+        NSImageSymbolConfiguration *config =
+            [NSImageSymbolConfiguration configurationWithPointSize:15
+                                                            weight:NSFontWeightRegular];
+        icone = [icone imageWithSymbolConfiguration:config];
+        [icone setTemplate:YES];
+        botao.image = icone;
+        botao.imagePosition = NSImageOnly;
+        botao.title = @"";
+    } else {
+        // Sem símbolo não ficamos com um botão invisível: cai-se no texto.
+        botao.image = nil;
+        botao.imagePosition = NSNoImage;
+        botao.title = ligado ? @"◉" : @"◎";
+    }
+
+    // A cor é o que diz se está ligado; não usamos o state porque um botão de
+    // acção momentânea não o desenha.
+    botao.contentTintColor = ligado ? [NSColor controlAccentColor]
+                                    : [NSColor secondaryLabelColor];
+    botao.toolTip = ligado ? @"Filtro de áudio ligado (crossfeed e equalização)."
+                           : @"Filtro de áudio desligado. Só se liga com auscultadores na cavilha.";
+}
+
+// Clique no botão: liga ou desliga o filtro.
+- (void)toggleBs2bFilter:(id)sender
+{
+    #if ENABLE_BS2B_BRIDGE
+    // Invertemos o NOSSO estado — o botão não guarda estado nenhum, só o mostra.
+    BOOL ligar = !self.bs2bUserEnabled;
+
+    // Só se liga com auscultadores na cavilha. O botão continua visível e
+    // clicável sem eles — é aqui que a regra se impõe, apitando e voltando
+    // atrás, em vez de o desactivar (desactivado não se via).
+    if (ligar && ![self headphonesAreConnected]) {
+        NSBeep();
+        self.bs2bUserEnabled = NO;
+        [self updateBs2bToggleButtonAppearance];
+        return;
+    }
+
+    self.bs2bUserEnabled = ligar;
+    [self updateBs2bToggleButtonAppearance];
+
+    #ifdef DEBUG
+    NSLog(@"[bs2b] Filtro %@ pelo utilizador.", ligar ? @"ligado" : @"desligado");
+    #endif
+
+    if (ligar) {
+        [self startBs2bIfNeeded];
+    } else {
+        [self stopBs2bIfRunning];
+    }
+    #else
+    self.bs2bUserEnabled = NO;
+    [self updateBs2bToggleButtonAppearance];
     #endif
 }
 
@@ -1555,6 +1639,16 @@ CoreAudioPlaybackState playbackState;
     #if ENABLE_BS2B_BRIDGE
     // Já está a correr?
     if (self.bs2bTask && self.bs2bTask.isRunning) {
+        return;
+    }
+
+    // O utilizador desligou o filtro no botão. Sem esta guarda, os arranques
+    // ligados à reprodução (mudar de faixa, carregar em tocar) voltavam a
+    // levantá-lo por trás das costas dele.
+    if (!self.bs2bUserEnabled) {
+        #ifdef DEBUG
+        NSLog(@"[bs2b] Filtro desligado no botão; não arranco a ponte.");
+        #endif
         return;
     }
 
@@ -4042,6 +4136,43 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 
     // **Garante que a capa fica por cima de tudo o que foi adicionado depois**
     [self.view addSubview:self.coverArtView positioned:NSWindowAbove relativeTo:nil];
+
+    // Botão do filtro: por baixo da capa, na faixa livre entre ela e os botões
+    // de transporte. Centrado no meio da capa (x = 80) e à mesma altura que a
+    // barra de progresso (centro em y = 90), tirando ambas as medidas das
+    // vistas em vez de as fixar à mão.
+    //
+    // Entra em último lugar e explicitamente por cima de tudo, e isso não é
+    // capricho: nesta janela a subvista que fica no fundo da pilha (índice 0)
+    // não chega a ser desenhada. Verifiquei-o com o lldb na aplicação a correr —
+    // o botão estava na hierarquia, com moldura certa, visível e opaco, e mesmo
+    // assim invisível; pôr o botão do AirPlay no índice 0 fá-lo desaparecer
+    // exactamente da mesma maneira. Como a capa é reposicionada por cima de
+    // tudo mesmo aqui acima, quem for adicionado antes dela acaba no fundo.
+    CGFloat ladoBotaoFiltro = 20;
+    NSRect botaoFiltro = NSMakeRect(NSMidX(self.coverArtView.frame) - ladoBotaoFiltro / 2.0,
+                                    NSMidY(self.progressBar.frame)  - ladoBotaoFiltro / 2.0,
+                                    ladoBotaoFiltro,
+                                    ladoBotaoFiltro);
+    self.bs2bToggleButton = [[NSButton alloc] initWithFrame:botaoFiltro];
+    self.bs2bToggleButton.bezelStyle = NSBezelStyleRegularSquare;
+    self.bs2bToggleButton.bordered = NO;
+    // Fica sempre activo por uma questão de visibilidade: desactivado, é
+    // desenhado tão esbatido que não se vê. A regra dos auscultadores é imposta
+    // na acção (recusa e apita), não no aspecto.
+    self.bs2bToggleButton.enabled = YES;
+    self.bs2bToggleButton.target = self;
+    self.bs2bToggleButton.action = @selector(toggleBs2bFilter:);
+    [self updateBs2bToggleButtonAppearance];
+    [self.view addSubview:self.bs2bToggleButton positioned:NSWindowAbove relativeTo:nil];
+
+    #ifdef DEBUG
+    NSLog(@"[bs2b] Botão do filtro: moldura %@, imagem %@, índice %lu de %lu subvistas",
+          NSStringFromRect(self.bs2bToggleButton.frame),
+          self.bs2bToggleButton.image,
+          (unsigned long)[self.view.subviews indexOfObject:self.bs2bToggleButton],
+          (unsigned long)self.view.subviews.count);
+    #endif
 }
 
 #pragma mark - HTML ”Now Playing“

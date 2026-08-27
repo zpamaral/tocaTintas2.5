@@ -28,13 +28,25 @@ SOFTWARE.
 #import "ZPAudioCapture.h"
 #import <AVFoundation/AVFoundation.h>
 
+// RIFF (12) + fmt  (24) + fact (12) + cabeçalho de data (8). O troço «fact» é
+// exigido pela norma para formatos que não sejam PCM inteiro; sem ele há
+// leitores esquisitos que recusam WAV de vírgula flutuante.
+enum { kZPWavHeaderSize = 56 };   // constante de compilação: serve de dimensão do vector
+
 @interface ZPAudioCapture ()
 
 // Audio Engine
 @property (strong, nonatomic) AVAudioEngine *audioEngine;
 
 // Recording properties
-@property (strong, nonatomic) NSOutputStream *fileOutputStream;
+// A gravação escreve WAV de vírgula flutuante de 32 bits, não Int16: ver a nota
+// em -installAudioTap. Precisa de um NSFileHandle (e não de um NSOutputStream)
+// porque o cabeçalho só se pode fechar no fim, voltando ao início do ficheiro.
+@property (strong, nonatomic) NSFileHandle *recordFileHandle;
+@property (strong, nonatomic) NSURL *recordFileURL;
+@property (assign, nonatomic) unsigned long long recordDataBytes;
+@property (assign, nonatomic) double recordSampleRate;
+@property (assign, nonatomic) NSUInteger recordChannels;
 @property (assign, nonatomic) BOOL isRecording;
 
 // Streaming properties
@@ -48,8 +60,10 @@ SOFTWARE.
 @property (assign, nonatomic) float gainFactor;
 
 // Reutilizados entre callbacks (criados uma vez por tap)
-@property (strong, nonatomic) AVAudioConverter *audioConverter;
+@property (strong, nonatomic) AVAudioConverter *audioConverter;      // Int16, para o AirPlay
 @property (strong, nonatomic) AVAudioPCMBuffer *convertedBuffer;
+@property (strong, nonatomic) AVAudioConverter *recordConverter;     // float de 32 bits, para o ficheiro
+@property (strong, nonatomic) AVAudioPCMBuffer *recordBuffer;
 
 // Fila serial para I/O fora do thread de áudio
 @property (strong, nonatomic) dispatch_queue_t ioQueue;
@@ -97,9 +111,12 @@ SOFTWARE.
     }
 
     self.isRecording = YES;
-    
-    // Set default gain (e.g., +6 dB); it overrides _gainFactor
-    [self setGainInDecibels:6.0];
+
+    // Sem ganho na gravação. O ganho fixo de +6 dB que aqui estava só fazia
+    // sentido enquanto se gravava em Int16, para aproveitar escala; agora que o
+    // ficheiro é de vírgula flutuante não há escala a aproveitar e o ganho só
+    // arriscava ceifar picos. Quem normaliza é o Audacity, sem perdas.
+    self.gainFactor = 1.0;
 
     // Get the Application Support directory
     NSArray<NSURL *> *appSupportURLs = [[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask];
@@ -120,12 +137,35 @@ SOFTWARE.
     }
 
     // Create a unique file name
-    NSString *fileName = [NSString stringWithFormat:@"Recording_%@.pcm", [[NSUUID UUID] UUIDString]];
+    NSString *fileName = [NSString stringWithFormat:@"Recording_%@.wav", [[NSUUID UUID] UUIDString]];
     NSURL *outputFileURL = [appDirectory URLByAppendingPathComponent:fileName];
 
-    // Set up the file output stream
-    self.fileOutputStream = [NSOutputStream outputStreamWithURL:outputFileURL append:NO];
-    [self.fileOutputStream open];
+    // Ficheiro novo com o cabeçalho reservado a zeros: as dimensões e a
+    // frequência de amostragem só se sabem no fim, e são lá escritas por cima.
+    self.recordFileURL = outputFileURL;
+    self.recordDataBytes = 0;
+    self.recordSampleRate = 0.0;
+    self.recordChannels = 2;
+
+    NSMutableData *reserva = [NSMutableData dataWithLength:kZPWavHeaderSize];
+    if (![reserva writeToURL:outputFileURL atomically:NO]) {
+        #ifdef DEBUG
+        NSLog(@"[Audio Capture] Não consegui criar %@", [outputFileURL path]);
+        #endif
+        self.isRecording = NO;
+        return;
+    }
+
+    NSError *handleError = nil;
+    self.recordFileHandle = [NSFileHandle fileHandleForWritingToURL:outputFileURL error:&handleError];
+    if (!self.recordFileHandle) {
+        #ifdef DEBUG
+        NSLog(@"[Audio Capture] Não consegui abrir %@: %@", [outputFileURL path], handleError.localizedDescription);
+        #endif
+        self.isRecording = NO;
+        return;
+    }
+    [self.recordFileHandle seekToEndOfFile];
 
     #ifdef DEBUG
     NSLog(@"[Audio Capture] Recording started. Saving to %@", [outputFileURL path]);
@@ -145,16 +185,91 @@ SOFTWARE.
 
     self.isRecording = NO;
 
-    if (self.fileOutputStream) {
-        [self.fileOutputStream close];
-        self.fileOutputStream = nil;
-        #ifdef DEBUG
-        NSLog(@"[Audio Capture] Recording stopped and file output stream closed.");
-        #endif
+    // O fecho vai para a fila de I/O, atrás de tudo o que já lá esteja: é uma
+    // fila em série, portanto as últimas amostras entram no ficheiro antes de
+    // o cabeçalho ser escrito e o descritor fechado.
+    if (self.recordFileHandle) {
+        dispatch_async(self.ioQueue, ^{
+            [self finalizeRecordingFile];
+        });
     }
 
     // Stop audio capture if not streaming
     [self stopAudioCaptureIfNeeded];
+}
+
+#pragma mark - Ficheiro WAV
+
+// Cabeçalho canónico de WAV em vírgula flutuante de 32 bits.
+static void ZPPutU32(uint8_t *p, uint32_t v) {
+    p[0] = (uint8_t)(v & 0xFF);
+    p[1] = (uint8_t)((v >> 8) & 0xFF);
+    p[2] = (uint8_t)((v >> 16) & 0xFF);
+    p[3] = (uint8_t)((v >> 24) & 0xFF);
+}
+
+static void ZPPutU16(uint8_t *p, uint16_t v) {
+    p[0] = (uint8_t)(v & 0xFF);
+    p[1] = (uint8_t)((v >> 8) & 0xFF);
+}
+
+static NSData *ZPWavHeader(double sampleRate, NSUInteger channels, unsigned long long dataBytes) {
+    const uint16_t bitsPerSample = 32;
+    const uint16_t blockAlign    = (uint16_t)(channels * bitsPerSample / 8);
+    const uint32_t byteRate      = (uint32_t)llround(sampleRate) * blockAlign;
+    const uint32_t frames        = blockAlign ? (uint32_t)(dataBytes / blockAlign) : 0;
+    // O RIFF conta tudo menos os primeiros 8 bytes.
+    const uint32_t riffSize      = (uint32_t)(kZPWavHeaderSize - 8 + dataBytes);
+
+    uint8_t h[kZPWavHeaderSize];
+    memset(h, 0, sizeof(h));
+    memcpy(h + 0,  "RIFF", 4);   ZPPutU32(h + 4,  riffSize);
+    memcpy(h + 8,  "WAVE", 4);
+    memcpy(h + 12, "fmt ", 4);   ZPPutU32(h + 16, 16);
+    ZPPutU16(h + 20, 3);                        // WAVE_FORMAT_IEEE_FLOAT
+    ZPPutU16(h + 22, (uint16_t)channels);
+    ZPPutU32(h + 24, (uint32_t)llround(sampleRate));
+    ZPPutU32(h + 28, byteRate);
+    ZPPutU16(h + 32, blockAlign);
+    ZPPutU16(h + 34, bitsPerSample);
+    memcpy(h + 36, "fact", 4);   ZPPutU32(h + 40, 4);
+    ZPPutU32(h + 44, frames);
+    memcpy(h + 48, "data", 4);   ZPPutU32(h + 52, (uint32_t)dataBytes);
+    return [NSData dataWithBytes:h length:sizeof(h)];
+}
+
+// Corre sempre na ioQueue, depois da última escrita de amostras.
+- (void)finalizeRecordingFile {
+    NSFileHandle *handle = self.recordFileHandle;
+    if (!handle) {
+        return;
+    }
+    self.recordFileHandle = nil;
+
+    double taxa = self.recordSampleRate > 0.0 ? self.recordSampleRate : 44100.0;
+
+    // O WAV guarda as dimensões em 32 bits sem sinal: acima de 4 GiB (cerca de
+    // 3 h 20 m em estéreo float a 44,1 kHz) o cabeçalho deixa de as poder
+    // descrever. As amostras estão todas no ficheiro; é a contagem que trunca.
+    if (self.recordDataBytes > UINT32_MAX) {
+        NSLog(@"[Audio Capture] Gravação com %llu bytes excede os 4 GiB que o cabeçalho WAV descreve; %@ vai indicar menos do que tem.",
+              self.recordDataBytes, [self.recordFileURL lastPathComponent]);
+    }
+
+    NSData *cabecalho = ZPWavHeader(taxa, self.recordChannels, self.recordDataBytes);
+
+    NSError *erro = nil;
+    if (![handle seekToOffset:0 error:&erro] || ![handle writeData:cabecalho error:&erro]) {
+        #ifdef DEBUG
+        NSLog(@"[Audio Capture] Erro a fechar o cabeçalho WAV: %@", erro.localizedDescription);
+        #endif
+    }
+    [handle closeFile];
+
+    #ifdef DEBUG
+    NSLog(@"[Audio Capture] Gravação fechada: %llu bytes de amostras, %.0f Hz, %lu canais, float de 32 bits (%@).",
+          self.recordDataBytes, taxa, (unsigned long)self.recordChannels, [self.recordFileURL lastPathComponent]);
+    #endif
 }
 
 #pragma mark - Streaming Methods
@@ -296,6 +411,24 @@ SOFTWARE.
     // 8192 frames cobre o pior caso de upsampling (ex.: entrada a 32 kHz → saída a 44,1 kHz)
     self.convertedBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:targetFormat frameCapacity:8192];
 
+    // A gravação segue por um caminho próprio, em vírgula flutuante de 32 bits
+    // e à frequência do próprio dispositivo.
+    //
+    // Porquê: com o volume de saída a 25 %, o sinal chega ao tap a −12 dB e
+    // ocupa só um quarto da escala. Passá-lo a Int16 aí atirava fora dois bits
+    // de resolução, que nenhuma normalização posterior no Audacity recupera —
+    // amplificar depois é amplificar também o ruído de quantização já gravado.
+    // Em float de 32 bits a atenuação não custa resolução nenhuma (são 24 bits
+    // de mantissa a acompanhar o expoente), e a normalização passa a ser
+    // exacta. Manter a frequência do dispositivo evita ainda a reamostragem.
+    AVAudioFormat *recordFormat = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32
+                                                                   sampleRate:inputFormat.sampleRate
+                                                                     channels:2
+                                                                  interleaved:YES];
+
+    self.recordConverter = [[AVAudioConverter alloc] initFromFormat:inputFormat toFormat:recordFormat];
+    self.recordBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:recordFormat frameCapacity:8192];
+
     __weak typeof(self) weakSelf = self;
 
     if (self.engineConfigObserver) {
@@ -329,13 +462,58 @@ SOFTWARE.
         if (!strongSelf) return;
 
         if (buffer.frameLength > 0) {
+            // A gravação leva o sinal tal como chegou: converte-se antes de
+            // qualquer ganho, para o ficheiro ficar com o original.
+            if (strongSelf.isRecording) {
+                NSError *recError = nil;
+                [strongSelf.recordConverter convertToBuffer:strongSelf.recordBuffer fromBuffer:buffer error:&recError];
+                if (recError) {
+                    #ifdef DEBUG
+                    NSLog(@"[Audio Capture] Erro a converter para float: %@", recError.localizedDescription);
+                    #endif
+                } else {
+                    if (strongSelf.recordSampleRate <= 0.0) {
+                        strongSelf.recordSampleRate = strongSelf.recordConverter.outputFormat.sampleRate;
+                        strongSelf.recordChannels   = strongSelf.recordConverter.outputFormat.channelCount;
+                    }
+
+                    NSUInteger recLength = strongSelf.recordBuffer.frameLength
+                                           * strongSelf.recordConverter.outputFormat.streamDescription->mBytesPerFrame;
+                    // Copiar os bytes antes de sair do thread de áudio
+                    NSData *floatData = [NSData dataWithBytes:strongSelf.recordBuffer.floatChannelData[0]
+                                                       length:recLength];
+
+                    dispatch_async(strongSelf.ioQueue, ^{
+                        // O descritor é posto a nil no -finalizeRecordingFile,
+                        // nesta mesma fila: o que chegue depois disso é tarde.
+                        NSFileHandle *handle = strongSelf.recordFileHandle;
+                        if (!handle) return;
+                        NSError *writeError = nil;
+                        if (![handle writeData:floatData error:&writeError]) {
+                            #ifdef DEBUG
+                            NSLog(@"[Audio Capture] Error writing to file: %@", writeError.localizedDescription);
+                            #endif
+                            return;
+                        }
+                        strongSelf.recordDataBytes += floatData.length;
+                    });
+                }
+            }
+
+            if (!strongSelf.isStreaming) {
+                return;
+            }
+
+            // Daqui para baixo é o caminho do AirPlay, que continua em Int16.
             if (strongSelf.gainFactor != 1.0) {
                 for (AVAudioChannelCount channel = 0; channel < buffer.format.channelCount; channel++) {
                     float *channelData = buffer.floatChannelData[channel];
                     for (AVAudioFrameCount frame = 0; frame < buffer.frameLength; frame++) {
                         channelData[frame] *= strongSelf.gainFactor;
-                        if (channelData[frame] > 32767.0) channelData[frame] = 32767.0;
-                        if (channelData[frame] < -32768.0) channelData[frame] = -32768.0;
+                        // As amostras vêm normalizadas a ±1,0, não em contagens
+                        // de Int16: o limite de antes (±32768) nunca pegava.
+                        if (channelData[frame] >  1.0f) channelData[frame] =  1.0f;
+                        if (channelData[frame] < -1.0f) channelData[frame] = -1.0f;
                     }
                 }
             }
@@ -355,24 +533,11 @@ SOFTWARE.
             NSData *pcmData = [NSData dataWithBytes:strongSelf.convertedBuffer.int16ChannelData[0]
                                              length:dataLength];
 
-            BOOL doRecord = strongSelf.isRecording;
-            BOOL doStream = strongSelf.isStreaming;
-
-            if (doRecord || doStream) {
-                dispatch_async(strongSelf.ioQueue, ^{
-                    if (doRecord && strongSelf.fileOutputStream) {
-                        NSInteger bytesWritten = [strongSelf.fileOutputStream write:pcmData.bytes maxLength:pcmData.length];
-                        if (bytesWritten < 0) {
-                            #ifdef DEBUG
-                            NSLog(@"[Audio Capture] Error writing to file: %@", strongSelf.fileOutputStream.streamError.localizedDescription);
-                            #endif
-                        }
-                    }
-                    if (doStream && strongSelf.inputPipe) {
-                        [[strongSelf.inputPipe fileHandleForWriting] writeData:pcmData];
-                    }
-                });
-            }
+            dispatch_async(strongSelf.ioQueue, ^{
+                if (strongSelf.inputPipe) {
+                    [[strongSelf.inputPipe fileHandleForWriting] writeData:pcmData];
+                }
+            });
         }
     }];
 }
