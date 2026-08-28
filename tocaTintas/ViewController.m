@@ -309,8 +309,15 @@ static WavpackStreamReader memoryReader = {
 // Botão que liga e desliga o filtro. O estado que manda é o bs2bUserEnabled;
 // o botão é só o espelho dele — desenha-se a partir daí, nunca ao contrário.
 @property (strong, nonatomic) NSButton *bs2bToggleButton;
+// O utilizador quer o processamento ligado? Só tem significado com
+// auscultadores: nas colunas a ponte corre sempre em passagem limpa.
 @property (assign, nonatomic) BOOL bs2bUserEnabled;
+// Com que configuração é que a ponte que está a correr foi lançada. Serve para
+// não a reiniciar à toa: reiniciar corta o som por um instante.
+@property (copy,   nonatomic) NSString *bs2bRunningOutputName;
+@property (assign, nonatomic) BOOL bs2bRunningProcessing;
 - (void)updateBs2bToggleButtonAppearance;
+- (void)applyBs2bConfigurationWithOutput:(NSString *)nomeSaida;
 
 @end
 
@@ -895,6 +902,10 @@ CoreAudioPlaybackState playbackState;
         NSLog(@"[Popover selection] AirPlay streaming started.");
         #endif
 
+        // Colunas ou AirPlay: com a transmissão a começar, a ponte cala as
+        // colunas já, sem esperar pelo temporizador de um segundo.
+        [self applyBs2bConfiguration];
+
         // Mute the built-in speakers
         if (![self setMute:YES]) {
             #ifdef DEBUG
@@ -918,6 +929,9 @@ CoreAudioPlaybackState playbackState;
             self.isStreaming = NO;
             [self.airPlayStreamer stopStreaming];
             self.airPlayStreamer = nil;
+
+            // Acabada a transmissão, as colunas voltam a ter direito ao som.
+            [self applyBs2bConfiguration];
         }
 
         // Clear the reference to the currently selected checkbox and device name
@@ -1443,38 +1457,253 @@ CoreAudioPlaybackState playbackState;
 }
 
 // Actualiza o bs2b_bridge em função do estado dos auscultadores
+// Versão que não sabe a saída: varre e delega. Fica para quem chama de fora do
+// temporizador (o observador de mudança de dispositivo, o arranque).
 - (void)updateBs2bForHeadphonesConnected:(BOOL)connected
 {
+    [self updateBs2bForHeadphonesConnected:connected output:[self bs2bPreferredOutputDeviceName]];
+}
+
+- (void)updateBs2bForHeadphonesConnected:(BOOL)connected output:(NSString *)nomeSaida
+{
     #if ENABLE_BS2B_BRIDGE
-    // Borda ascendente: passaram de desligados → ligados.
-    // Ligar a cavilha selecciona o botão automaticamente, que é o comportamento
-    // de sempre; a partir daí o utilizador pode desligá-lo à mão.
+    // Borda ascendente: ligar a cavilha acende o processamento, que é o
+    // comportamento de sempre; a partir daí o utilizador desliga-o à mão.
     if (connected && !self.bs2bLastHeadphonesConnected) {
         #ifdef DEBUG
-        NSLog(@"[bs2b] Headphones plugged in — starting bs2b_bridge if needed.");
+        NSLog(@"[bs2b] Auscultadores ligados.");
         #endif
         self.bs2bUserEnabled = YES;
-        [self updateBs2bToggleButtonAppearance];
-        [self startBs2bIfNeeded];
     }
 
-    // Borda descendente: passaram de ligados → desligados
+    // Borda descendente. A ponte NÃO pára: passa a levar o som às colunas, em
+    // passagem limpa. Pará-la seria ficar sem som nenhum — com a saída do
+    // macOS no BlackHole, é ela o único caminho até um altifalante.
     if (!connected && self.bs2bLastHeadphonesConnected) {
         #ifdef DEBUG
-        NSLog(@"[bs2b] Headphones unplugged — stopping bs2b_bridge.");
+        NSLog(@"[bs2b] Auscultadores desligados.");
         #endif
         self.bs2bUserEnabled = NO;
-        [self updateBs2bToggleButtonAppearance];
-        [self stopBs2bIfRunning];
     }
 
     self.bs2bLastHeadphonesConnected = connected;
+    [self updateBs2bToggleButtonAppearance];
+    [self applyBs2bConfigurationWithOutput:nomeSaida];
+    #endif
+}
+
+// Nome EXACTO do dispositivo CoreAudio para onde a ponte deve tocar: os
+// auscultadores se estiverem na cavilha, senão a saída integrada. O CamillaDSP
+// não faz correspondência por substring, daí devolver-se o nome tal e qual.
+// Devolve nil se não houver saída nenhuma utilizável.
+- (NSString *)bs2bPreferredOutputDeviceName
+{
+    AudioObjectPropertyAddress devicesAddr = (AudioObjectPropertyAddress) {
+        .mSelector = kAudioHardwarePropertyDevices,
+        .mScope    = kAudioObjectPropertyScopeGlobal,
+        .mElement  = kAudioObjectPropertyElementMain
+    };
+
+    UInt32 dataSize = 0;
+    if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &devicesAddr, 0, NULL, &dataSize) != noErr
+        || dataSize == 0) {
+        return nil;
+    }
+
+    AudioObjectID *deviceIDs = (AudioObjectID *)malloc(dataSize);
+    if (!deviceIDs) {
+        return nil;
+    }
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &devicesAddr, 0, NULL, &dataSize, deviceIDs) != noErr) {
+        free(deviceIDs);
+        return nil;
+    }
+
+    UInt32 deviceCount = dataSize / sizeof(AudioObjectID);
+    NSString *auscultadores = nil;
+    NSString *integrada = nil;
+
+    for (UInt32 i = 0; i < deviceCount && !auscultadores; ++i) {
+        AudioObjectID devID = deviceIDs[i];
+
+        // Tem saída estéreo?
+        UInt32 streamsSize = 0;
+        AudioObjectPropertyAddress streamAddr = (AudioObjectPropertyAddress) {
+            .mSelector = kAudioDevicePropertyStreamConfiguration,
+            .mScope    = kAudioDevicePropertyScopeOutput,
+            .mElement  = kAudioObjectPropertyElementMain
+        };
+        if (AudioObjectGetPropertyDataSize(devID, &streamAddr, 0, NULL, &streamsSize) != noErr || streamsSize == 0) {
+            continue;
+        }
+        AudioBufferList *bufferList = (AudioBufferList *)malloc(streamsSize);
+        if (!bufferList) {
+            continue;
+        }
+        if (AudioObjectGetPropertyData(devID, &streamAddr, 0, NULL, &streamsSize, bufferList) != noErr) {
+            free(bufferList);
+            continue;
+        }
+        UInt32 canais = 0;
+        for (UInt32 b = 0; b < bufferList->mNumberBuffers; ++b) {
+            canais += bufferList->mBuffers[b].mNumberChannels;
+        }
+        free(bufferList);
+        if (canais < 2) {
+            continue;
+        }
+
+        // Nome
+        CFStringRef nameRef = NULL;
+        UInt32 nameSize = sizeof(nameRef);
+        AudioObjectPropertyAddress nameAddr = (AudioObjectPropertyAddress) {
+            .mSelector = kAudioDevicePropertyDeviceNameCFString,
+            .mScope    = kAudioDevicePropertyScopeOutput,
+            .mElement  = kAudioObjectPropertyElementMain
+        };
+        if (AudioObjectGetPropertyData(devID, &nameAddr, 0, NULL, &nameSize, &nameRef) != noErr || !nameRef) {
+            continue;
+        }
+        NSString *nome = CFBridgingRelease(nameRef);
+
+        if ([nome rangeOfString:kBS2BHeadphonesNameSubstring options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            auscultadores = nome;
+            continue;
+        }
+
+        // Saída integrada: escolhida pelo tipo de ligação, não pelo nome, que
+        // muda com o idioma do sistema e com o modelo da máquina. O BlackHole é
+        // virtual e os agregados são agregados, portanto ficam de fora.
+        if (!integrada) {
+            UInt32 transporte = 0;
+            UInt32 transporteSize = sizeof(transporte);
+            AudioObjectPropertyAddress transporteAddr = (AudioObjectPropertyAddress) {
+                .mSelector = kAudioDevicePropertyTransportType,
+                .mScope    = kAudioObjectPropertyScopeGlobal,
+                .mElement  = kAudioObjectPropertyElementMain
+            };
+            if (AudioObjectGetPropertyData(devID, &transporteAddr, 0, NULL, &transporteSize, &transporte) == noErr
+                && transporte == kAudioDeviceTransportTypeBuiltIn) {
+                integrada = nome;
+            }
+        }
+    }
+
+    free(deviceIDs);
+
+    // Sem registo aqui: isto é chamado uma vez por segundo pelo temporizador,
+    // e o que interessa saber fica no registo de quem lança a ponte.
+    return auscultadores ?: integrada;
+}
+
+// A ponte só faz sentido enquanto a saída do sistema for o BlackHole: é dela
+// que captura. Se o utilizador puser a saída directamente nas colunas ou nuns
+// auscultadores, o som já lá vai ter sozinho e a ponte só serviria para
+// capturar silêncio e prender um dispositivo.
+- (BOOL)systemOutputIsBlackHole
+{
+    AudioObjectPropertyAddress addr = (AudioObjectPropertyAddress) {
+        .mSelector = kAudioHardwarePropertyDefaultOutputDevice,
+        .mScope    = kAudioObjectPropertyScopeGlobal,
+        .mElement  = kAudioObjectPropertyElementMain
+    };
+
+    AudioObjectID devID = kAudioObjectUnknown;
+    UInt32 size = sizeof(devID);
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &addr, 0, NULL, &size, &devID) != noErr
+        || devID == kAudioObjectUnknown) {
+        return NO;
+    }
+
+    CFStringRef nameRef = NULL;
+    UInt32 nameSize = sizeof(nameRef);
+    AudioObjectPropertyAddress nameAddr = (AudioObjectPropertyAddress) {
+        .mSelector = kAudioDevicePropertyDeviceNameCFString,
+        .mScope    = kAudioObjectPropertyScopeGlobal,
+        .mElement  = kAudioObjectPropertyElementMain
+    };
+    if (AudioObjectGetPropertyData(devID, &nameAddr, 0, NULL, &nameSize, &nameRef) != noErr || !nameRef) {
+        return NO;
+    }
+
+    NSString *nome = CFBridgingRelease(nameRef);
+    return [nome rangeOfString:@"BlackHole" options:NSCaseInsensitiveSearch].location != NSNotFound;
+}
+
+// Ponto único que põe a ponte de acordo com o estado do mundo. Lança-a, pára-a
+// ou relança-a com outra configuração, e só o faz se alguma coisa mudou.
+- (void)applyBs2bConfiguration
+{
+    [self applyBs2bConfigurationWithOutput:[self bs2bPreferredOutputDeviceName]];
+}
+
+- (void)applyBs2bConfigurationWithOutput:(NSString *)saida
+{
+    #if ENABLE_BS2B_BRIDGE
+    if (![self systemOutputIsBlackHole]) {
+        if (self.bs2bTask && self.bs2bTask.isRunning) {
+            #ifdef DEBUG
+            NSLog(@"[bs2b] A saída do sistema deixou de ser o BlackHole; a parar a ponte.");
+            #endif
+            [self stopBs2bIfRunning];
+        }
+        return;
+    }
+
+    if (!saida) {
+        #ifdef DEBUG
+        NSLog(@"[bs2b] Sem saída utilizável; a ponte não corre.");
+        #endif
+        [self stopBs2bIfRunning];
+        return;
+    }
+
+    BOOL comAuscultadores =
+        [saida rangeOfString:kBS2BHeadphonesNameSubstring options:NSCaseInsensitiveSearch].location != NSNotFound;
+
+    // Colunas OU AirPlay, nunca os dois. Auscultadores com AirPlay pode, porque
+    // os auscultadores tiram-se da cabeça; as colunas não se desligam, e a
+    // transmissão essa desliga-se aqui mesmo, no tocaTintas.
+    //
+    // O indicador de transmissão é o próprio objecto: o -isStreaming do
+    // controlador nunca chega a ser posto a YES em lado nenhum.
+    if (!comAuscultadores && self.airPlayStreamer != nil) {
+        if (self.bs2bTask && self.bs2bTask.isRunning) {
+            #ifdef DEBUG
+            NSLog(@"[bs2b] AirPlay a transmitir e sem auscultadores; a calar as colunas.");
+            #endif
+            [self stopBs2bIfRunning];
+        }
+        return;
+    }
+
+    // Processar só com auscultadores: o crossfeed modela a cabeça e a
+    // equalização é a dos MDR-7506. Nas colunas a ponte é apenas um fio.
+    BOOL processar = comAuscultadores && self.bs2bUserEnabled;
+
+    if (self.bs2bTask && self.bs2bTask.isRunning
+        && [self.bs2bRunningOutputName isEqualToString:saida]
+        && self.bs2bRunningProcessing == processar) {
+        return;   // já está como deve estar
+    }
+
+    [self stopBs2bIfRunning];
+    [self startBs2bWithOutputDevice:saida processing:processar];
     #endif
 }
 
 // Repõe o aspecto do botão a partir do bs2bUserEnabled. Símbolo SF sem borda,
 // o mesmo molde do botão de AirPlay desta janela: desenha-se sempre. O radio
 // sem etiqueta que aqui estava antes não pintava nada aos 16 px.
+// Três estados: sem auscultadores nada acontece; com auscultadores, o círculo
+// azul é o processamento ligado e o mesmo círculo em branco é a passagem limpa.
+//
+//   auscultadores fora        -> auscultadores cinzentos, sem círculo
+//   dentro, CamillaDSP activo -> círculo cheio azul
+//   dentro, CamillaDSP parado -> o mesmo círculo cheio, branco
+//
+// «Parado» quer dizer sem crossfeed nem equalização — a ponte continua a
+// correr, porque é ela que leva o som do BlackHole aos auscultadores.
 - (void)updateBs2bToggleButtonAppearance
 {
     NSButton *botao = self.bs2bToggleButton;
@@ -1482,8 +1711,30 @@ CoreAudioPlaybackState playbackState;
         return;
     }
 
-    BOOL ligado = self.bs2bUserEnabled;
-    NSString *nomeSimbolo = ligado ? @"headphones.circle.fill" : @"headphones";
+    BOOL comAuscultadores = self.bs2bLastHeadphonesConnected;
+    BOOL processar = comAuscultadores && self.bs2bUserEnabled;
+
+    NSString *nomeSimbolo;
+    NSColor *cor;
+    NSString *dica;
+
+    if (!comAuscultadores) {
+        nomeSimbolo = @"headphones";
+        cor  = [NSColor secondaryLabelColor];
+        dica = @"Sem auscultadores na cavilha. O filtro só se liga com eles.";
+    } else if (processar) {
+        nomeSimbolo = @"headphones.circle.fill";
+        cor  = [NSColor controlAccentColor];
+        dica = @"Filtro de áudio ligado (crossfeed e equalização). Carregar para desligar.";
+    } else {
+        // O mesmo símbolo cheio do estado azul, só que branco: o que distingue
+        // os dois estados é a cor, não o desenho. A variante sem «.fill» dava
+        // uma circunferência vazia, que se lê como outra coisa.
+        nomeSimbolo = @"headphones.circle.fill";
+        cor  = [NSColor whiteColor];
+        dica = @"Filtro de áudio desligado; o som passa sem tratamento. Carregar para ligar.";
+    }
+
     NSImage *icone = [NSImage imageWithSystemSymbolName:nomeSimbolo
                                 accessibilityDescription:@"Filtro de áudio"];
     if (icone) {
@@ -1499,46 +1750,37 @@ CoreAudioPlaybackState playbackState;
         // Sem símbolo não ficamos com um botão invisível: cai-se no texto.
         botao.image = nil;
         botao.imagePosition = NSNoImage;
-        botao.title = ligado ? @"◉" : @"◎";
+        botao.title = processar ? @"◉" : @"◎";
     }
 
-    // A cor é o que diz se está ligado; não usamos o state porque um botão de
-    // acção momentânea não o desenha.
-    botao.contentTintColor = ligado ? [NSColor controlAccentColor]
-                                    : [NSColor secondaryLabelColor];
-    botao.toolTip = ligado ? @"Filtro de áudio ligado (crossfeed e equalização)."
-                           : @"Filtro de áudio desligado. Só se liga com auscultadores na cavilha.";
+    botao.contentTintColor = cor;
+    botao.toolTip = dica;
 }
 
-// Clique no botão: liga ou desliga o filtro.
+// Clique no botão: liga ou desliga o processamento. Não pára a ponte.
 - (void)toggleBs2bFilter:(id)sender
 {
     #if ENABLE_BS2B_BRIDGE
-    // Invertemos o NOSSO estado — o botão não guarda estado nenhum, só o mostra.
-    BOOL ligar = !self.bs2bUserEnabled;
-
-    // Só se liga com auscultadores na cavilha. O botão continua visível e
-    // clicável sem eles — é aqui que a regra se impõe, apitando e voltando
-    // atrás, em vez de o desactivar (desactivado não se via).
-    if (ligar && ![self headphonesAreConnected]) {
+    // Sem auscultadores não há nada para alternar: o crossfeed e a equalização
+    // são para eles. Apita e fica tudo na mesma.
+    if (![self headphonesAreConnected]) {
         NSBeep();
         self.bs2bUserEnabled = NO;
         [self updateBs2bToggleButtonAppearance];
         return;
     }
 
-    self.bs2bUserEnabled = ligar;
-    [self updateBs2bToggleButtonAppearance];
+    self.bs2bUserEnabled = !self.bs2bUserEnabled;
 
     #ifdef DEBUG
-    NSLog(@"[bs2b] Filtro %@ pelo utilizador.", ligar ? @"ligado" : @"desligado");
+    NSLog(@"[bs2b] Processamento %@ pelo utilizador.", self.bs2bUserEnabled ? @"ligado" : @"desligado");
     #endif
 
-    if (ligar) {
-        [self startBs2bIfNeeded];
-    } else {
-        [self stopBs2bIfRunning];
-    }
+    [self updateBs2bToggleButtonAppearance];
+    // Relança a ponte com o outro perfil. Há um corte de som de uma fracção de
+    // segundo: o CamillaDSP não troca de configuração sem reabrir os
+    // dispositivos, e não vale a pena montar-lhe o canal de controlo por isto.
+    [self applyBs2bConfiguration];
     #else
     self.bs2bUserEnabled = NO;
     [self updateBs2bToggleButtonAppearance];
@@ -1602,8 +1844,20 @@ CoreAudioPlaybackState playbackState;
 - (void)pollBs2bHeadphones
 {
     #if ENABLE_BS2B_BRIDGE
-    BOOL connected = [self headphonesAreConnected];
-    [self updateBs2bForHeadphonesConnected:connected];
+    // UMA varredura de dispositivos por sondagem, e o resultado serve para as
+    // duas perguntas: há auscultadores? e para onde deve a ponte tocar?
+    //
+    // Isto não é micro-optimização. Cada varredura consulta o HAL quatro vezes
+    // por dispositivo, e há aqui nove dispositivos (três deles agregados).
+    // Estava a correr três varreduras por segundo — a de -headphonesAreConnected,
+    // a de -bs2bPreferredOutputDeviceName e a de novo dentro do apply — na
+    // thread principal, contra o mesmo coreaudiod de que dependem o camilladsp
+    // e a captura do AirPlay. São cerca de 180 consultas por segundo em vez de 60.
+    NSString *saida = [self bs2bPreferredOutputDeviceName];
+    BOOL connected = (saida != nil) &&
+        [saida rangeOfString:kBS2BHeadphonesNameSubstring options:NSCaseInsensitiveSearch].location != NSNotFound;
+
+    [self updateBs2bForHeadphonesConnected:connected output:saida];
     #endif
 }
 
@@ -1635,28 +1889,15 @@ CoreAudioPlaybackState playbackState;
     #endif
 }
 
+// Mantido para os sítios que ligam a ponte à reprodução (mudar de faixa,
+// carregar em tocar): hoje é só um pedido para pôr tudo de acordo.
 - (void)startBs2bIfNeeded {
+    [self applyBs2bConfiguration];
+}
+
+- (void)startBs2bWithOutputDevice:(NSString *)nomeSaida processing:(BOOL)processar {
     #if ENABLE_BS2B_BRIDGE
-    // Já está a correr?
     if (self.bs2bTask && self.bs2bTask.isRunning) {
-        return;
-    }
-
-    // O utilizador desligou o filtro no botão. Sem esta guarda, os arranques
-    // ligados à reprodução (mudar de faixa, carregar em tocar) voltavam a
-    // levantá-lo por trás das costas dele.
-    if (!self.bs2bUserEnabled) {
-        #ifdef DEBUG
-        NSLog(@"[bs2b] Filtro desligado no botão; não arranco a ponte.");
-        #endif
-        return;
-    }
-
-    // Só corre se houver auscultadores
-    if (![self headphonesAreConnected]) {
-        #ifdef DEBUG
-        NSLog(@"[bs2b] Headphones not detected; not starting bs2b_bridge.");
-        #endif
         return;
     }
 
@@ -1671,13 +1912,19 @@ CoreAudioPlaybackState playbackState;
     NSTask *task = [[NSTask alloc] init];
     task.launchPath = bridgePath;
 
-    // To choose specific options:
-    // task.arguments = @[@"--perfil", @"cmoy"];
-    // task.arguments = @[@"--silencioso"];  // or any other default
-    // --eq: equalização dos MDR-7506 (AutoEQ/oratory1990, alvo Harman).
-    // Tirar a palavra --eq desliga-a; --eq FICHEIRO usa outra correcção.
-    task.arguments = @[@"--perfil", @"cmoy", @"--eq", @"--silencioso"];
-    
+    // --saida: o destino é sempre dito de fora, porque muda com a cavilha.
+    // --perfil nenhum: passagem limpa, sem crossfeed nem equalização. É o que
+    // o botão desligado quer dizer, e é também o que se usa nas colunas. Note-se
+    // que «desligado» não pára a ponte: ela continua a ser o caminho do som.
+    NSMutableArray<NSString *> *argumentos =
+        [@[@"--saida", nomeSaida, @"--silencioso"] mutableCopy];
+    if (processar) {
+        [argumentos addObjectsFromArray:@[@"--perfil", @"cmoy", @"--eq"]];
+    } else {
+        [argumentos addObjectsFromArray:@[@"--perfil", @"nenhum"]];
+    }
+    task.arguments = argumentos;
+
     // To avoid spam in stdout, redirect to /dev/null
     task.standardOutput = [NSPipe pipe];
     task.standardError  = [NSPipe pipe];
@@ -1687,6 +1934,7 @@ CoreAudioPlaybackState playbackState;
         dispatch_async(dispatch_get_main_queue(), ^{
             if (weakSelf.bs2bTask == finishedTask) {
                 weakSelf.bs2bTask = nil;
+                weakSelf.bs2bRunningOutputName = nil;
             }
             #ifdef DEBUG
             NSLog(@"[bs2b] bs2b_bridge terminated (exitStatus=%d).",
@@ -1698,16 +1946,20 @@ CoreAudioPlaybackState playbackState;
     @try {
         [task launch];
         self.bs2bTask = task;
+        self.bs2bRunningOutputName = nomeSaida;
+        self.bs2bRunningProcessing = processar;
         #ifdef DEBUG
-        NSLog(@"[bs2b] bs2b_bridge started at path %@", bridgePath);
+        NSLog(@"[bs2b] bs2b_bridge lançado: saída «%@», processamento %@.",
+              nomeSaida, processar ? @"ligado" : @"desligado");
         #endif
     } @catch (NSException *exception) {
         #ifdef DEBUG
         NSLog(@"[bs2b] Failed to launch bs2b_bridge: %@", exception);
         #endif
         self.bs2bTask = nil;
+        self.bs2bRunningOutputName = nil;
     }
-        #endif
+    #endif
 }
 
 - (void)stopBs2bIfRunning {
@@ -1728,6 +1980,7 @@ CoreAudioPlaybackState playbackState;
         }
     }
     self.bs2bTask = nil;
+    self.bs2bRunningOutputName = nil;
             #endif
 }
 

@@ -3,13 +3,19 @@
 // /usr/local/bin/clang -O3 -march=native -mtune=native bs2b_bridge3.c -o bs2b_bridge3
 //
 // Correcções face ao bs2b_bridge2:
-//   1) chunksize 1024 -> 128. O «chunksize» domina o atraso da ponte: medido em
-//      ida-e-volta pelo BlackHole, 1024 dá 69 ms contra 35 ms do bs2b_bridge
-//      original (PortAudio, 512 «frames»). Como o dispositivo de saída múltipla
-//      («tocaTintas auriculares») manda o som seco directamente para os
-//      auscultadores E para o BlackHole, ouvem-se as duas cópias: com 35 ms o
-//      atraso ainda funde (efeito de precedência), com 69 ms passa a eco
-//      separado. Com 128 a ida-e-volta é 37,9 ms, igual à do original.
+//   1) chunksize. Esteve em 1024, desceu a 128 e voltou a 1024 — a razão da
+//      descida deixou de existir. O «chunksize» domina o atraso da ponte:
+//      medido em ida-e-volta pelo BlackHole, 1024 dá 69 ms contra 37,9 ms com
+//      128. Enquanto a saída do macOS era o dispositivo de saída múltipla
+//      («tocaTintas auriculares»), que manda o som seco directamente para os
+//      auscultadores E para o BlackHole, ouviam-se as duas cópias e o atraso
+//      tinha de ficar abaixo dos 40 ms para o efeito de precedência as fundir.
+//      Com a saída do macOS no BlackHole directo não há cópia seca nenhuma com
+//      que alinhar, e o atraso deixa de importar: só o vê quem carrega em tocar
+//      e espera 69 ms pelo primeiro som. Em troca, 1024 são 23 ms de trabalho
+//      por bloco em vez de 2,9 ms — margem que este processo, que corre sem
+//      prioridade de tempo real, precisa para não perder blocos. Um bloco
+//      perdido é um estalido.
 //   2) Compensação de ganho. O libbs2b atenua a saída para não saturar quando
 //      soma os dois ramos; a cadeia CamillaDSP não o fazia e ficava 1,1 a
 //      1,8 dB acima (medido por resposta ao impulso). Agora atenua o mesmo.
@@ -97,10 +103,10 @@
 // do original, o CamillaDSP NÃO faz correspondência por substring; o nome tem
 // de ser exacto. Para os listar:  system_profiler SPAudioDataType
 #define IN_DEV_NAME   "BlackHole 2ch"           // captura (loopback do sistema)
-#define OUT_DEV_NAME  "Auscultadores externos"  // saída: auriculares Sony
+#define OUT_DEV_NAME  "Auscultadores externos"  // saída pré-definida: auriculares Sony
 
 #define SAMPLE_RATE   44100
-#define CHUNK_SIZE    128     // atraso da ponte ~= chunksize; ver nota no topo
+#define CHUNK_SIZE    1024    // atraso da ponte ~= chunksize; ver nota no topo
 #define SAMPLE_FORMAT "F32"   // o que o binario 4.1.3 aceita (S16/S24/S32/F32).
                               // NB: a documentacao do 4.1.3 diz "F32_LE" e mente;
                               // v3 chamava-lhe "FLOAT32LE".
@@ -127,10 +133,17 @@ typedef struct {
 // Níveis cx4 / cx3 / cx2 do projecto camilladsp-crossfeed.
 // A última coluna é a atenuação que o libbs2b aplica à saída e que faltava
 // aqui: medida por comparação das respostas ao impulso das duas cadeias.
+// O perfil «nenhum» não é um crossfeed mais fraco: é a ausência dele. Serve
+// para a ponte continuar a levar o áudio do BlackHole aos auscultadores sem lhe
+// tocar — que é o que o botão do programa de música quer dizer com «desligado».
+// Matar a ponte não servia: ela não é o efeito, é o próprio fio.
+#define PERFIL_NENHUM "nenhum"
+
 static const Perfil PERFIS[] = {
-    { "default", "700 Hz / 4,5 dB", 873.89, -2.25, 700.0,  -6.75, -1.81 },
-    { "cmoy",    "700 Hz / 6,0 dB", 868.97, -2.00, 700.0,  -8.00, -1.53 },
-    { "jmeier",  "650 Hz / 9,5 dB", 824.70, -1.40, 650.0, -10.92, -1.11 },
+    { "default",       "700 Hz / 4,5 dB", 873.89, -2.25, 700.0,  -6.75, -1.81 },
+    { "cmoy",          "700 Hz / 6,0 dB", 868.97, -2.00, 700.0,  -8.00, -1.53 },
+    { "jmeier",        "650 Hz / 9,5 dB", 824.70, -1.40, 650.0, -10.92, -1.11 },
+    { PERFIL_NENHUM,   "sem crossfeed",     0.0,   0.0,    0.0,   0.0,   0.0 },
 };
 #define NUM_PERFIS ((int)(sizeof(PERFIS) / sizeof(PERFIS[0])))
 
@@ -175,6 +188,12 @@ static const char *g_eq_origem = NULL;   // texto para as mensagens
 
 // --------------------------------------------------------------------------
 
+// Dispositivo de saída. O pré-definido são os auscultadores, mas quem chama
+// pode mandar tocar noutro sítio com --saida: é assim que o programa de música
+// leva o som às colunas quando não há auscultadores na cavilha. O nome tem de
+// ser exacto (o CamillaDSP não faz correspondência por substring).
+static const char *g_saida = OUT_DEV_NAME;
+
 static int g_silencioso = 0;
 static int g_ajustar_relogio = 1;        // correcção de deriva, ligada
 static int g_tem_volume = 0;
@@ -187,11 +206,17 @@ static char g_cfg[64] = {0};             // caminho do ficheiro temporário
 
 static void imprimir_uso(const char *nome_prog) {
     fprintf(stderr,
-        "Uso: %s [--perfil default|cmoy|jmeier] [--eq [ficheiro]] [--volume dB]\n"
+        "Uso: %s [--perfil default|cmoy|jmeier|nenhum] [--saida NOME]\n"
+        "       %*s [--eq [ficheiro]] [--volume dB]\n"
         "       %*s [--loudness] [--sem-ajuste-relogio] [--silencioso] [--mostrar-config]\n"
         "       %s --ajuda\n\n"
         "Opções:\n"
-        "  --perfil P       Onde P pertence a {default, cmoy, jmeier}\n"
+        "  --perfil P       Onde P pertence a {default, cmoy, jmeier, nenhum}.\n"
+        "                   «nenhum» é passagem limpa: a ponte continua a levar o\n"
+        "                   áudio do BlackHole à saída, sem crossfeed nenhum\n"
+        "  --saida NOME     Nome EXACTO do dispositivo de saída CoreAudio\n"
+        "                   (pré-definido: \"%s\"). Para os listar:\n"
+        "                   system_profiler SPAudioDataType\n"
         "  --eq [ficheiro]  Equalização dos auscultadores. Sem argumento usa a\n"
         "                   correcção embutida dos Sony MDR-7506; com argumento lê\n"
         "                   um ParametricEQ.txt do AutoEQ (tipos PK, LSC e HSC)\n"
@@ -207,11 +232,13 @@ static void imprimir_uso(const char *nome_prog) {
         "Perfis (equivalentes bs2b, via CamillaDSP):\n"
         "  default  -> 700 Hz / 4,5 dB\n"
         "  cmoy     -> 700 Hz / 6,0 dB\n"
-        "  jmeier   -> 650 Hz / 9,5 dB   (pré-definido)\n\n"
+        "  jmeier   -> 650 Hz / 9,5 dB   (pré-definido)\n"
+        "  nenhum   -> sem crossfeed (passagem limpa)\n\n"
         "Ambiente:\n"
         "  CAMILLADSP_BIN   Caminho do executável CamillaDSP\n"
         "                   (pré-definido: %s)\n",
-        nome_prog, (int)strlen(nome_prog), "", nome_prog, CAMILLADSP_BIN_DEFAULT);
+        nome_prog, (int)strlen(nome_prog), "", (int)strlen(nome_prog), "",
+        nome_prog, OUT_DEV_NAME, CAMILLADSP_BIN_DEFAULT);
 }
 
 static const Perfil *escolher_perfil(const char *nome) {
@@ -320,6 +347,8 @@ static void gerar_config(FILE *f, const Perfil *p) {
         "  chunksize: %d\n",
         p->nome, SAMPLE_RATE, CHUNK_SIZE);
 
+    const int sem_crossfeed = (strcmp(p->nome, PERFIL_NENHUM) == 0);
+
     // Correcção de deriva: de 10 em 10 segundos o CamillaDSP compara o nível
     // do tampão com o alvo e pede ao BlackHole que ande um nadinha mais depressa
     // ou mais devagar. Sem reamostrador — o relógio do dispositivo é ajustável,
@@ -344,34 +373,42 @@ static void gerar_config(FILE *f, const Perfil *p) {
         "    device: \"%s\"\n"
         "    format: %s\n"
         "\n"
-        "filters:\n"
-        "  xfeed_hi:\n"
-        "    type: Biquad\n"
-        "    parameters:\n"
-        "      type: Lowshelf\n"
-        "      freq: %g\n"
-        "      gain: %g\n"
-        "      q: 0.5\n"
-        "  xfeed_lo:\n"
-        "    type: Biquad\n"
-        "    parameters:\n"
-        "      type: LowpassFO\n"
-        "      freq: %g\n"
-        "  xfeed_lo_gain:\n"
-        "    type: Gain\n"
-        "    parameters:\n"
-        "      gain: %g\n"
-        "      scale: dB\n"
+        "filters:\n",
+        IN_DEV_NAME, SAMPLE_FORMAT,
+        g_saida, SAMPLE_FORMAT);
+
+    if (!sem_crossfeed) {
+        fprintf(f,
+            "  xfeed_hi:\n"
+            "    type: Biquad\n"
+            "    parameters:\n"
+            "      type: Lowshelf\n"
+            "      freq: %g\n"
+            "      gain: %g\n"
+            "      q: 0.5\n"
+            "  xfeed_lo:\n"
+            "    type: Biquad\n"
+            "    parameters:\n"
+            "      type: LowpassFO\n"
+            "      freq: %g\n"
+            "  xfeed_lo_gain:\n"
+            "    type: Gain\n"
+            "    parameters:\n"
+            "      gain: %g\n"
+            "      scale: dB\n",
+            p->hi_freq, p->hi_gain,
+            p->lo_freq,
+            p->lo_gain);
+    }
+
+    // O «comp» existe sempre, ainda que a 0 dB no perfil «nenhum»: é ele que
+    // garante que a cadeia nunca fica vazia, e o CamillaDSP quer um pipeline.
+    fprintf(f,
         "  comp:\n"
         "    type: Gain\n"
         "    parameters:\n"
         "      gain: %g\n"
         "      scale: dB\n",
-        IN_DEV_NAME, SAMPLE_FORMAT,
-        OUT_DEV_NAME, SAMPLE_FORMAT,
-        p->hi_freq, p->hi_gain,
-        p->lo_freq,
-        p->lo_gain,
         p->comp_gain);
 
     if (g_num_eq > 0) {
@@ -409,6 +446,18 @@ static void gerar_config(FILE *f, const Perfil *p) {
             LOUDNESS_LOW_BOOST, LOUDNESS_HIGH_BOOST);
     }
 
+    if (sem_crossfeed) {
+        // Passagem limpa: sem mistura de 2->4->2, sem crossfeed. Fica só o
+        // «comp» (a 0 dB) e, se tiverem sido pedidos, a equalização e o
+        // loudness.
+        fprintf(f,
+            "\n"
+            "pipeline:\n"
+            "  - type: Filter\n"
+            "    channels: [0, 1]\n"
+            "    names:\n"
+            "      - comp\n");
+    } else {
     fprintf(f,
         "\n"
         "mixers:\n"
@@ -470,6 +519,7 @@ static void gerar_config(FILE *f, const Perfil *p) {
         "    channels: [0, 1]\n"
         "    names:\n"
         "      - comp\n");
+    }
 
     if (g_num_eq > 0) {
         fprintf(f, "      - eq_preamp\n");
@@ -513,6 +563,24 @@ int main(int argc, char *argv[]) {
         }
         if (strcmp(arg, "--sem-ajuste-relogio") == 0) {
             g_ajustar_relogio = 0;
+            continue;
+        }
+        if (strncmp(arg, "--saida=", 8) == 0) {
+            if (arg[8] == '\0') {
+                fprintf(stderr, "Erro: --saida= precisa de um nome de dispositivo.\n\n");
+                imprimir_uso(argv[0]);
+                return 1;
+            }
+            g_saida = arg + 8;
+            continue;
+        }
+        if (strcmp(arg, "--saida") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Erro: --saida precisa de um nome de dispositivo.\n\n");
+                imprimir_uso(argv[0]);
+                return 1;
+            }
+            g_saida = argv[++i];
             continue;
         }
         if (strcmp(arg, "--loudness") == 0) {

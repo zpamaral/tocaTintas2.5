@@ -1238,10 +1238,14 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
                                                                   interleaved:YES];
 
     // Conversor e tampões criados uma vez e reutilizados em cada callback: no
-    // thread de áudio não se aloca memória.
+    // thread de áudio não se aloca memória. A capacidade é quatro vezes o que
+    // se pede ao tap — o código antigo dimensionava-os pelo tampão que chegava,
+    // e um tampão maior do que estes não teria onde caber. Se ainda assim vier
+    // um maior, o bloco é descartado com aviso em vez de sair calado.
+    const AVAudioFrameCount capacidadeTap = 4096 * 4;
     self.toFloatConverter = [[AVAudioConverter alloc] initFromFormat:inputFormat toFormat:floatFormat];
-    self.floatBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:floatFormat frameCapacity:8192];
-    self.int16Buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:targetFormat frameCapacity:8192];
+    self.floatBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:floatFormat frameCapacity:capacidadeTap];
+    self.int16Buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:targetFormat frameCapacity:capacidadeTap];
 
     __weak typeof(self) weakSelf = self;
 
@@ -1255,6 +1259,14 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
         AVAudioPCMBuffer *floatBuffer = strongSelf.floatBuffer;
         AVAudioPCMBuffer *convertedBuffer = strongSelf.int16Buffer;
         if (!floatBuffer || !convertedBuffer) return;
+
+        if (buffer.frameLength > floatBuffer.frameCapacity) {
+            #ifdef DEBUG
+            NSLog(@"[Streaming] Tampão do tap com %u tramas, acima da capacidade de %u — bloco descartado.",
+                  buffer.frameLength, floatBuffer.frameCapacity);
+            #endif
+            return;
+        }
 
         // Passo 1: converter para float 32 bits
         NSError *error = nil;
