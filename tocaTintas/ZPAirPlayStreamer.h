@@ -44,6 +44,11 @@ SOFTWARE.
 
 - (void)updateReplayGainValue:(float)dB; // To update the gain for each streamed song
 
+/// Como o anterior, mas com o `replaygain_track_peak` da faixa (0…1; 0 ou
+/// negativo significa «desconhecido»). Com o pico, o ganho é limitado a 1/pico
+/// para a normalização não ceifar os picos das faixas mais baixas.
+- (void)updateReplayGainValue:(float)dB trackPeak:(float)peak;
+
 - (void)startStreaming;
 - (void)stopStreaming;
 + (void)cleanupRaopPlayLockFile;

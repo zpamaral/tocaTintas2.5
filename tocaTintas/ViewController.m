@@ -2714,9 +2714,24 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
     }];
 }
 
+// Empurra ganho e pico juntos para o streamer. São lidos de sítios diferentes
+// das etiquetas e por ordem imprevisível, por isso manda-se sempre o par
+// completo com o que já se souber — a última chamada é a que fica a valer.
+- (void)pushReplayGainToStreamer {
+    if (!self.airPlayStreamer) {
+        #ifdef DEBUG
+        NSLog(@"[ReplayGain] AirPlayStreamer é nil; ganho não actualizado.");
+        #endif
+        return;
+    }
+    [self.airPlayStreamer updateReplayGainValue:self.replayGainValue
+                                      trackPeak:self.replayGainPeak];
+}
+
 - (void)extractAndDisplayFlacMetadataWithLibFLAC:(NSURL *)fileURL {
     // Always default to 1.0 before reading metadata
     self.replayGainValue = 0.0f;
+    self.replayGainPeak  = 0.0f;
 
     // Initialize the FLAC decoder
     FLAC__StreamDecoder *decoder = FLAC__stream_decoder_new();
@@ -2853,7 +2868,19 @@ NSString *print_vorbis_comment(const FLAC__StreamMetadata_VorbisComment_Entry *e
             #ifdef DEBUG
             NSLog(@"[ReplayGain] FLAC track gain: %f dB", self.replayGainValue);
             #endif
-            [self.airPlayStreamer updateReplayGainValue:self.replayGainValue];
+            [self pushReplayGainToStreamer];
+        });
+    }
+    else if ([entry_str hasPrefix:@"REPLAYGAIN_TRACK_PEAK="]) {
+        // Exemplo: "REPLAYGAIN_TRACK_PEAK=0.988525"
+        float peakValue = [[entry_str substringFromIndex:22] floatValue];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.replayGainPeak = peakValue;
+            #ifdef DEBUG
+            NSLog(@"[ReplayGain] FLAC track peak: %f", self.replayGainPeak);
+            #endif
+            [self pushReplayGainToStreamer];
         });
     }
 
@@ -3844,13 +3871,32 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
             NSLog(@"[ReplayGain] WavPack track gain: %.2f dB", self.replayGainValue);
             #endif
 
-            if (self.airPlayStreamer) {
-                [self.airPlayStreamer updateReplayGainValue:self.replayGainValue];
-            } else {
-                NSLog(@"[ReplayGain] AirPlayStreamer is nil, unable to update replay gain value.");
-            }
+            [self pushReplayGainToStreamer];
         });
 }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Extract replaygain_track_peak (0…1)
+    // ─────────────────────────────────────────────────────────────────────────────
+    tagSize = WavpackGetTagItem(wpc, "replaygain_track_peak", NULL, 0);
+    if (tagSize > 0) {
+        tagValue = (char *)malloc(tagSize + 1);
+        WavpackGetTagItem(wpc, "replaygain_track_peak", tagValue, tagSize + 1);
+
+        NSString *peakString = [NSString stringWithUTF8String:tagValue];
+        free(tagValue);
+
+        float peakValue = [peakString floatValue];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.replayGainPeak = peakValue;
+
+            #ifdef DEBUG
+            NSLog(@"[ReplayGain] WavPack track peak: %.4f", self.replayGainPeak);
+            #endif
+
+            [self pushReplayGainToStreamer];
+        });
+    }
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Extract Cover Art (if any)
@@ -5640,6 +5686,7 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     [self startProgressBarUpdates];  // Update progress bar
     [self extractAndDisplayMetadataFromURL:trackURL];  // Extract and display metadata
     self.replayGainValue = 0.0f;
+    self.replayGainPeak  = 0.0f;
 }
 
 // Start updating the progress bar every second
@@ -6399,6 +6446,7 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
                 __block NSImage *coverArt = nil;
                 __block NSString *trackNumberString = @"0";
                 __block float replayGainValue = 0.0f;
+                __block float replayGainPeak = 0.0f;
                 __block BOOL foundReplayGain = NO;
 
                 // Common metadata → artist/album/title/cover
@@ -6461,6 +6509,34 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
                     @"REPLAYGAIN_TRACK_GAIN"
                 ];
 
+                NSArray *replayGainPeakKeys = @[
+                    @"com.apple.iTunes.REPLAYGAIN_TRACK_PEAK",
+                    @"org.hydrogenaudio.replaygain.replaygain_track_peak",
+                    @"replaygain_track_peak",
+                    @"replaygain track peak",
+                    @"REPLAYGAIN_TRACK_PEAK"
+                ];
+
+                // A palha onde se procura o nome da etiqueta, e o texto do
+                // valor. Serviam a busca do ganho em código repetido; agora que
+                // também se procura o pico, ficam num sítio só.
+                NSString * (^palhaDoItem)(AVMetadataItem *) = ^NSString *(AVMetadataItem *item) {
+                    NSString *freeName = item.extraAttributes[AVMetadataExtraAttributeInfoKey] ?: @"";
+                    NSString *keyStr = [item.key isKindOfClass:NSString.class] ? (NSString *)item.key : @"";
+                    return [[@[ (item.identifier ?: @""), freeName, keyStr ]
+                              componentsJoinedByString:@"|"] lowercaseString];
+                };
+
+                NSString * (^textoDoItem)(AVMetadataItem *) = ^NSString *(AVMetadataItem *item) {
+                    NSString *valueString = nil;
+                    if ([item.value isKindOfClass:NSString.class]) {
+                        valueString = (NSString *)item.value;
+                    } else if ([item.value isKindOfClass:NSData.class]) {
+                        valueString = [[NSString alloc] initWithData:(NSData *)item.value encoding:NSUTF8StringEncoding];
+                    }
+                    return [valueString stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                };
+
                 dispatch_group_t g = dispatch_group_create();
                 __block NSArray<AVMetadataItem *> *iTunesItems = @[];
                 __block NSArray<AVMetadataItem *> *id3Items = @[];
@@ -6480,6 +6556,27 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
                 }];
 
                 dispatch_group_notify(g, dispatch_get_main_queue(), ^{
+                    // ---- Pico, procurado primeiro para já estar à mão quando
+                    // o ganho for encontrado e empurrado para o streamer ----
+                    for (AVMetadataItem *metadataItem in [iTunesItems arrayByAddingObjectsFromArray:id3Items]) {
+                        NSString *hay = palhaDoItem(metadataItem);
+                        BOOL match = NO;
+                        for (NSString *k in replayGainPeakKeys) {
+                            if ([hay containsString:k.lowercaseString]) { match = YES; break; }
+                        }
+                        if (!match) continue;
+
+                        NSString *valueString = textoDoItem(metadataItem);
+                        if (!valueString.length) continue;
+
+                        replayGainPeak = [valueString floatValue];
+                        self.replayGainPeak = replayGainPeak;
+                        #ifdef DEBUG
+                        NSLog(@"[ReplayGain] AAC/ALAC/MP3 track peak: %f", replayGainPeak);
+                        #endif
+                        break;
+                    }
+
                     // ---- iTunes (AAC/ALAC) ----
                     for (AVMetadataItem *metadataItem in iTunesItems) {
                         #ifdef DEBUG
@@ -6524,9 +6621,9 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
                         NSLog(@"[ReplayGain] AAC/ALAC track replayGain: %f dB", replayGainValue);
                         #endif
                         self.replayGainValue = replayGainValue;
-                        [self.airPlayStreamer updateReplayGainValue:self.replayGainValue];
+                        [self pushReplayGainToStreamer];
                         break;
-                        
+
                     }
 
                     // ---- ID3 fallback (MP3) ----
@@ -6549,7 +6646,7 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
                                     NSLog(@"[ReplayGain] MP3 (inferred track gain): %f dB", replayGainValue);
                                     #endif
                                     self.replayGainValue = replayGainValue;
-                                    [self.airPlayStreamer updateReplayGainValue:self.replayGainValue];
+                                    [self pushReplayGainToStreamer];
                                     break;
                                 }
                             }

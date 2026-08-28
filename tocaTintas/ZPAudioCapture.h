@@ -10,7 +10,9 @@
 
 @interface ZPAudioCapture : NSObject
 
-@property (nonatomic, strong) NSURL *audioSaveDirectory; // Directory to save audio recordings
+// Grava a entrada de áudio para um WAV de vírgula flutuante de 32 bits em
+// ~/Library/Application Support/tocaTintas. Quem trata do AirPlay é o
+// ZPAirPlayStreamer — esta classe só grava.
 - (void)startCapturingAudio;
 - (void)stopCapturingAudio;
 

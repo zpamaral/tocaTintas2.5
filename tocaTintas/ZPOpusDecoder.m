@@ -119,6 +119,7 @@ SOFTWARE.
 
     __block BOOL success = YES;
     __block float replayGainValue = 0.0f; // Default replay gain
+    __block float replayGainPeak  = 0.0f; // 0 = pico desconhecido
 
     dispatch_block_t decodeBlock = dispatch_block_create(0, ^{
         if (self && self->opusFile) {
@@ -171,6 +172,12 @@ SOFTWARE.
                             #endif
                             success = NO;
                         }
+                    } else if (strncasecmp(comment, "replaygain_track_peak=", 22) == 0) {
+                        NSString *peakString = [NSString stringWithUTF8String:comment + 22];
+                        replayGainPeak = [peakString floatValue];
+                        #ifdef DEBUG
+                        NSLog(@"[ReplayGain] Opus track peak: %.4f", replayGainPeak);
+                        #endif
                     }
                 }
             } else {
@@ -194,7 +201,8 @@ SOFTWARE.
             #ifdef DEBUG
             NSLog(@"[ReplayGain] Updating AirPlayStreamer with replay gain: %.2f", self.replayGainValue);
             #endif
-            [self.airPlayStreamer updateReplayGainValue:self.replayGainValue];
+            [self.airPlayStreamer updateReplayGainValue:self.replayGainValue
+                                              trackPeak:replayGainPeak];
         } else {
             NSLog(@"[ReplayGain] Opus error airPlayStreamer is nil when updating replay gain.");
         }

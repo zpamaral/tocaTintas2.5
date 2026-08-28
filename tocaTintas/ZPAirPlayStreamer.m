@@ -32,6 +32,7 @@ SOFTWARE.
 #import <sys/stat.h>
 #import <fcntl.h>
 #import <errno.h>
+#import <stdatomic.h>
 
 @interface ZPAirPlayStreamer ()
 
@@ -44,15 +45,16 @@ SOFTWARE.
 @property (nonatomic, strong) AVAudioEngine *audioEngine;
 
 // New properties
-@property (nonatomic, strong) NSOutputStream *fileOutputStream;
 @property (nonatomic, assign) BOOL isStreaming;
-@property (nonatomic, assign) BOOL isRecording;
+
+// Reutilizados em cada callback do tap: alocar no thread de áudio é o que não
+// se deve fazer, e era o que aqui se fazia duas vezes por bloco.
+@property (nonatomic, strong) AVAudioConverter *toFloatConverter;
+@property (nonatomic, strong) AVAudioPCMBuffer *floatBuffer;
+@property (nonatomic, strong) AVAudioPCMBuffer *int16Buffer;
 
 // Circular buffer
 @property (nonatomic, assign) TPCircularBuffer circularBuffer;
-
-// Gain adjustment
-@property (assign, nonatomic) float gainFactor2;
 
 // Opus Decoder
 @property (nonatomic, strong) ZPOpusDecoder *opusDecoder;
@@ -303,7 +305,13 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
     dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
 }
 
-@implementation ZPAirPlayStreamer
+@implementation ZPAirPlayStreamer {
+    // Ganho da normalização. O alvo é escrito pelo thread principal quando a
+    // faixa muda e lido pelo thread de áudio, daí ser atómico; o «actual» só é
+    // tocado dentro do tap, e é o que persegue o alvo bloco a bloco.
+    _Atomic float _ganhoAlvo;
+    float _ganhoActual;
+}
 
 #pragma mark - Initialization
 
@@ -316,9 +324,11 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         _port = port;
         _audioEngine = [[AVAudioEngine alloc] init];
         _isStreaming = NO;
-        _isRecording = NO;
-        [self setGainInDecibels2:replayGainValue]; // replayGainValue is in dB, convert it here
-        //[self setGainInDecibels2:0.0f]; // Neutral gain (0 dB)
+        // Sem pico conhecido à partida; quem souber chama depois o
+        // -updateReplayGainValue:trackPeak:. No arranque o ganho actual já
+        // parte do alvo, para a primeira faixa não entrar com rampa.
+        [self updateReplayGainValue:replayGainValue trackPeak:0.0f];
+        _ganhoActual = atomic_load(&_ganhoAlvo);
 
         // Initialize the circular buffer with 10 seconds of stereo audio
         //TPCircularBufferInit(&_circularBuffer, 44100 * 2 * 10); // Original value
@@ -347,7 +357,7 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
             NSLog(@"[Streaming] Reconfiguração do engine de áudio detectada (mudança de dispositivos).");
             #endif
 
-            if (!strongSelf.isStreaming && !strongSelf.isRecording) return;
+            if (!strongSelf.isStreaming) return;
 
             [strongSelf installAudioTap];
 
@@ -1155,65 +1165,6 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
     #endif
 }
 
-#pragma mark - Recording Methods
-
-- (void)startRecording {
-    if (self.isRecording) {
-        #ifdef DEBUG
-        NSLog(@"[Streaming] Already recording.");
-        #endif
-        return;
-    }
-
-    self.isRecording = YES;
-    [self setGainInDecibels2:6.0];
-
-    NSArray<NSURL *> *appSupportURLs = [[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask];
-    NSURL *appSupportURL = [appSupportURLs firstObject];
-    NSURL *tocaTintasDirectory = [appSupportURL URLByAppendingPathComponent:@"[Streaming] tocaTintas" isDirectory:YES];
-
-    NSError *error = nil;
-    if (![[NSFileManager defaultManager] fileExistsAtPath:[tocaTintasDirectory path]]) {
-        [[NSFileManager defaultManager] createDirectoryAtURL:tocaTintasDirectory withIntermediateDirectories:YES attributes:nil error:&error];
-        if (error) {
-            #ifdef DEBUG
-            NSLog(@"[Streaming] Error creating directory: %@", error.localizedDescription);
-            #endif
-        }
-    }
-
-    NSString *fileName = [NSString stringWithFormat:@"[Streaming] Recording_%@.pcm", [[NSUUID UUID] UUIDString]];
-    NSURL *outputFileURL = [tocaTintasDirectory URLByAppendingPathComponent:fileName];
-
-    self.fileOutputStream = [NSOutputStream outputStreamWithURL:outputFileURL append:NO];
-    [self.fileOutputStream open];
-    [self startOrUpdateAudioCapture];
-    #ifdef DEBUG
-    NSLog(@"[Streaming] Recording started. Saving to %@", [outputFileURL path]);
-    #endif
-}
-
-- (void)stopRecording {
-    if (!self.isRecording) {
-        #ifdef DEBUG
-        NSLog(@"[Streaming] Recording is not running.");
-        #endif
-        return;
-    }
-
-    self.isRecording = NO;
-
-    if (self.fileOutputStream) {
-        [self.fileOutputStream close];
-        self.fileOutputStream = nil;
-        #ifdef DEBUG
-        NSLog(@"[Streaming] Recording stopped and file output stream closed.");
-        #endif
-    }
-
-    [self stopAudioCaptureIfNeeded];
-}
-
 #pragma mark - Audio Capture
 
 - (void)startOrUpdateAudioCapture {
@@ -1230,14 +1181,16 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
     if (![self.audioEngine startAndReturnError:&engineError]) {
         #ifdef DEBUG
         NSLog(@"[Streaming] Error starting audio engine: %@", engineError.localizedDescription);
+        #endif
     } else {
+        #ifdef DEBUG
         NSLog(@"[Streaming] Audio capturing started.");
         #endif
     }
 }
 
 - (void)stopAudioCaptureIfNeeded {
-    if (!self.isRecording && !self.isStreaming) {
+    if (!self.isStreaming) {
         if (self.audioEngine.isRunning) {
             [self.audioEngine.inputNode removeTapOnBus:0];
             [self.audioEngine stop];
@@ -1248,7 +1201,7 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
         }
     } else {
         #ifdef DEBUG
-        NSLog(@"[Streaming] Audio engine continues running (recording or streaming is active).");
+        NSLog(@"[Streaming] Audio engine continues running (streaming is active).");
         #endif
     }
 }
@@ -1278,27 +1231,34 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
                                                                     channels:2
                                                                  interleaved:NO];
 
-    // Formato final int16 para envio e gravação
+    // Formato final int16 para envio ao raop_play
     AVAudioFormat *targetFormat = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatInt16
                                                                    sampleRate:44100.0
                                                                      channels:2
                                                                   interleaved:YES];
 
-    // Conversores criados uma vez e reutilizados em cada callback
-    AVAudioConverter *toFloatConverter = [[AVAudioConverter alloc] initFromFormat:inputFormat toFormat:floatFormat];
+    // Conversor e tampões criados uma vez e reutilizados em cada callback: no
+    // thread de áudio não se aloca memória.
+    self.toFloatConverter = [[AVAudioConverter alloc] initFromFormat:inputFormat toFormat:floatFormat];
+    self.floatBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:floatFormat frameCapacity:8192];
+    self.int16Buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:targetFormat frameCapacity:8192];
+
+    __weak typeof(self) weakSelf = self;
 
     [inputNode installTapOnBus:0
                     bufferSize:4096
                         format:inputFormat
                          block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
-        if (!buffer || buffer.frameLength == 0) return;
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf || !buffer || buffer.frameLength == 0) return;
 
-        NSError *error = nil;
+        AVAudioPCMBuffer *floatBuffer = strongSelf.floatBuffer;
+        AVAudioPCMBuffer *convertedBuffer = strongSelf.int16Buffer;
+        if (!floatBuffer || !convertedBuffer) return;
 
         // Passo 1: converter para float 32 bits
-        AVAudioPCMBuffer *floatBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:floatFormat
-                                                                      frameCapacity:buffer.frameCapacity];
-        [toFloatConverter convertToBuffer:floatBuffer fromBuffer:buffer error:&error];
+        NSError *error = nil;
+        [strongSelf.toFloatConverter convertToBuffer:floatBuffer fromBuffer:buffer error:&error];
         if (error) {
             #ifdef DEBUG
             NSLog(@"[Streaming] Error converting to float: %@", error.localizedDescription);
@@ -1306,67 +1266,83 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
             return;
         }
 
-        // Passo 2: aplicar ganho em float — sem perda de precisão
-        float gainFactor = self.gainFactor2;
-        for (NSUInteger ch = 0; ch < floatFormat.channelCount; ch++) {
-            float *channelData = floatBuffer.floatChannelData[ch];
-            for (NSUInteger i = 0; i < floatBuffer.frameLength; i++) {
-                channelData[i] *= gainFactor;
-                channelData[i] = fmaxf(-1.0f, fminf(1.0f, channelData[i]));
-            }
-        }
+        // Passos 2 e 3 num só varrimento: ganho, limitação e conversão para
+        // int16 com a intercalação L/R sob controlo nosso.
+        //
+        // O ganho não salta: quando a faixa muda, o alvo é novo mas o ganho
+        // percorre a distância ao longo deste bloco (uns 90 ms a 44,1 kHz).
+        // Um degrau entre duas amostras — de ×0,5 para ×1,4, por exemplo —
+        // ouve-se como um estalo. O alvo é lido uma vez por bloco, e de forma
+        // atómica, porque quem o escreve é o thread principal.
+        const AVAudioFrameCount frames = floatBuffer.frameLength;
+        const float ganhoAlvo = atomic_load(&strongSelf->_ganhoAlvo);
+        float ganho = strongSelf->_ganhoActual;
+        const float passo = (frames > 0) ? (ganhoAlvo - ganho) / (float)frames : 0.0f;
 
-        // Passo 3: converter para int16 manualmente — controlo total da intercalação L/R
-        AVAudioPCMBuffer *convertedBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:targetFormat
-                                                                          frameCapacity:floatBuffer.frameCapacity];
-        convertedBuffer.frameLength = floatBuffer.frameLength;
+        convertedBuffer.frameLength = frames;
 
-        float *leftChannel  = floatBuffer.floatChannelData[0];
-        float *rightChannel = floatBuffer.floatChannelData[1];
+        const float *leftChannel  = floatBuffer.floatChannelData[0];
+        const float *rightChannel = floatBuffer.floatChannelData[1];
         int16_t *pcmData = convertedBuffer.int16ChannelData[0];
 
-        for (NSUInteger i = 0; i < floatBuffer.frameLength; i++) {
-            pcmData[i * 2]     = (int16_t)(leftChannel[i]  * INT16_MAX);
-            pcmData[i * 2 + 1] = (int16_t)(rightChannel[i] * INT16_MAX);
+        for (AVAudioFrameCount i = 0; i < frames; i++, ganho += passo) {
+            float esquerdo = fmaxf(-1.0f, fminf(1.0f, leftChannel[i]  * ganho));
+            float direito  = fmaxf(-1.0f, fminf(1.0f, rightChannel[i] * ganho));
+            // lrintf arredonda; o molde para int truncava em direcção a zero,
+            // o que é meio bit de distorção de graça em cada amostra.
+            pcmData[i * 2]     = (int16_t)lrintf(esquerdo * INT16_MAX);
+            pcmData[i * 2 + 1] = (int16_t)lrintf(direito  * INT16_MAX);
         }
 
-        NSUInteger byteCount = floatBuffer.frameLength * targetFormat.streamDescription->mBytesPerFrame;
+        strongSelf->_ganhoActual = ganhoAlvo;
+
+        NSUInteger byteCount = frames * convertedBuffer.format.streamDescription->mBytesPerFrame;
 
         // Passo 4: escrever no tampão circular. Se estiver cheio, o bloco é
         // descartado — regista-se para correlacionar com soluços audíveis.
-        if (!TPCircularBufferProduceBytes(&self->_circularBuffer, pcmData, (uint32_t)byteCount)) {
+        if (!TPCircularBufferProduceBytes(&strongSelf->_circularBuffer, pcmData, (uint32_t)byteCount)) {
             #ifdef DEBUG
             NSLog(@"[Streaming] Tampão circular cheio — descartados %lu bytes do tap.", (unsigned long)byteCount);
             #endif
-        }
-
-        // Gravação — usa os dados int16 directamente, independente do tampão
-        if (self.isRecording) {
-            NSData *recordingData = [NSData dataWithBytes:pcmData length:byteCount];
-            NSInteger bytesWritten = [self.fileOutputStream write:recordingData.bytes maxLength:recordingData.length];
-            if (bytesWritten < 0) {
-                #ifdef DEBUG
-                NSLog(@"[Recording] Error writing to file: %@", self.fileOutputStream.streamError.localizedDescription);
-                #endif
-            }
         }
     }];
 }
 
 #pragma mark - Gain Adjustment
 
+// Sem pico: mantém-se o comportamento antigo (aplica o ganho todo e limita-se
+// à bruta se transbordar).
 - (void)updateReplayGainValue:(float)dB {
-    // Just call the existing method
-    #ifdef DEBUG
-    NSLog(@"[ReplayGain] All Formats, updateReplayGainValue received: %.2f", dB);
-    #endif
-    [self setGainInDecibels2:dB];
+    [self updateReplayGainValue:dB trackPeak:0.0f];
 }
 
-- (void)setGainInDecibels2:(float)gainInDb {
-    self.gainFactor2 = powf(10.0, gainInDb / 20.0);
+// O pico é o `replaygain_track_peak` das etiquetas: a amplitude da amostra mais
+// alta da faixa, em escala 0…1 (pode passar de 1 em material já ceifado).
+//
+// Sem ele, uma faixa baixinha leva um ganho positivo que atira os picos acima
+// de 0 dBFS, e o limitador do tap corta-os a direito — distorção audível
+// precisamente nas passagens mais fortes. Com ele, limita-se o ganho a 1/pico,
+// que é o máximo que a faixa comporta sem ceifar. É a regra «prevent clipping»
+// da norma ReplayGain.
+- (void)updateReplayGainValue:(float)dB trackPeak:(float)peak {
+    float factor = powf(10.0f, dB / 20.0f);
+
+    if (peak > 0.0f) {
+        float tecto = 1.0f / peak;
+        if (factor > tecto) {
+            #ifdef DEBUG
+            NSLog(@"[ReplayGain] Ganho de %.2f dB (×%.3f) reduzido para ×%.3f: o pico da faixa é %.3f.",
+                  dB, factor, tecto, peak);
+            #endif
+            factor = tecto;
+        }
+    }
+
+    atomic_store(&_ganhoAlvo, factor);
+
     #ifdef DEBUG
-    NSLog(@"[ReplayGain] Final gain factor set to %.2f for %.2f dB gain.", self.gainFactor2, gainInDb);
+    NSLog(@"[ReplayGain] Ganho alvo ×%.3f para %.2f dB (pico %@).",
+          factor, dB, peak > 0.0f ? [NSString stringWithFormat:@"%.3f", peak] : @"desconhecido");
     #endif
 }
 

@@ -55,6 +55,9 @@ SOFTWARE.
 //@property (nonatomic, strong) NSArray<NSString *> *fullFileNamesForMatching;
 
 @property (nonatomic, assign) float replayGainValue;
+// `replaygain_track_peak` da faixa (0…1). Zero significa «não vinha nas
+// etiquetas», e nesse caso não há como impedir o ceifar da normalização.
+@property (nonatomic, assign) float replayGainPeak;
 @property (nonatomic, assign) BOOL isStreaming;
 
 @end

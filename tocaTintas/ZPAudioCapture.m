@@ -49,20 +49,8 @@ enum { kZPWavHeaderSize = 56 };   // constante de compilação: serve de dimens�
 @property (assign, nonatomic) NSUInteger recordChannels;
 @property (assign, nonatomic) BOOL isRecording;
 
-// Streaming properties
-@property (strong, nonatomic) NSTask *raopTask;
-@property (strong, nonatomic) NSPipe *inputPipe;
-@property (assign, nonatomic) BOOL isStreaming;
-@property (strong, nonatomic) NSString *ipAddress;
-@property (strong, nonatomic) NSString *port;
-
-// Gain adjustment
-@property (assign, nonatomic) float gainFactor;
-
 // Reutilizados entre callbacks (criados uma vez por tap)
-@property (strong, nonatomic) AVAudioConverter *audioConverter;      // Int16, para o AirPlay
-@property (strong, nonatomic) AVAudioPCMBuffer *convertedBuffer;
-@property (strong, nonatomic) AVAudioConverter *recordConverter;     // float de 32 bits, para o ficheiro
+@property (strong, nonatomic) AVAudioConverter *recordConverter;
 @property (strong, nonatomic) AVAudioPCMBuffer *recordBuffer;
 
 // Fila serial para I/O fora do thread de áudio
@@ -81,8 +69,6 @@ enum { kZPWavHeaderSize = 56 };   // constante de compilação: serve de dimens�
         // Initialize audio engine
         _audioEngine = [[AVAudioEngine alloc] init];
         _isRecording = NO;
-        _isStreaming = NO;
-        _gainFactor = 1.0; // Default gain factor (no gain adjustment)
         _ioQueue = dispatch_queue_create("com.tocaTintas.audioCapture.io", DISPATCH_QUEUE_SERIAL);
     }
     return self;
@@ -111,12 +97,6 @@ enum { kZPWavHeaderSize = 56 };   // constante de compilação: serve de dimens�
     }
 
     self.isRecording = YES;
-
-    // Sem ganho na gravação. O ganho fixo de +6 dB que aqui estava só fazia
-    // sentido enquanto se gravava em Int16, para aproveitar escala; agora que o
-    // ficheiro é de vírgula flutuante não há escala a aproveitar e o ganho só
-    // arriscava ceifar picos. Quem normaliza é o Audacity, sem perdas.
-    self.gainFactor = 1.0;
 
     // Get the Application Support directory
     NSArray<NSURL *> *appSupportURLs = [[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask];
@@ -172,7 +152,7 @@ enum { kZPWavHeaderSize = 56 };   // constante de compilação: serve de dimens�
     #endif
 
     // Start or update audio capture
-    [self startOrUpdateAudioCapture];
+    [self startAudioCapture];
 }
 
 - (void)stopRecording {
@@ -194,8 +174,7 @@ enum { kZPWavHeaderSize = 56 };   // constante de compilação: serve de dimens�
         });
     }
 
-    // Stop audio capture if not streaming
-    [self stopAudioCaptureIfNeeded];
+    [self stopAudioCapture];
 }
 
 #pragma mark - Ficheiro WAV
@@ -272,87 +251,9 @@ static NSData *ZPWavHeader(double sampleRate, NSUInteger channels, unsigned long
     #endif
 }
 
-#pragma mark - Streaming Methods
-
-- (void)startStreamingToIPAddress:(NSString *)ipAddress port:(NSString *)port {
-    if (self.isStreaming) {
-        #ifdef DEBUG
-        NSLog(@"[Audio Capture] Already streaming.");
-        #endif
-        return;
-    }
-
-    self.isStreaming = YES;
-    self.ipAddress = ipAddress;
-    self.port = port;
-
-    // Set up the pipe to connect to raop_play's standard input
-    self.inputPipe = [NSPipe pipe];
-
-    // Start raop_play as a subprocess
-    self.raopTask = [[NSTask alloc] init];
-    NSString *raopPlayPath = [[NSBundle mainBundle] pathForResource:@"raop_play" ofType:nil];
-    self.raopTask.launchPath = raopPlayPath;
-
-    self.raopTask.arguments = @[
-        @"-a", self.ipAddress,
-        @"-p", self.port,
-        @"-"
-    ];
-
-    self.raopTask.standardInput = self.inputPipe;
-    self.raopTask.standardOutput = [NSPipe pipe]; // Optional
-    self.raopTask.standardError = [NSPipe pipe];  // Optional
-
-    // Launch raop_play
-    [self.raopTask launch];
-
-    #ifdef DEBUG
-    NSLog(@"[Audio Capture] Streaming started to %@:%@", self.ipAddress, self.port);
-    #endif
-
-    // Start or update audio capture
-    [self startOrUpdateAudioCapture];
-}
-
-- (void)stopStreaming {
-    if (!self.isStreaming) {
-        #ifdef DEBUG
-        NSLog(@"[Audio Capture] Streaming is not running.");
-        #endif
-        return;
-    }
-
-    self.isStreaming = NO;
-
-    // Close pipe and terminate raop_play
-    if (self.inputPipe && self.inputPipe.fileHandleForWriting) {
-        [self.inputPipe.fileHandleForWriting closeFile];
-        self.inputPipe = nil;
-        #ifdef DEBUG
-        NSLog(@"[Audio Capture] Input pipe closed.");
-        #endif
-    }
-
-    if (self.raopTask) {
-        [self.raopTask terminate];
-        self.raopTask = nil;
-        #ifdef DEBUG
-        NSLog(@"[Audio Capture] RAOP task terminated.");
-        #endif
-    }
-
-    #ifdef DEBUG
-    NSLog(@"[Audio Capture] Streaming stopped.");
-    #endif
-
-    // Stop audio capture if not recording
-    [self stopAudioCaptureIfNeeded];
-}
-
 #pragma mark - Audio Capture Management
 
-- (void)startOrUpdateAudioCapture {
+- (void)startAudioCapture {
     // If the audio engine is already running, no need to reinstall the tap
     if (self.audioEngine.isRunning) {
         #ifdef DEBUG
@@ -361,10 +262,8 @@ static NSData *ZPWavHeader(double sampleRate, NSUInteger channels, unsigned long
         return;
     }
 
-    // Install the audio tap
     [self installAudioTap];
 
-    // Start the audio engine
     NSError *engineError = nil;
     if (![self.audioEngine startAndReturnError:&engineError]) {
         #ifdef DEBUG
@@ -377,42 +276,41 @@ static NSData *ZPWavHeader(double sampleRate, NSUInteger channels, unsigned long
     }
 }
 
-- (void)stopAudioCaptureIfNeeded {
-    // Stop the audio engine if neither recording nor streaming is active
-    if (!self.isRecording && !self.isStreaming) {
-        if (self.engineConfigObserver) {
-            [[NSNotificationCenter defaultCenter] removeObserver:self.engineConfigObserver];
-            self.engineConfigObserver = nil;
-        }
-        if (self.audioEngine.isRunning) {
-            [self.audioEngine.inputNode removeTapOnBus:0];
-            [self.audioEngine stop];
-            #ifdef DEBUG
-            NSLog(@"[Audio Capture] Audio engine stopped.");
-            #endif
-        }
-    } else {
+- (void)stopAudioCapture {
+    if (self.engineConfigObserver) {
+        [[NSNotificationCenter defaultCenter] removeObserver:self.engineConfigObserver];
+        self.engineConfigObserver = nil;
+    }
+    if (self.audioEngine.isRunning) {
+        [self.audioEngine.inputNode removeTapOnBus:0];
+        [self.audioEngine stop];
         #ifdef DEBUG
-        NSLog(@"[Audio Capture] Audio engine continues running (recording or streaming is active).");
+        NSLog(@"[Audio Capture] Audio engine stopped.");
         #endif
     }
 }
 
 - (void)installAudioTap {
     AVAudioInputNode *inputNode = self.audioEngine.inputNode;
+
+    // Remover um tap anterior antes de instalar: instalar por cima de um tap
+    // existente lança excepção, e este método volta a correr sempre que o
+    // dispositivo de áudio muda (ver o observador mais abaixo) — trocar de
+    // saída a meio de uma gravação passava por aqui.
+    [inputNode removeTapOnBus:0];
+
     AVAudioFormat *inputFormat = [inputNode inputFormatForBus:0];
 
-    AVAudioFormat *targetFormat = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatInt16
-                                                                   sampleRate:44100.0
-                                                                     channels:2
-                                                                  interleaved:YES];
+    if (!inputFormat || inputFormat.channelCount == 0 || inputFormat.sampleRate == 0) {
+        #ifdef DEBUG
+        NSLog(@"[Audio Capture] Formato de entrada inválido: %.0f Hz, %u canais.",
+              inputFormat.sampleRate, inputFormat.channelCount);
+        #endif
+        return;
+    }
 
-    self.audioConverter = [[AVAudioConverter alloc] initFromFormat:inputFormat toFormat:targetFormat];
-    // 8192 frames cobre o pior caso de upsampling (ex.: entrada a 32 kHz → saída a 44,1 kHz)
-    self.convertedBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:targetFormat frameCapacity:8192];
-
-    // A gravação segue por um caminho próprio, em vírgula flutuante de 32 bits
-    // e à frequência do próprio dispositivo.
+    // Grava-se em vírgula flutuante de 32 bits, à frequência do próprio
+    // dispositivo.
     //
     // Porquê: com o volume de saída a 25 %, o sinal chega ao tap a −12 dB e
     // ocupa só um quarto da escala. Passá-lo a Int16 aí atirava fora dois bits
@@ -441,7 +339,7 @@ static NSData *ZPWavHeader(double sampleRate, NSUInteger channels, unsigned long
                 usingBlock:^(NSNotification *note) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
-        if (!strongSelf.isRecording && !strongSelf.isStreaming) return;
+        if (!strongSelf.isRecording) return;
         #ifdef DEBUG
         NSLog(@"[Audio Capture] Reconfiguração do engine detectada — a reinstalar tap.");
         #endif
@@ -459,97 +357,54 @@ static NSData *ZPWavHeader(double sampleRate, NSUInteger channels, unsigned long
                         format:inputFormat
                          block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
-        if (!strongSelf) return;
+        if (!strongSelf || !strongSelf.isRecording || buffer.frameLength == 0) {
+            return;
+        }
 
-        if (buffer.frameLength > 0) {
-            // A gravação leva o sinal tal como chegou: converte-se antes de
-            // qualquer ganho, para o ficheiro ficar com o original.
-            if (strongSelf.isRecording) {
-                NSError *recError = nil;
-                [strongSelf.recordConverter convertToBuffer:strongSelf.recordBuffer fromBuffer:buffer error:&recError];
-                if (recError) {
-                    #ifdef DEBUG
-                    NSLog(@"[Audio Capture] Erro a converter para float: %@", recError.localizedDescription);
-                    #endif
-                } else {
-                    if (strongSelf.recordSampleRate <= 0.0) {
-                        strongSelf.recordSampleRate = strongSelf.recordConverter.outputFormat.sampleRate;
-                        strongSelf.recordChannels   = strongSelf.recordConverter.outputFormat.channelCount;
-                    }
+        NSError *recError = nil;
+        [strongSelf.recordConverter convertToBuffer:strongSelf.recordBuffer fromBuffer:buffer error:&recError];
+        if (recError) {
+            #ifdef DEBUG
+            NSLog(@"[Audio Capture] Erro a converter para float: %@", recError.localizedDescription);
+            #endif
+            return;
+        }
 
-                    NSUInteger recLength = strongSelf.recordBuffer.frameLength
-                                           * strongSelf.recordConverter.outputFormat.streamDescription->mBytesPerFrame;
-                    // Copiar os bytes antes de sair do thread de áudio
-                    NSData *floatData = [NSData dataWithBytes:strongSelf.recordBuffer.floatChannelData[0]
-                                                       length:recLength];
+        // A frequência e o número de canais do ficheiro são os do primeiro
+        // bloco que entrar; é com eles que o cabeçalho é escrito no fim.
+        if (strongSelf.recordSampleRate <= 0.0) {
+            strongSelf.recordSampleRate = strongSelf.recordConverter.outputFormat.sampleRate;
+            strongSelf.recordChannels   = strongSelf.recordConverter.outputFormat.channelCount;
+        }
 
-                    dispatch_async(strongSelf.ioQueue, ^{
-                        // O descritor é posto a nil no -finalizeRecordingFile,
-                        // nesta mesma fila: o que chegue depois disso é tarde.
-                        NSFileHandle *handle = strongSelf.recordFileHandle;
-                        if (!handle) return;
-                        NSError *writeError = nil;
-                        if (![handle writeData:floatData error:&writeError]) {
-                            #ifdef DEBUG
-                            NSLog(@"[Audio Capture] Error writing to file: %@", writeError.localizedDescription);
-                            #endif
-                            return;
-                        }
-                        strongSelf.recordDataBytes += floatData.length;
-                    });
-                }
-            }
+        NSUInteger recLength = strongSelf.recordBuffer.frameLength
+                               * strongSelf.recordConverter.outputFormat.streamDescription->mBytesPerFrame;
+        // Copiar os bytes antes de sair do thread de áudio
+        NSData *floatData = [NSData dataWithBytes:strongSelf.recordBuffer.floatChannelData[0]
+                                           length:recLength];
 
-            if (!strongSelf.isStreaming) {
-                return;
-            }
+        dispatch_async(strongSelf.ioQueue, ^{
+            // O descritor é posto a nil no -finalizeRecordingFile, nesta mesma
+            // fila em série: o que chegue depois disso vem tarde.
+            NSFileHandle *handle = strongSelf.recordFileHandle;
+            if (!handle) return;
 
-            // Daqui para baixo é o caminho do AirPlay, que continua em Int16.
-            if (strongSelf.gainFactor != 1.0) {
-                for (AVAudioChannelCount channel = 0; channel < buffer.format.channelCount; channel++) {
-                    float *channelData = buffer.floatChannelData[channel];
-                    for (AVAudioFrameCount frame = 0; frame < buffer.frameLength; frame++) {
-                        channelData[frame] *= strongSelf.gainFactor;
-                        // As amostras vêm normalizadas a ±1,0, não em contagens
-                        // de Int16: o limite de antes (±32768) nunca pegava.
-                        if (channelData[frame] >  1.0f) channelData[frame] =  1.0f;
-                        if (channelData[frame] < -1.0f) channelData[frame] = -1.0f;
-                    }
-                }
-            }
-
-            NSError *error = nil;
-            [strongSelf.audioConverter convertToBuffer:strongSelf.convertedBuffer fromBuffer:buffer error:&error];
-            if (error) {
+            NSError *writeError = nil;
+            if (![handle writeData:floatData error:&writeError]) {
                 #ifdef DEBUG
-                NSLog(@"[Audio Capture] Error converting audio buffer: %@", error.localizedDescription);
+                NSLog(@"[Audio Capture] Erro a escrever no ficheiro: %@", writeError.localizedDescription);
                 #endif
                 return;
             }
-
-            // Copiar os bytes antes de sair do thread de áudio
-            NSUInteger dataLength = strongSelf.convertedBuffer.frameLength
-                                    * strongSelf.audioConverter.outputFormat.streamDescription->mBytesPerFrame;
-            NSData *pcmData = [NSData dataWithBytes:strongSelf.convertedBuffer.int16ChannelData[0]
-                                             length:dataLength];
-
-            dispatch_async(strongSelf.ioQueue, ^{
-                if (strongSelf.inputPipe) {
-                    [[strongSelf.inputPipe fileHandleForWriting] writeData:pcmData];
-                }
-            });
-        }
+            strongSelf.recordDataBytes += floatData.length;
+        });
     }];
 }
 
-#pragma mark - Gain Adjustment
-
-- (void)setGainInDecibels:(float)gainInDb {
-    // Convert dB gain to linear scale factor
-    self.gainFactor = powf(10.0, gainInDb / 20.0);
-    #ifdef DEBUG
-    NSLog(@"[Audio Capture] Gain factor set to %.2f for %.2f dB gain.", self.gainFactor, gainInDb);
-    #endif
+- (void)dealloc {
+    if (_engineConfigObserver) {
+        [[NSNotificationCenter defaultCenter] removeObserver:_engineConfigObserver];
+    }
 }
 
 @end
