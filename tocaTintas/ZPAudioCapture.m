@@ -27,11 +27,126 @@ SOFTWARE.
 //
 #import "ZPAudioCapture.h"
 #import <AVFoundation/AVFoundation.h>
+#import <CoreAudio/CoreAudio.h>
+#import <AudioToolbox/AudioToolbox.h>
 
 // RIFF (12) + fmt  (24) + fact (12) + cabeçalho de data (8). O troço «fact» é
 // exigido pela norma para formatos que não sejam PCM inteiro; sem ele há
 // leitores esquisitos que recusam WAV de vírgula flutuante.
 enum { kZPWavHeaderSize = 56 };   // constante de compilação: serve de dimensão do vector
+
+// Substring do nome do dispositivo de loopback. É o mesmo BlackHole para onde a
+// saída do sistema aponta; o nome exacto («BlackHole 2ch») pode mudar com a
+// versão, daí procurar-se por pedaço.
+static NSString * const kZPLoopbackNameSubstring = @"BlackHole";
+
+// Procura o dispositivo de loopback entre os que têm entrada estéreo.
+static AudioDeviceID ZPLoopbackInputDevice(void) {
+    AudioObjectPropertyAddress devicesAddr = (AudioObjectPropertyAddress) {
+        .mSelector = kAudioHardwarePropertyDevices,
+        .mScope    = kAudioObjectPropertyScopeGlobal,
+        .mElement  = kAudioObjectPropertyElementMain
+    };
+
+    UInt32 dataSize = 0;
+    if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &devicesAddr, 0, NULL, &dataSize) != noErr
+        || dataSize == 0) {
+        return kAudioObjectUnknown;
+    }
+
+    AudioDeviceID *ids = (AudioDeviceID *)malloc(dataSize);
+    if (!ids) {
+        return kAudioObjectUnknown;
+    }
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &devicesAddr, 0, NULL, &dataSize, ids) != noErr) {
+        free(ids);
+        return kAudioObjectUnknown;
+    }
+
+    AudioDeviceID encontrado = kAudioObjectUnknown;
+    UInt32 total = dataSize / sizeof(AudioDeviceID);
+
+    for (UInt32 i = 0; i < total && encontrado == kAudioObjectUnknown; ++i) {
+        // Tem canais de ENTRADA? O BlackHole tem os dois lados; só nos serve a entrada.
+        UInt32 streamsSize = 0;
+        AudioObjectPropertyAddress streamAddr = (AudioObjectPropertyAddress) {
+            .mSelector = kAudioDevicePropertyStreamConfiguration,
+            .mScope    = kAudioDevicePropertyScopeInput,
+            .mElement  = kAudioObjectPropertyElementMain
+        };
+        if (AudioObjectGetPropertyDataSize(ids[i], &streamAddr, 0, NULL, &streamsSize) != noErr || streamsSize == 0) {
+            continue;
+        }
+        AudioBufferList *lista = (AudioBufferList *)malloc(streamsSize);
+        if (!lista) {
+            continue;
+        }
+        if (AudioObjectGetPropertyData(ids[i], &streamAddr, 0, NULL, &streamsSize, lista) != noErr) {
+            free(lista);
+            continue;
+        }
+        UInt32 canais = 0;
+        for (UInt32 b = 0; b < lista->mNumberBuffers; ++b) {
+            canais += lista->mBuffers[b].mNumberChannels;
+        }
+        free(lista);
+        if (canais < 2) {
+            continue;
+        }
+
+        CFStringRef nameRef = NULL;
+        UInt32 nameSize = sizeof(nameRef);
+        AudioObjectPropertyAddress nameAddr = (AudioObjectPropertyAddress) {
+            .mSelector = kAudioDevicePropertyDeviceNameCFString,
+            .mScope    = kAudioObjectPropertyScopeGlobal,
+            .mElement  = kAudioObjectPropertyElementMain
+        };
+        if (AudioObjectGetPropertyData(ids[i], &nameAddr, 0, NULL, &nameSize, &nameRef) != noErr || !nameRef) {
+            continue;
+        }
+        NSString *nome = CFBridgingRelease(nameRef);
+        if ([nome rangeOfString:kZPLoopbackNameSubstring options:NSCaseInsensitiveSearch].location != NSNotFound) {
+            encontrado = ids[i];
+        }
+    }
+
+    free(ids);
+    return encontrado;
+}
+
+BOOL ZPBindEngineInputToLoopback(AVAudioEngine *engine) {
+    if (!engine) {
+        return NO;
+    }
+
+    AudioDeviceID dispositivo = ZPLoopbackInputDevice();
+    if (dispositivo == kAudioObjectUnknown) {
+        NSLog(@"[Audio Capture] Não encontrei nenhum dispositivo de entrada com \"%@\" no nome; "
+               "a entrada fica no dispositivo por omissão do sistema.", kZPLoopbackNameSubstring);
+        return NO;
+    }
+
+    AudioUnit unidade = engine.inputNode.audioUnit;
+    if (!unidade) {
+        return NO;
+    }
+
+    OSStatus estado = AudioUnitSetProperty(unidade,
+                                           kAudioOutputUnitProperty_CurrentDevice,
+                                           kAudioUnitScope_Global,
+                                           0,
+                                           &dispositivo,
+                                           sizeof(dispositivo));
+    if (estado != noErr) {
+        NSLog(@"[Audio Capture] Não consegui prender a entrada ao loopback (estado %d).", (int)estado);
+        return NO;
+    }
+
+    #ifdef DEBUG
+    NSLog(@"[Audio Capture] Entrada presa ao dispositivo de loopback (id %u).", (unsigned)dispositivo);
+    #endif
+    return YES;
+}
 
 @interface ZPAudioCapture ()
 
@@ -292,6 +407,11 @@ static NSData *ZPWavHeader(double sampleRate, NSUInteger channels, unsigned long
 
 - (void)installAudioTap {
     AVAudioInputNode *inputNode = self.audioEngine.inputNode;
+
+    // Antes de ler o formato: a entrada é o BlackHole, não o que o sistema
+    // tiver como dispositivo por omissão. Repete-se aqui e não só no arranque
+    // porque este método volta a correr a cada reconfiguração de áudio.
+    ZPBindEngineInputToLoopback(self.audioEngine);
 
     // Remover um tap anterior antes de instalar: instalar por cima de um tap
     // existente lança excepção, e este método volta a correr sempre que o

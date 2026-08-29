@@ -27,6 +27,7 @@ SOFTWARE.
 //
 
 #import "ZPAirPlayStreamer.h"
+#import "ZPAudioCapture.h"                      // ZPBindEngineInputToLoopback
 #import <TPCircularBuffer/TPCircularBuffer.h>
 #import <AVFoundation/AVFoundation.h>
 #import <sys/stat.h>
@@ -1210,6 +1211,12 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
 
 - (void)installAudioTap {
     AVAudioInputNode *inputNode = self.audioEngine.inputNode;
+
+    // A captura é do BlackHole, e não do dispositivo de entrada por omissão do
+    // sistema: assim a entrada do Mac fica livre para o microfone sem que a
+    // transmissão passe a mandar a sala para a aparelhagem. Antes de se ler o
+    // formato, que é o do dispositivo.
+    ZPBindEngineInputToLoopback(self.audioEngine);
 
     // Remover um tap anterior antes de instalar — instalar sobre um tap
     // existente lança excepção (relevante na reinstalação após reconfiguração)
