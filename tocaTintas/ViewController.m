@@ -325,6 +325,101 @@ static WavpackStreamReader memoryReader = {
 
 @end
 
+#pragma mark - Botões de transporte
+
+// Os oito botões de transporte usam emojis como título, e os emojis da Apple
+// Color Emoji não são símbolos soltos: cada um é um ladrilho quadrado com o
+// desenho lá dentro. Isso obriga a dois acertos, um por eixo, porque os fundos
+// verde e vermelho da selecção têm de assentar centrados nesse ladrilho.
+
+// Eixo horizontal. A fonte não centra a tinta na própria caixa de avanço: a
+// 18 pt o avanço mede 24 pt, a tinta 21 pt, e sobram 1,165 pt à esquerda contra
+// 1,834 pt à direita. O AppKit centra o avanço no rectângulo do título — que
+// nestes botões é exactamente igual aos bounds, medi-o —, e como o avanço é
+// simétrico o centramento está certo do lado dele; é a tinta que fica 0,335 pt
+// à esquerda do meio. Num parágrafo centrado, o recuo da primeira linha desloca
+// o texto metade do seu valor, portanto 1 pt de recuo empurra o glifo meio ponto
+// para a direita e o ladrilho passa a assentar simetricamente sobre a grelha de
+// pixéis. Confirmei na janela a correr: 2 px de cor de cada lado, nos oito
+// botões. Como o «attributedTitle» ignora o «alignment» do botão, o parágrafo
+// tem de trazer o centrar consigo.
+static NSAttributedString *ZPTituloDeBotaoDeTransporte(NSString *glifo) {
+    NSMutableParagraphStyle *estilo = [[NSMutableParagraphStyle alloc] init];
+    estilo.alignment = NSTextAlignmentCenter;
+    estilo.firstLineHeadIndent = 1.0;
+
+    return [[NSAttributedString alloc] initWithString:glifo attributes:@{
+        NSFontAttributeName: [NSFont systemFontOfSize:18 weight:NSFontWeightSemibold],
+        NSParagraphStyleAttributeName: estilo
+    }];
+}
+
+// Eixo vertical. Aqui não há acerto que sirva, porque o problema não é de
+// centramento mas de aritmética: a 18 pt o ladrilho rasteriza com 22 colunas
+// mas apenas 21 linhas. Num botão de 26×26 sobram 26 − 22 = 4 px na horizontal,
+// que se repartem certos, dois de cada lado; na vertical sobram 26 − 21 = 5 px,
+// número ímpar que não há como dividir em dois. Medido na janela a correr, nos
+// oito botões: duas linhas vazias acima do ícone e três abaixo.
+//
+// Mexer no glifo não resolve — deslocá-lo só troca 2/3 por 3/2 — e mexer na
+// altura do botão também não, porque o título é recentrado na nova caixa e a
+// assimetria acompanha-o. O que resolve é encolher o rectângulo pintado: uma
+// linha a menos, tirada por baixo, deixa exactamente 2 px de cor a toda a volta.
+//
+// Por isso o fundo é pintado aqui, na célula, e não na camada do botão: a
+// «layer.backgroundColor» está presa aos bounds e não permite este recorte, e
+// uma subcamada não serve porque as subcamadas desenham por cima do conteúdo da
+// vista, ou seja tapariam o emoji. Desenhado na célula, fica por baixo do
+// título, que é onde tem de estar.
+@interface ZPCelulaDeBotaoDeTransporte : NSButtonCell
+// Cor da selecção, ou nil quando o botão não está seleccionado.
+@property (nonatomic, strong) NSColor *corDeFundo;
+@end
+
+@implementation ZPCelulaDeBotaoDeTransporte
+
+- (void)drawWithFrame:(NSRect)frame inView:(NSView *)controlView {
+    if (self.corDeFundo) {
+        // O NSButton é uma vista invertida (y cresce para baixo), portanto a
+        // linha a descontar sai simplesmente da altura.
+        NSRect fundo = frame;
+        fundo.size.height -= 1.0;
+        if (!controlView.isFlipped) {
+            fundo.origin.y += 1.0;
+        }
+
+        [self.corDeFundo setFill];
+        [[NSBezierPath bezierPathWithRoundedRect:fundo xRadius:6.0 yRadius:6.0] fill];
+    }
+
+    [super drawWithFrame:frame inView:controlView];
+}
+
+@end
+
+// Põe o botão a usar a célula acima e assenta-lhe o título já compensado.
+static void ZPPreparaBotaoDeTransporte(NSButton *botao, NSString *glifo) {
+    ZPCelulaDeBotaoDeTransporte *celula = [[ZPCelulaDeBotaoDeTransporte alloc] init];
+    [celula setButtonType:NSButtonTypeMomentaryPushIn];
+    celula.bordered = NO;
+    celula.controlSize = NSControlSizeLarge;
+    botao.cell = celula;
+
+    botao.attributedTitle = ZPTituloDeBotaoDeTransporte(glifo);
+}
+
+// Selecciona ou desselecciona um botão de transporte. Passar nil tira a cor.
+static void ZPPintaBotaoDeTransporte(NSButton *botao, NSColor *cor) {
+    ZPCelulaDeBotaoDeTransporte *celula = (ZPCelulaDeBotaoDeTransporte *)botao.cell;
+    if (![celula isKindOfClass:[ZPCelulaDeBotaoDeTransporte class]]) {
+        return;
+    }
+
+    celula.corDeFundo = cor;
+    botao.needsDisplay = YES;
+}
+
+
 @implementation ViewController
 
 // Structure to hold the audio playback state
@@ -4524,11 +4619,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 
     // ⏮️
     self.backwardButton = [[NSButton alloc] initWithFrame:NSMakeRect(startX, buttonYPosition, buttonWidth, buttonHeight)];
-    self.backwardButton.bordered = NO;
-    self.backwardButton.controlSize = NSControlSizeLarge;
-    self.backwardButton.font = [NSFont systemFontOfSize:18 weight:NSFontWeightSemibold];
-    self.backwardButton.alignment = NSTextAlignmentCenter;
-    self.backwardButton.title = @"⏮️";
+    ZPPreparaBotaoDeTransporte(self.backwardButton, @"⏮️");
     self.backwardButton.target = self;
     self.backwardButton.action = @selector(backwardTrack);
     [self.view addSubview:self.backwardButton];
@@ -4536,11 +4627,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     // ▶️
     startX += buttonWidth;
     self.playButton = [[NSButton alloc] initWithFrame:NSMakeRect(startX, buttonYPosition, buttonWidth, buttonHeight)];
-    self.playButton.bordered = NO;
-    self.playButton.controlSize = NSControlSizeLarge;
-    self.playButton.font = [NSFont systemFontOfSize:18 weight:NSFontWeightSemibold];
-    self.playButton.alignment = NSTextAlignmentCenter;
-    self.playButton.title = @"▶️";
+    ZPPreparaBotaoDeTransporte(self.playButton, @"▶️");
     self.playButton.target = self;
     self.playButton.action = @selector(playButtonPressed);
     [self.view addSubview:self.playButton];
@@ -4548,11 +4635,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     // ⏸️
     startX += buttonWidth;
     self.pauseButton = [[NSButton alloc] initWithFrame:NSMakeRect(startX, buttonYPosition, buttonWidth, buttonHeight)];
-    self.pauseButton.bordered = NO;
-    self.pauseButton.controlSize = NSControlSizeLarge;
-    self.pauseButton.font = [NSFont systemFontOfSize:18 weight:NSFontWeightSemibold];
-    self.pauseButton.alignment = NSTextAlignmentCenter;
-    self.pauseButton.title = @"⏸️";
+    ZPPreparaBotaoDeTransporte(self.pauseButton, @"⏸️");
     self.pauseButton.target = self;
     self.pauseButton.action = @selector(pauseAudio);
     [self.view addSubview:self.pauseButton];
@@ -4560,11 +4643,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     // ⏹️
     startX += buttonWidth;
     self.stopButton = [[NSButton alloc] initWithFrame:NSMakeRect(startX, buttonYPosition, buttonWidth, buttonHeight)];
-    self.stopButton.bordered = NO;
-    self.stopButton.controlSize = NSControlSizeLarge;
-    self.stopButton.font = [NSFont systemFontOfSize:18 weight:NSFontWeightSemibold];
-    self.stopButton.alignment = NSTextAlignmentCenter;
-    self.stopButton.title = @"⏹️";
+    ZPPreparaBotaoDeTransporte(self.stopButton, @"⏹️");
     self.stopButton.target = self;
     self.stopButton.action = @selector(stopAudio);
     [self.view addSubview:self.stopButton];
@@ -4572,11 +4651,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     // ⏭️
     startX += buttonWidth;
     self.forwardButton = [[NSButton alloc] initWithFrame:NSMakeRect(startX, buttonYPosition, buttonWidth, buttonHeight)];
-    self.forwardButton.bordered = NO;
-    self.forwardButton.controlSize = NSControlSizeLarge;
-    self.forwardButton.font = [NSFont systemFontOfSize:18 weight:NSFontWeightSemibold];
-    self.forwardButton.alignment = NSTextAlignmentCenter;
-    self.forwardButton.title = @"⏭️";
+    ZPPreparaBotaoDeTransporte(self.forwardButton, @"⏭️");
     self.forwardButton.target = self;
     self.forwardButton.action = @selector(forwardTrack);
     [self.view addSubview:self.forwardButton];
@@ -4584,11 +4659,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     // 🔁
     startX += buttonWidth;
     self.repeatButton = [[NSButton alloc] initWithFrame:NSMakeRect(startX, buttonYPosition, buttonWidth, buttonHeight)];
-    self.repeatButton.bordered = NO;
-    self.repeatButton.controlSize = NSControlSizeLarge;
-    self.repeatButton.font = [NSFont systemFontOfSize:18 weight:NSFontWeightSemibold];
-    self.repeatButton.alignment = NSTextAlignmentCenter;
-    self.repeatButton.title = @"🔁";
+    ZPPreparaBotaoDeTransporte(self.repeatButton, @"🔁");
     self.repeatButton.target = self;
     self.repeatButton.action = @selector(repeatTracks);
     [self.view addSubview:self.repeatButton];
@@ -4596,11 +4667,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     // 🔀
     startX += buttonWidth;
     self.shuffleButton = [[NSButton alloc] initWithFrame:NSMakeRect(startX, buttonYPosition, buttonWidth, buttonHeight)];
-    self.shuffleButton.bordered = NO;
-    self.shuffleButton.controlSize = NSControlSizeLarge;
-    self.shuffleButton.font = [NSFont systemFontOfSize:18 weight:NSFontWeightSemibold];
-    self.shuffleButton.alignment = NSTextAlignmentCenter;
-    self.shuffleButton.title = @"🔀";
+    ZPPreparaBotaoDeTransporte(self.shuffleButton, @"🔀");
     self.shuffleButton.target = self;
     self.shuffleButton.action = @selector(shuffleTracks);
     [self.view addSubview:self.shuffleButton];
@@ -4608,11 +4675,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     // ⏺️
     startX += buttonWidth;
     self.recordButton = [[NSButton alloc] initWithFrame:NSMakeRect(startX, buttonYPosition, buttonWidth, buttonHeight)];
-    self.recordButton.bordered = NO;
-    self.recordButton.controlSize = NSControlSizeLarge;
-    self.recordButton.font = [NSFont systemFontOfSize:18 weight:NSFontWeightSemibold];
-    self.recordButton.alignment = NSTextAlignmentCenter;
-    self.recordButton.title = @"⏺️";
+    ZPPreparaBotaoDeTransporte(self.recordButton, @"⏺️");
     self.recordButton.target = self;
     self.recordButton.action = @selector(recordAudio);
     [self.view addSubview:self.recordButton];
@@ -5310,62 +5373,22 @@ enum {
 
 // Give visual feedback for when repeat is active
 - (void)updateRepeatButtonAppearance:(BOOL)isActive {
-    self.repeatButton.wantsLayer = YES;
-
-    if (isActive) {
-        self.repeatButton.layer.backgroundColor = [[NSColor systemGreenColor] CGColor];
-        self.repeatButton.layer.cornerRadius = 6.0;
-        self.repeatButton.layer.masksToBounds = YES;
-    } else {
-        self.repeatButton.layer.backgroundColor = [[NSColor clearColor] CGColor];
-        self.repeatButton.layer.cornerRadius = 0.0;
-        self.repeatButton.layer.masksToBounds = NO;
-    }
+    ZPPintaBotaoDeTransporte(self.repeatButton, isActive ? [NSColor systemGreenColor] : nil);
 }
 
 // Give visual feedback for when repeat is active
 - (void)updateShuffleButtonAppearance:(BOOL)isActive {
-    self.shuffleButton.wantsLayer = YES;
-
-    if (isActive) {
-        self.shuffleButton.layer.backgroundColor = [[NSColor systemGreenColor] CGColor];
-        self.shuffleButton.layer.cornerRadius = 6.0;
-        self.shuffleButton.layer.masksToBounds = YES;
-    } else {
-        self.shuffleButton.layer.backgroundColor = [[NSColor clearColor] CGColor];
-        self.shuffleButton.layer.cornerRadius = 0.0;
-        self.shuffleButton.layer.masksToBounds = NO;
-    }
+    ZPPintaBotaoDeTransporte(self.shuffleButton, isActive ? [NSColor systemGreenColor] : nil);
 }
 
 // Give visual feedback for when pause is active
 - (void)updatePauseButtonAppearance:(BOOL)isActive {
-    self.pauseButton.wantsLayer = YES;
-
-    if (isActive) {
-        self.pauseButton.layer.backgroundColor = [[NSColor systemGreenColor] CGColor];
-        self.pauseButton.layer.cornerRadius = 6.0;
-        self.pauseButton.layer.masksToBounds = YES;
-    } else {
-        self.pauseButton.layer.backgroundColor = [[NSColor clearColor] CGColor];
-        self.pauseButton.layer.cornerRadius = 0.0;
-        self.pauseButton.layer.masksToBounds = NO;
-    }
+    ZPPintaBotaoDeTransporte(self.pauseButton, isActive ? [NSColor systemGreenColor] : nil);
 }
 
 // Add visual feedback for when recording is active
 - (void)updateRecordButtonAppearance:(BOOL)isActive {
-    self.recordButton.wantsLayer = YES;
-
-    if (isActive) {
-        self.recordButton.layer.backgroundColor = [[NSColor systemRedColor] CGColor];
-        self.recordButton.layer.cornerRadius = 6.0;
-        self.recordButton.layer.masksToBounds = YES;
-    } else {
-        self.recordButton.layer.backgroundColor = [[NSColor clearColor] CGColor];
-        self.recordButton.layer.cornerRadius = 0.0;
-        self.recordButton.layer.masksToBounds = NO;
-    }
+    ZPPintaBotaoDeTransporte(self.recordButton, isActive ? [NSColor systemRedColor] : nil);
 }
 
 - (void)repeatTracks {
@@ -5478,6 +5501,15 @@ enum {
         currentPlaybackTime = self.audioPlayer.currentTime;
     }
 
+    // Em pausa, ligar ou desligar o aleatório não retoma a reprodução. Nos dois
+    // sentidos a faixa em curso é a mesma — só muda o índice que aponta para
+    // ela, porque se passa a contá-lo noutra lista — portanto não há nada para
+    // recarregar, e chamar aqui o -playAudio punha a tocar quem tinha pedido
+    // pausa. Não querer continuar a tocar aleatoriamente não é querer voltar a
+    // tocar. O botão de repetir nunca teve este defeito por nem sequer mexer na
+    // reprodução.
+    BOOL estavaEmPausa = self.isPlaybackPaused;
+
     // Toggle shuffle mode
     self.isShuffleModeActive = !self.isShuffleModeActive;
 
@@ -5513,7 +5545,7 @@ enum {
                                                               : [self randomShuffledStartIndex];
 
         // Start playing from the shuffled list
-        if (self.shuffledTracks.count > 0) {
+        if (!estavaEmPausa && self.shuffledTracks.count > 0) {
             [self playAudio];
             // Resume playback from the captured position
             [self.audioPlayer setCurrentTime:currentPlaybackTime];
@@ -5541,7 +5573,9 @@ enum {
         self.currentTrackIndex = (originalIndex != NSNotFound) ? originalIndex : 0;
 
         // Resume playback from the original track
-        if (self.audioFiles.count > 0) {
+        if (estavaEmPausa) {
+            // Fica como estava: em pausa, na mesma faixa.
+        } else if (self.audioFiles.count > 0) {
             [self playAudio];
             // Resume playback from the captured position
             [self.audioPlayer setCurrentTime:currentPlaybackTime];
