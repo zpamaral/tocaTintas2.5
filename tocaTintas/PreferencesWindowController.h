@@ -60,6 +60,20 @@ void ZPResolveReplayGain(float trackGain, float trackPeak,
                          float albumGain, float albumPeak,
                          float *outGain, float *outPeak);
 
+/// Equalização de auscultadores escolhida: string vazia = nenhuma,
+/// @"builtin" = a correcção embutida dos MDR-7506, senão o caminho de um
+/// ficheiro ParametricEQ.txt do AutoEQ.
+extern NSString * const kBS2BEqDefaultsKey;
+extern NSString * const kBS2BEqChangedNotification;
+
+/// Pasta onde o utilizador larga os ficheiros ParametricEQ.txt. Criada se não
+/// existir: ~/Library/Application Support/tocaTintas/eq
+NSURL *ZPHeadphoneEqFolder(void);
+
+/// A escolha válida guardada: se apontar para um ficheiro que já não existe,
+/// recai na embutida.
+NSString *ZPCurrentBS2BEq(void);
+
 @interface PreferencesWindowController : NSWindowController
 
 @property (weak) IBOutlet NSButton *saveButton; // Button for saving

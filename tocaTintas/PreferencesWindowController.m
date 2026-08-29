@@ -89,6 +89,77 @@ void ZPResolveReplayGain(float trackGain, float trackPeak,
     if (outPeak) *outPeak = trackPeak;
 }
 
+NSString * const kBS2BEqDefaultsKey        = @"bs2bEq";
+NSString * const kBS2BEqChangedNotification = @"BS2BEqChanged";
+
+// Repõe as correcções do AutoEQ a partir do arquivo que vem no pacote, se a
+// pasta estiver vazia. É o que faz com que apagar a pasta não perca nada: as
+// tuas contagens de reprodução não voltam, mas os 522 modelos voltam.
+//
+// Se o arquivo não estiver no pacote (não foi acrescentado ao projecto do
+// Xcode), isto não faz nada e a lista fica só com as duas entradas especiais —
+// não rebenta, apenas não semeia.
+static void ZPSemearEqSeVazia(NSURL *pasta) {
+    NSArray<NSURL *> *conteudo =
+        [[NSFileManager defaultManager] contentsOfDirectoryAtURL:pasta
+                                      includingPropertiesForKeys:nil
+                                                         options:NSDirectoryEnumerationSkipsHiddenFiles
+                                                           error:NULL];
+    if (conteudo.count > 0) {
+        return;
+    }
+
+    NSString *arquivo = [[NSBundle mainBundle] pathForResource:@"eq_autoeq" ofType:@"tgz"];
+    if (!arquivo) {
+        return;
+    }
+
+    NSTask *tar = [[NSTask alloc] init];
+    tar.launchPath = @"/usr/bin/tar";
+    tar.arguments = @[@"-xzf", arquivo, @"-C", pasta.path];
+    tar.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    tar.standardError  = [NSFileHandle fileHandleWithNullDevice];
+
+    @try {
+        [tar launch];
+        // Esperar sem bombear o run loop, pela mesma razão que em
+        // -stopBs2bIfRunning: o -waitUntilExit do NSTask corre o run loop.
+        for (int i = 0; i < 100 && tar.isRunning; ++i) {
+            usleep(20 * 1000);
+        }
+        NSLog(@"[eq] Correcções do AutoEQ repostas em %@.", pasta.path);
+    } @catch (NSException *e) {
+        NSLog(@"[eq] Não consegui repor as correcções: %@", e.reason);
+    }
+}
+
+NSURL *ZPHeadphoneEqFolder(void) {
+    NSURL *suporte = [[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory
+                                                             inDomains:NSUserDomainMask] firstObject];
+    NSURL *pasta = [[suporte URLByAppendingPathComponent:@"tocaTintas" isDirectory:YES]
+                    URLByAppendingPathComponent:@"eq" isDirectory:YES];
+    [[NSFileManager defaultManager] createDirectoryAtURL:pasta
+                            withIntermediateDirectories:YES attributes:nil error:NULL];
+    ZPSemearEqSeVazia(pasta);
+    return pasta;
+}
+
+NSString *ZPCurrentBS2BEq(void) {
+    NSString *guardado = [[NSUserDefaults standardUserDefaults] stringForKey:kBS2BEqDefaultsKey];
+    if (!guardado) {
+        return @"builtin";           // como sempre foi, para quem nunca escolheu
+    }
+    if (guardado.length == 0 || [guardado isEqualToString:@"builtin"]) {
+        return guardado;
+    }
+    // Um caminho que desapareceu não pode ficar a valer: a ponte recusaria
+    // arrancar e ficavas sem som sem perceber porquê.
+    if (![[NSFileManager defaultManager] fileExistsAtPath:guardado]) {
+        return @"builtin";
+    }
+    return guardado;
+}
+
 NSString *ZPCurrentBS2BProfile(void) {
     NSString *guardado = [[NSUserDefaults standardUserDefaults] stringForKey:kBS2BProfileDefaultsKey];
     for (NSUInteger i = 0; i < kNumPerfis; ++i) {
@@ -103,6 +174,8 @@ NSString *ZPCurrentBS2BProfile(void) {
 @property (strong, nonatomic) NSPopUpButton *dspPopUp;
 @property (strong, nonatomic) NSPopUpButton *normPopUp;
 @property (strong, nonatomic) NSButton *compensarVolume;
+@property (strong, nonatomic) NSPopUpButton *eqMarcaPopUp;
+@property (strong, nonatomic) NSPopUpButton *eqModeloPopUp;
 @end
 
 @implementation PreferencesWindowController
@@ -134,8 +207,11 @@ NSString *ZPCurrentBS2BProfile(void) {
 
     // A barra de separadores rouba altura ao conteúdo; a janela cresce o mesmo
     // para o primeiro separador não ficar mais apertado do que estava.
-    [janela setContentSize:NSMakeSize(480, 310)];
-    janela.contentView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 480, 310)];
+    // Alta que chegue para o texto mais comprido das três traduções. As
+    // etiquetas medem-se a si próprias (ver -etiquetaEm:…), portanto o que
+    // sobra é margem, não texto cortado.
+    [janela setContentSize:NSMakeSize(480, 430)];
+    janela.contentView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 480, 430)];
 
     NSTabView *separadores = [[NSTabView alloc] initWithFrame:janela.contentView.bounds];
     separadores.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
@@ -149,6 +225,11 @@ NSString *ZPCurrentBS2BProfile(void) {
     itemDSP.label = NSLocalizedString(@"prefs_tab_dsp", @"Título do separador do tratamento de áudio");
     itemDSP.view = [self criarVistaDSP];
     [separadores addTabViewItem:itemDSP];
+
+    NSTabViewItem *itemEq = [[NSTabViewItem alloc] initWithIdentifier:@"eq"];
+    itemEq.label = NSLocalizedString(@"prefs_tab_eq", @"Título do separador dos auscultadores");
+    itemEq.view = [self criarVistaEq];
+    [separadores addTabViewItem:itemEq];
 
     NSTabViewItem *itemAirPlay = [[NSTabViewItem alloc] initWithIdentifier:@"airplay"];
     itemAirPlay.label = NSLocalizedString(@"prefs_tab_airplay", @"Título do separador do AirPlay");
@@ -164,6 +245,11 @@ NSString *ZPCurrentBS2BProfile(void) {
 // Localizable.strings e não é preciso acrescentar objectos ao storyboard, que
 // obrigaria a mexer nos Main.strings das três línguas.
 // Etiqueta de texto para os separadores montados em código.
+//
+// A altura dada na moldura é ignorada: a etiqueta mede o texto à largura
+// pedida e fica com a altura de que precisa, crescendo para baixo a partir do
+// topo da moldura. Sem isto, uma tradução mais comprida do que a portuguesa
+// era simplesmente cortada a meio da frase — e o russo é sempre mais comprido.
 - (NSTextField *)etiquetaEm:(NSView *)vista moldura:(NSRect)r texto:(NSString *)texto pequena:(BOOL)pequena {
     NSTextField *t = [[NSTextField alloc] initWithFrame:r];
     t.stringValue = texto;
@@ -176,24 +262,33 @@ NSString *ZPCurrentBS2BProfile(void) {
         t.font = [NSFont systemFontOfSize:[NSFont smallSystemFontSize]];
         t.textColor = [NSColor secondaryLabelColor];
     }
+
+    NSSize cabe = [t.cell cellSizeForBounds:NSMakeRect(0, 0, NSWidth(r), CGFLOAT_MAX)];
+    NSRect ajustada = r;
+    ajustada.size.height = ceil(cabe.height);
+    ajustada.origin.y    = NSMaxY(r) - ajustada.size.height;   // topo fixo
+    t.frame = ajustada;
+
     [vista addSubview:t];
     return t;
 }
 
 - (NSView *)criarVistaDSP {
-    NSView *vista = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 480, 285)];
+    const CGFloat A = 390, margem = 20, largura = 440;
+    NSView *vista = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 480, A)];
+    CGFloat topo = A - margem;   // vai descendo à medida que se coloca
 
-    NSTextField *(^etiqueta)(NSRect, NSString *, BOOL) = ^NSTextField *(NSRect r, NSString *texto, BOOL pequena) {
-        return [self etiquetaEm:vista moldura:r texto:texto pequena:pequena];
-    };
+    NSTextField *t = [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 200, largura, 200)
+                                texto:NSLocalizedString(@"prefs_dsp_explanation", @"Explicação do que o crossfeed faz")
+                              pequena:NO];
+    topo = NSMinY(t.frame) - 18;
 
-    etiqueta(NSMakeRect(20, 195, 440, 70),
-             NSLocalizedString(@"prefs_dsp_explanation", @"Explicação do que o crossfeed faz"), NO);
+    [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 17, 220, 17)
+               texto:NSLocalizedString(@"prefs_dsp_profile_label", @"Etiqueta do menu de perfis")
+             pequena:NO];
+    topo -= 17 + 6;
 
-    etiqueta(NSMakeRect(20, 160, 200, 17),
-             NSLocalizedString(@"prefs_dsp_profile_label", @"Etiqueta do menu de perfis"), NO);
-
-    self.dspPopUp = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(20, 128, 330, 26) pullsDown:NO];
+    self.dspPopUp = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(margem, topo - 26, 330, 26) pullsDown:NO];
     NSArray<NSString *> *chaves = @[@"prefs_dsp_profile_default", @"prefs_dsp_profile_cmoy", @"prefs_dsp_profile_jmeier"];
     for (NSUInteger i = 0; i < kNumPerfis; ++i) {
         [self.dspPopUp addItemWithTitle:NSLocalizedString(chaves[i], @"Nome de um perfil de crossfeed")];
@@ -202,6 +297,7 @@ NSString *ZPCurrentBS2BProfile(void) {
     self.dspPopUp.target = self;
     self.dspPopUp.action = @selector(dspProfileChanged:);
     [vista addSubview:self.dspPopUp];
+    topo -= 26 + 20;
 
     NSString *actual = ZPCurrentBS2BProfile();
     for (NSMenuItem *item in self.dspPopUp.itemArray) {
@@ -211,24 +307,231 @@ NSString *ZPCurrentBS2BProfile(void) {
         }
     }
 
-    etiqueta(NSMakeRect(20, 20, 440, 95),
-             NSLocalizedString(@"prefs_dsp_note", @"Nota sobre o botão dos auscultadores"), YES);
+    [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 220, largura, 220)
+               texto:NSLocalizedString(@"prefs_dsp_note", @"Nota sobre o botão dos auscultadores")
+             pequena:YES];
 
     return vista;
 }
 
-- (NSView *)criarVistaAirPlay {
-    NSView *vista = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 480, 285)];
+- (NSView *)criarVistaEq {
+    const CGFloat A = 390, margem = 20, largura = 440;
+    NSView *vista = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 480, A)];
+    CGFloat topo = A - margem;
 
-    [self etiquetaEm:vista moldura:NSMakeRect(20, 195, 440, 70)
-               texto:NSLocalizedString(@"prefs_norm_explanation", @"Explicação da normalização de volume")
+    NSTextField *t = [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 200, largura, 200)
+                                texto:NSLocalizedString(@"prefs_eq_explanation", @"O que a equalização faz")
+                              pequena:NO];
+    topo = NSMinY(t.frame) - 18;
+
+    // Dois menus em vez de um: 522 modelos numa lista só não se navega. O
+    // primeiro escolhe a marca (ou as duas entradas especiais), o segundo o
+    // modelo dessa marca.
+    [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 17, 200, 17)
+               texto:NSLocalizedString(@"prefs_eq_brand", @"Etiqueta do menu de marcas")
              pequena:NO];
+    topo -= 17 + 6;
 
-    [self etiquetaEm:vista moldura:NSMakeRect(20, 160, 300, 17)
+    self.eqMarcaPopUp = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(margem, topo - 26, largura, 26) pullsDown:NO];
+    self.eqMarcaPopUp.target = self;
+    self.eqMarcaPopUp.action = @selector(eqMarcaChanged:);
+    [vista addSubview:self.eqMarcaPopUp];
+    topo -= 26 + 14;
+
+    [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 17, 200, 17)
+               texto:NSLocalizedString(@"prefs_eq_model", @"Etiqueta do menu de modelos")
+             pequena:NO];
+    topo -= 17 + 6;
+
+    self.eqModeloPopUp = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(margem, topo - 26, largura, 26) pullsDown:NO];
+    self.eqModeloPopUp.target = self;
+    self.eqModeloPopUp.action = @selector(eqModeloChanged:);
+    [vista addSubview:self.eqModeloPopUp];
+    topo -= 26 + 14;
+
+    NSButton *abrir = [[NSButton alloc] initWithFrame:NSMakeRect(margem, topo - 24, 260, 24)];
+    abrir.bezelStyle = NSBezelStyleRounded;
+    abrir.title = NSLocalizedString(@"prefs_eq_open_folder", @"Botão para abrir a pasta das correcções");
+    abrir.target = self;
+    abrir.action = @selector(abrirPastaEq:);
+    [vista addSubview:abrir];
+    topo -= 24 + 16;
+
+    [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 240, largura, 240)
+               texto:NSLocalizedString(@"prefs_eq_note", @"Nota sobre os ficheiros do AutoEQ")
+             pequena:YES];
+
+    [self recarregarListaEq];
+    return vista;
+}
+
+// Marcas = subpastas de eq/. Ficheiros soltos na raiz aparecem juntos numa
+// entrada à parte, para quem larga lá um ficheiro à mão não ter de os arrumar.
+- (NSArray<NSString *> *)marcasDisponiveis {
+    NSURL *pasta = ZPHeadphoneEqFolder();
+    NSArray<NSURL *> *conteudo =
+        [[NSFileManager defaultManager] contentsOfDirectoryAtURL:pasta
+                                      includingPropertiesForKeys:@[NSURLIsDirectoryKey]
+                                                         options:NSDirectoryEnumerationSkipsHiddenFiles
+                                                           error:NULL];
+    NSMutableArray<NSString *> *marcas = [NSMutableArray array];
+    BOOL soltos = NO;
+    for (NSURL *u in conteudo) {
+        NSNumber *ehPasta = nil;
+        [u getResourceValue:&ehPasta forKey:NSURLIsDirectoryKey error:NULL];
+        if (ehPasta.boolValue) {
+            [marcas addObject:u.lastPathComponent];
+        } else if ([u.pathExtension caseInsensitiveCompare:@"txt"] == NSOrderedSame) {
+            soltos = YES;
+        }
+    }
+    [marcas sortUsingSelector:@selector(localizedStandardCompare:)];
+    if (soltos) {
+        [marcas insertObject:@"" atIndex:0];   // a pseudo-marca dos ficheiros soltos
+    }
+    return marcas;
+}
+
+- (NSArray<NSURL *> *)ficheirosDaMarca:(NSString *)marca {
+    NSURL *pasta = ZPHeadphoneEqFolder();
+    if (marca.length) {
+        pasta = [pasta URLByAppendingPathComponent:marca isDirectory:YES];
+    }
+    NSArray<NSURL *> *conteudo =
+        [[NSFileManager defaultManager] contentsOfDirectoryAtURL:pasta
+                                      includingPropertiesForKeys:nil
+                                                         options:NSDirectoryEnumerationSkipsHiddenFiles
+                                                           error:NULL];
+    NSMutableArray<NSURL *> *txt = [NSMutableArray array];
+    for (NSURL *u in conteudo) {
+        if ([u.pathExtension caseInsensitiveCompare:@"txt"] == NSOrderedSame) {
+            [txt addObject:u];
+        }
+    }
+    [txt sortUsingComparator:^NSComparisonResult(NSURL *a, NSURL *b) {
+        return [a.lastPathComponent localizedStandardCompare:b.lastPathComponent];
+    }];
+    return txt;
+}
+
+- (void)recarregarListaEq {
+    if (!self.eqMarcaPopUp) {
+        return;
+    }
+
+    NSString *actual = ZPCurrentBS2BEq();
+    NSString *marcaActual = nil;
+    if (actual.length && ![actual isEqualToString:@"builtin"]) {
+        NSURL *u = [NSURL fileURLWithPath:actual];
+        NSString *pai = u.URLByDeletingLastPathComponent.lastPathComponent;
+        marcaActual = [pai isEqualToString:@"eq"] ? @"" : pai;
+    }
+
+    [self.eqMarcaPopUp removeAllItems];
+    [self.eqMarcaPopUp addItemWithTitle:NSLocalizedString(@"prefs_eq_none", @"Sem equalização")];
+    self.eqMarcaPopUp.lastItem.representedObject = @"@nenhuma";
+    [self.eqMarcaPopUp addItemWithTitle:NSLocalizedString(@"prefs_eq_builtin", @"A correcção embutida")];
+    self.eqMarcaPopUp.lastItem.representedObject = @"@builtin";
+
+    NSArray<NSString *> *marcas = [self marcasDisponiveis];
+    if (marcas.count) {
+        [self.eqMarcaPopUp.menu addItem:[NSMenuItem separatorItem]];
+    }
+    for (NSString *m in marcas) {
+        [self.eqMarcaPopUp addItemWithTitle:m.length ? m : NSLocalizedString(@"prefs_eq_mine", @"Ficheiros soltos")];
+        self.eqMarcaPopUp.lastItem.representedObject = m;
+    }
+
+    NSString *aSeleccionar = @"@builtin";
+    if (actual.length == 0)            aSeleccionar = @"@nenhuma";
+    else if (marcaActual != nil)       aSeleccionar = marcaActual;
+
+    for (NSMenuItem *item in self.eqMarcaPopUp.itemArray) {
+        if ([item.representedObject isEqualToString:aSeleccionar]) {
+            [self.eqMarcaPopUp selectItem:item];
+            break;
+        }
+    }
+    [self recarregarModelosSeleccionando:actual];
+}
+
+- (void)recarregarModelosSeleccionando:(NSString *)caminho {
+    NSString *marca = self.eqMarcaPopUp.selectedItem.representedObject;
+    BOOL especial = [marca hasPrefix:@"@"];
+
+    [self.eqModeloPopUp removeAllItems];
+    self.eqModeloPopUp.enabled = !especial;
+    if (especial) {
+        [self.eqModeloPopUp addItemWithTitle:@"—"];
+        return;
+    }
+
+    for (NSURL *u in [self ficheirosDaMarca:marca]) {
+        [self.eqModeloPopUp addItemWithTitle:[u.lastPathComponent stringByDeletingPathExtension]];
+        self.eqModeloPopUp.lastItem.representedObject = u.path;
+    }
+    for (NSMenuItem *item in self.eqModeloPopUp.itemArray) {
+        if ([item.representedObject isEqualToString:caminho]) {
+            [self.eqModeloPopUp selectItem:item];
+            return;
+        }
+    }
+    if (self.eqModeloPopUp.numberOfItems > 0) {
+        [self.eqModeloPopUp selectItemAtIndex:0];
+    }
+}
+
+- (void)windowDidBecomeKey:(NSNotification *)nota {
+    [self recarregarListaEq];
+}
+
+- (void)eqMarcaChanged:(id)sender {
+    NSString *marca = self.eqMarcaPopUp.selectedItem.representedObject;
+    if ([marca isEqualToString:@"@nenhuma"]) {
+        [self guardarEq:@""];
+    } else if ([marca isEqualToString:@"@builtin"]) {
+        [self guardarEq:@"builtin"];
+    } else {
+        [self recarregarModelosSeleccionando:nil];
+        [self eqModeloChanged:nil];
+        return;
+    }
+    [self recarregarModelosSeleccionando:nil];
+}
+
+- (void)eqModeloChanged:(id)sender {
+    NSString *caminho = self.eqModeloPopUp.selectedItem.representedObject;
+    if (caminho.length) {
+        [self guardarEq:caminho];
+    }
+}
+
+- (void)guardarEq:(NSString *)valor {
+    [[NSUserDefaults standardUserDefaults] setObject:valor forKey:kBS2BEqDefaultsKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    [[NSNotificationCenter defaultCenter] postNotificationName:kBS2BEqChangedNotification object:nil];
+}
+
+- (void)abrirPastaEq:(id)sender {
+    [[NSWorkspace sharedWorkspace] openURL:ZPHeadphoneEqFolder()];
+}
+
+- (NSView *)criarVistaAirPlay {
+    const CGFloat A = 390, margem = 20, largura = 440;
+    NSView *vista = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 480, A)];
+    CGFloat topo = A - margem;
+
+    NSTextField *t = [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 200, largura, 200)
+                                texto:NSLocalizedString(@"prefs_norm_explanation", @"Explicação da normalização de volume")
+                              pequena:NO];
+    topo = NSMinY(t.frame) - 18;
+
+    [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 17, 300, 17)
                texto:NSLocalizedString(@"prefs_norm_label", @"Etiqueta do menu de normalização")
              pequena:NO];
+    topo -= 17 + 6;
 
-    self.normPopUp = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(20, 128, 330, 26) pullsDown:NO];
+    self.normPopUp = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(margem, topo - 26, 380, 26) pullsDown:NO];
     NSArray<NSString *> *chaves = @[@"prefs_norm_none", @"prefs_norm_track_full",
                                     @"prefs_norm_track", @"prefs_norm_album"];
     for (NSUInteger i = 0; i < kNumNormalizacoes; ++i) {
@@ -238,6 +541,7 @@ NSString *ZPCurrentBS2BProfile(void) {
     self.normPopUp.target = self;
     self.normPopUp.action = @selector(airPlayNormalizationChanged:);
     [vista addSubview:self.normPopUp];
+    topo -= 26 + 16;
 
     NSString *actual = ZPCurrentAirPlayNormalization();
     for (NSMenuItem *item in self.normPopUp.itemArray) {
@@ -247,7 +551,7 @@ NSString *ZPCurrentBS2BProfile(void) {
         }
     }
 
-    self.compensarVolume = [[NSButton alloc] initWithFrame:NSMakeRect(20, 96, 440, 20)];
+    self.compensarVolume = [[NSButton alloc] initWithFrame:NSMakeRect(margem, topo - 20, largura, 20)];
     [self.compensarVolume setButtonType:NSButtonTypeSwitch];
     self.compensarVolume.title = NSLocalizedString(@"prefs_norm_compensate", @"Compensar o volume do sistema");
     NSNumber *guardado = [[NSUserDefaults standardUserDefaults] objectForKey:kAirPlayCompensateVolumeDefaultsKey];
@@ -256,8 +560,9 @@ NSString *ZPCurrentBS2BProfile(void) {
     self.compensarVolume.target = self;
     self.compensarVolume.action = @selector(compensateVolumeChanged:);
     [vista addSubview:self.compensarVolume];
+    topo -= 20 + 14;
 
-    [self etiquetaEm:vista moldura:NSMakeRect(20, 14, 440, 76)
+    [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 240, largura, 240)
                texto:NSLocalizedString(@"prefs_norm_note", @"Nota sobre a normalização")
              pequena:YES];
 

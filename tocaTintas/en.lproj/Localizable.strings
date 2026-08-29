@@ -60,3 +60,13 @@
 "prefs_norm_compensate" = "Compensate for the system volume attenuation";
 "prefs_norm_note2" = "The system output is BlackHole, and its volume slider attenuates the audio before everything else — including before the stream. With this on, what goes out over AirPlay is always at the file's level, and the Mac slider governs the headphones only. The volume of the stereo is the stereo's business.";
 "prefs_norm_track_full" = "Per track — full gain (may clip)";
+"prefs_tab_eq" = "Headphones";
+"prefs_eq_explanation" = "Equalization corrects the transducer's response: crossfeed models the head, this models the headphones. It applies to them only, and only with the processing on.";
+"prefs_eq_label" = "Headphone model:";
+"prefs_eq_none" = "No equalization";
+"prefs_eq_builtin" = "Sony MDR-7506 (built in)";
+"prefs_eq_open_folder" = "Open the corrections folder…";
+"prefs_eq_note" = "The list comes from the AutoEQ project, using oratory1990's measurements against the Harman over-ear target: 522 models from 106 brands, stored in ~/Library/Application Support/tocaTintas/eq. To add another, drop its “ParametricEQ.txt” in the folder — at the top level or in a subfolder named after the brand — and it appears here. The “Preamp” line is read and honoured: it is what keeps the bass boost from overloading the output.";
+"prefs_eq_brand" = "Brand:";
+"prefs_eq_model" = "Model:";
+"prefs_eq_mine" = "My own files";

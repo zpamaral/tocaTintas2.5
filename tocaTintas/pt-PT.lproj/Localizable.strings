@@ -60,3 +60,13 @@
 "prefs_norm_compensate" = "Compensar a atenuação do volume do sistema";
 "prefs_norm_note2" = "A saída do sistema é o BlackHole, e o seu cursor de volume atenua o áudio antes de tudo o resto — inclusive antes da transmissão. Com esta opção, o que sai para o AirPlay vai sempre ao nível do ficheiro, e o cursor do Mac passa a governar só os auscultadores. Quem manda no volume da aparelhagem é a aparelhagem.";
 "prefs_norm_track_full" = "Por faixa — ganho integral (pode ceifar)";
+"prefs_tab_eq" = "Auscultadores";
+"prefs_eq_explanation" = "A equalização corrige a resposta do transdutor: o crossfeed modela a cabeça, esta modela os auscultadores. Aplica-se só a eles, e só com o tratamento ligado.";
+"prefs_eq_label" = "Modelo de auscultadores:";
+"prefs_eq_none" = "Sem equalização";
+"prefs_eq_builtin" = "Sony MDR-7506 (embutida)";
+"prefs_eq_open_folder" = "Abrir a pasta das correcções…";
+"prefs_eq_note" = "A lista vem do projecto AutoEQ, com as medições do oratory1990 para o alvo Harman over-ear: 522 modelos de 106 marcas, guardados em ~/Library/Application Support/tocaTintas/eq. Para acrescentar outro, larga o ficheiro «ParametricEQ.txt» na pasta — na raiz ou numa subpasta com o nome da marca — e ele aparece aqui. A linha «Preamp» é lida e respeitada: é ela que impede o reforço de graves de saturar a saída.";
+"prefs_eq_brand" = "Marca:";
+"prefs_eq_model" = "Modelo:";
+"prefs_eq_mine" = "Os meus ficheiros";

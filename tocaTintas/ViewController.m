@@ -316,7 +316,10 @@ static WavpackStreamReader memoryReader = {
 // não a reiniciar à toa: reiniciar corta o som por um instante.
 @property (copy,   nonatomic) NSString *bs2bRunningOutputName;
 @property (copy,   nonatomic) NSString *bs2bRunningProfile;
+@property (copy,   nonatomic) NSString *bs2bRunningEq;
 @property (assign, nonatomic) BOOL bs2bRunningProcessing;
+// Guarda contra reentrância: ver a nota em -stopBs2bIfRunning.
+@property (assign, nonatomic) BOOL bs2bAplicando;
 - (void)updateBs2bToggleButtonAppearance;
 - (void)applyBs2bConfigurationWithOutput:(NSString *)nomeSaida;
 
@@ -1641,6 +1644,15 @@ CoreAudioPlaybackState playbackState;
 - (void)applyBs2bConfigurationWithOutput:(NSString *)saida
 {
     #if ENABLE_BS2B_BRIDGE
+    // Reentrância: este método pára e relança processos, e enquanto o faz não
+    // pode ser chamado outra vez — senão a segunda chamada vê um estado a meio
+    // e lança uma ponte a mais, que fica órfã. Acontecia mesmo: o temporizador
+    // de um segundo entrava pelo meio (ver -stopBs2bIfRunning).
+    if (self.bs2bAplicando) {
+        return;
+    }
+    self.bs2bAplicando = YES;
+
     if (![self systemOutputIsBlackHole]) {
         if (self.bs2bTask && self.bs2bTask.isRunning) {
             #ifdef DEBUG
@@ -1648,6 +1660,7 @@ CoreAudioPlaybackState playbackState;
             #endif
             [self stopBs2bIfRunning];
         }
+        self.bs2bAplicando = NO;
         return;
     }
 
@@ -1656,6 +1669,7 @@ CoreAudioPlaybackState playbackState;
         NSLog(@"[bs2b] Sem saída utilizável; a ponte não corre.");
         #endif
         [self stopBs2bIfRunning];
+        self.bs2bAplicando = NO;
         return;
     }
 
@@ -1675,6 +1689,7 @@ CoreAudioPlaybackState playbackState;
             #endif
             [self stopBs2bIfRunning];
         }
+        self.bs2bAplicando = NO;
         return;
     }
 
@@ -1685,12 +1700,15 @@ CoreAudioPlaybackState playbackState;
     if (self.bs2bTask && self.bs2bTask.isRunning
         && [self.bs2bRunningOutputName isEqualToString:saida]
         && [self.bs2bRunningProfile isEqualToString:ZPCurrentBS2BProfile()]
+        && [self.bs2bRunningEq isEqualToString:ZPCurrentBS2BEq()]
         && self.bs2bRunningProcessing == processar) {
+        self.bs2bAplicando = NO;
         return;   // já está como deve estar
     }
 
     [self stopBs2bIfRunning];
     [self startBs2bWithOutputDevice:saida processing:processar];
+    self.bs2bAplicando = NO;
     #endif
 }
 
@@ -1799,6 +1817,15 @@ CoreAudioPlaybackState playbackState;
                                                        queue:[NSOperationQueue mainQueue]
                                                   usingBlock:^(NSNotification *nota) {
         [weakSelfNorm pushReplayGainToStreamer];
+    }];
+
+    // Mudar a equalização nas preferências relança a ponte com ela.
+    __weak typeof(self) weakSelfEq = self;
+    [[NSNotificationCenter defaultCenter] addObserverForName:kBS2BEqChangedNotification
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *nota) {
+        [weakSelfEq applyBs2bConfiguration];
     }];
 
     // Mudar o perfil nas preferências relança a ponte com ele.
@@ -1918,6 +1945,8 @@ CoreAudioPlaybackState playbackState;
 - (void)startBs2bWithOutputDevice:(NSString *)nomeSaida processing:(BOOL)processar {
     #if ENABLE_BS2B_BRIDGE
     if (self.bs2bTask && self.bs2bTask.isRunning) {
+        NSLog(@"[bs2b] ARRANQUE recusado: já há uma ponte viva (pid %d).",
+              self.bs2bTask.processIdentifier);
         return;
     }
 
@@ -1946,11 +1975,18 @@ CoreAudioPlaybackState playbackState;
     BOOL comAuscultadores =
         [nomeSaida rangeOfString:kBS2BHeadphonesNameSubstring options:NSCaseInsensitiveSearch].location != NSNotFound;
 
-    // O perfil vem das preferências; sem escolha feita vale "cmoy".
+    // O perfil e a equalização vêm das preferências. A equalização é vazia
+    // (nenhuma), "builtin" (a dos MDR-7506) ou o caminho de um ParametricEQ.txt.
     NSString *perfil = ZPCurrentBS2BProfile();
+    NSString *eq     = ZPCurrentBS2BEq();
 
-    NSMutableArray<NSString *> *argumentos =
-        [@[@"--saida", nomeSaida, @"--silencioso"] mutableCopy];
+    NSArray<NSString *> * (^argumentosEq)(void) = ^NSArray<NSString *> *{
+        if ([eq isEqualToString:@"builtin"]) return @[@"--eq"];
+        if (eq.length > 0)                   return @[@"--eq", eq];
+        return @[];
+    };
+
+    NSMutableArray<NSString *> *argumentos = [@[@"--saida", nomeSaida] mutableCopy];
 
     // Dois interruptores escondidos, sem interface, para experimentar com os
     // estalidos de arranque sem recompilar. Nenhum mexe em nada por omissão:
@@ -1961,6 +1997,16 @@ CoreAudioPlaybackState playbackState;
     // O primeiro desliga a correcção de deriva entre relógios; o segundo dá
     // folga ao tampão (tem de ser >= chunksize, que são 1024 tramas).
     NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+
+    // Terceiro interruptor escondido: um caminho de ficheiro onde despejar o
+    // que a ponte e o CamillaDSP escrevem. Com ele, tira-se também o
+    // --silencioso, e o CamillaDSP sobe de «error» para «warn» — que é o nível
+    // onde ele diz «buffer underrun» e «clipping detected».
+    //
+    //   defaults write JPSdA.tocaTintas bs2bRegisto -string /tmp/bs2b.log
+    //
+    NSString *caminhoRegisto = [prefs stringForKey:@"bs2bRegisto"];
+
     if ([prefs boolForKey:@"bs2bSemAjusteRelogio"]) {
         [argumentos addObject:@"--sem-ajuste-relogio"];
     }
@@ -1969,17 +2015,41 @@ CoreAudioPlaybackState playbackState;
         [argumentos addObjectsFromArray:@[@"--nivel-alvo", [NSString stringWithFormat:@"%ld", (long)nivelAlvo]]];
     }
     if (processar) {
-        [argumentos addObjectsFromArray:@[@"--perfil", perfil, @"--eq"]];
+        [argumentos addObjectsFromArray:@[@"--perfil", perfil]];
+        [argumentos addObjectsFromArray:argumentosEq()];
     } else if (comAuscultadores) {
-        [argumentos addObjectsFromArray:@[@"--perfil", perfil, @"--eq", @"--sem-processamento"]];
+        // A equalização vai na mesma, para o --sem-processamento poder contar
+        // com o «preamp» dela ao igualar o nível.
+        [argumentos addObjectsFromArray:@[@"--perfil", perfil]];
+        [argumentos addObjectsFromArray:argumentosEq()];
+        [argumentos addObject:@"--sem-processamento"];
     } else {
         [argumentos addObjectsFromArray:@[@"--perfil", @"nenhum"]];
     }
+    if (!caminhoRegisto.length) {
+        [argumentos addObject:@"--silencioso"];
+    }
     task.arguments = argumentos;
 
-    // To avoid spam in stdout, redirect to /dev/null
-    task.standardOutput = [NSPipe pipe];
-    task.standardError  = [NSPipe pipe];
+    // Para onde vai o que a ponte escreve. Isto NÃO pode ser um NSPipe que
+    // ninguém leia: o cano tem 64 KB, e quando enche o processo do outro lado
+    // BLOQUEIA na escrita — com o CamillaDSP, bloquear é ficar sem áudio.
+    // Sem registo pedido, vai tudo para o dispositivo nulo.
+    NSFileHandle *destinoRegisto = [NSFileHandle fileHandleWithNullDevice];
+    if (caminhoRegisto.length) {
+        // Criar só se não existir: truncar a cada relançamento apagava
+        // precisamente o que interessa ler.
+        if (![[NSFileManager defaultManager] fileExistsAtPath:caminhoRegisto]) {
+            [[NSFileManager defaultManager] createFileAtPath:caminhoRegisto contents:nil attributes:nil];
+        }
+        NSFileHandle *f = [NSFileHandle fileHandleForWritingAtPath:caminhoRegisto];
+        if (f) {
+            [f seekToEndOfFile];
+            destinoRegisto = f;
+        }
+    }
+    task.standardOutput = destinoRegisto;
+    task.standardError  = destinoRegisto;
 
     __weak typeof(self) weakSelf = self;
     task.terminationHandler = ^(NSTask *finishedTask) {
@@ -2000,11 +2070,11 @@ CoreAudioPlaybackState playbackState;
         self.bs2bTask = task;
         self.bs2bRunningOutputName = nomeSaida;
         self.bs2bRunningProfile = perfil;
+        self.bs2bRunningEq = eq;
         self.bs2bRunningProcessing = processar;
-        #ifdef DEBUG
-        NSLog(@"[bs2b] bs2b_bridge lançado: saída «%@», perfil «%@», processamento %@.",
-              nomeSaida, perfil, processar ? @"ligado" : @"desligado");
-        #endif
+        NSLog(@"[bs2b] ARRANQUE pid %d: perfil «%@», eq «%@», processamento %@, saída «%@».",
+              task.processIdentifier, perfil, eq.length ? eq.lastPathComponent : @"nenhuma",
+              processar ? @"ligado" : @"desligado", nomeSaida);
     } @catch (NSException *exception) {
         #ifdef DEBUG
         NSLog(@"[bs2b] Failed to launch bs2b_bridge: %@", exception);
@@ -2017,24 +2087,38 @@ CoreAudioPlaybackState playbackState;
 
 - (void)stopBs2bIfRunning {
         #if ENABLE_BS2B_BRIDGE
-    if (self.bs2bTask && self.bs2bTask.isRunning) {
-        #ifdef DEBUG
-        NSLog(@"[bs2b] Terminating bs2b_bridge…");
-        #endif
-        [self.bs2bTask terminate];
+    NSLog(@"[bs2b] PARAGEM pedida: task=%@ pid=%d aRcorrer=%d",
+          self.bs2bTask ? @"sim" : @"NIL",
+          self.bs2bTask ? self.bs2bTask.processIdentifier : -1,
+          self.bs2bTask ? self.bs2bTask.isRunning : -1);
 
-        // To be sure of an immediate cleanup:
-        @try {
-            [self.bs2bTask waitUntilExit];
-        } @catch (NSException *exception) {
-            #ifdef DEBUG
-            NSLog(@"[bs2b] Exception waiting for bs2b_bridge to exit: %@", exception);
-            #endif
+    if (self.bs2bTask && self.bs2bTask.isRunning) {
+        NSTask *aMorrer = self.bs2bTask;
+        [aMorrer terminate];
+
+        // Esperar SEM bombear o run loop.
+        //
+        // O -waitUntilExit do NSTask não bloqueia: corre o run loop enquanto
+        // espera. Isso deixava entrar aqui pelo meio o temporizador de um
+        // segundo, que chamava outra vez o -applyBs2bConfiguration, via um
+        // -stopBs2bIfRunning aninhado — e no fim ficavam duas pontes vivas por
+        // cada mudança de perfil, uma delas órfã. Medido no registo: duas
+        // paragens do mesmo pid com 6 ms de intervalo.
+        //
+        // Esperamos na mesma, porque o CamillaDSP pede acesso exclusivo ao
+        // dispositivo e o seguinte falharia se o anterior ainda o tivesse. Mas
+        // esperamos a dormir, não a correr o run loop, e com um tecto.
+        for (int i = 0; i < 60 && aMorrer.isRunning; ++i) {
+            usleep(10 * 1000);
+        }
+        if (aMorrer.isRunning) {
+            NSLog(@"[bs2b] A ponte pid %d não morreu em 600 ms.", aMorrer.processIdentifier);
         }
     }
     self.bs2bTask = nil;
     self.bs2bRunningOutputName = nil;
     self.bs2bRunningProfile = nil;
+    self.bs2bRunningEq = nil;
             #endif
 }
 

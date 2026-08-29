@@ -34,6 +34,7 @@
 		1F7D75232C963F600046E0AC /* ZPOpusDecoder.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F7D75222C963F600046E0AC /* ZPOpusDecoder.m */; };
 		1F7D75262C9642000046E0AC /* libopus.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F7D75242C9642000046E0AC /* libopus.a */; };
 		1F7D75272C9642000046E0AC /* libopusfile.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F7D75252C9642000046E0AC /* libopusfile.a */; };
+		1F7E10B030432FCF00C86ED4 /* eq_autoeq.tgz in Resources */ = {isa = PBXBuildFile; fileRef = 1F7E10AE30432D7E00C86ED4 /* eq_autoeq.tgz */; };
 		1FAA50772E436F2E00DB68C7 /* QuickLookThumbnailing.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FEC26C92E33C1EB0099225A /* QuickLookThumbnailing.framework */; };
 		1FAA50782E436F2E00DB68C7 /* Quartz.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F7D8B562E32D815009D8628 /* Quartz.framework */; };
 		1FAA507C2E436F2F00DB68C7 /* ThumbnailProvider.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FAA507B2E436F2F00DB68C7 /* ThumbnailProvider.m */; };
@@ -133,6 +134,7 @@
 		1F7D75242C9642000046E0AC /* libopus.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libopus.a; path = tocaTintas.xcodeproj/Frameworks/libopus.a; sourceTree = "<group>"; };
 		1F7D75252C9642000046E0AC /* libopusfile.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libopusfile.a; path = tocaTintas.xcodeproj/Frameworks/libopusfile.a; sourceTree = "<group>"; };
 		1F7D8B562E32D815009D8628 /* Quartz.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Quartz.framework; path = System/Library/Frameworks/Quartz.framework; sourceTree = SDKROOT; };
+		1F7E10AE30432D7E00C86ED4 /* eq_autoeq.tgz */ = {isa = PBXFileReference; lastKnownFileType = file; path = eq_autoeq.tgz; sourceTree = "<group>"; };
 		1FAA50762E436F2E00DB68C7 /* ZPQLiconwv.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ZPQLiconwv.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		1FAA507A2E436F2F00DB68C7 /* ThumbnailProvider.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ThumbnailProvider.h; sourceTree = "<group>"; };
 		1FAA507B2E436F2F00DB68C7 /* ThumbnailProvider.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ThumbnailProvider.m; sourceTree = "<group>"; };
@@ -305,6 +307,7 @@
 				1F73F9C32CFE7744007C70AD /* placeholder.jpg */,
 				1F73F9C12CFE0C2D007C70AD /* refresh_icon.png */,
 				1FF2BD3E2CEF75CE009726BF /* ListAudioDevices */,
+				1F7E10AE30432D7E00C86ED4 /* eq_autoeq.tgz */,
 				1FC8C3ED2CE4C1A200271175 /* raop_play */,
 				1F75D8DF2EE994110005EE27 /* bs2b_bridge */,
 				1F37C8C42CD5446700346A66 /* cava */,
@@ -471,6 +474,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1F7E10B030432FCF00C86ED4 /* eq_autoeq.tgz in Resources */,
 				1FBE937C2D0B130E00E14743 /* placeholder.png in Resources */,
 				1F73F9C22CFE0C2D007C70AD /* refresh_icon.png in Resources */,
 				1F04EB2E2E5BBA9500323023 /* audio_stuff_info in Resources */,
