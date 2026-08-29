@@ -1913,13 +1913,25 @@ CoreAudioPlaybackState playbackState;
     task.launchPath = bridgePath;
 
     // --saida: o destino é sempre dito de fora, porque muda com a cavilha.
-    // --perfil nenhum: passagem limpa, sem crossfeed nem equalização. É o que
-    // o botão desligado quer dizer, e é também o que se usa nas colunas. Note-se
-    // que «desligado» não pára a ponte: ela continua a ser o caminho do som.
+    // Note-se que «desligado» não pára a ponte: ela continua a ser o caminho do
+    // som. São três casos, não dois:
+    //
+    //   auscultadores, tratamento ligado  -> crossfeed e equalização
+    //   auscultadores, tratamento parado  -> --sem-processamento: passagem
+    //       limpa, mas atenuada nos mesmos 7,33 dB que o crossfeed e o «preamp»
+    //       da equalização lhe tirariam. O botão passa a comparar o efeito e
+    //       não o volume, que é o que engana o ouvido.
+    //   colunas                           -> --perfil nenhum: passagem limpa a
+    //       0 dB. Aqui não há nada com que igualar o nível.
+    BOOL comAuscultadores =
+        [nomeSaida rangeOfString:kBS2BHeadphonesNameSubstring options:NSCaseInsensitiveSearch].location != NSNotFound;
+
     NSMutableArray<NSString *> *argumentos =
         [@[@"--saida", nomeSaida, @"--silencioso"] mutableCopy];
     if (processar) {
         [argumentos addObjectsFromArray:@[@"--perfil", @"cmoy", @"--eq"]];
+    } else if (comAuscultadores) {
+        [argumentos addObjectsFromArray:@[@"--perfil", @"cmoy", @"--eq", @"--sem-processamento"]];
     } else {
         [argumentos addObjectsFromArray:@[@"--perfil", @"nenhum"]];
     }

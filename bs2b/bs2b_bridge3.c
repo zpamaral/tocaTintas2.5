@@ -194,6 +194,14 @@ static const char *g_eq_origem = NULL;   // texto para as mensagens
 // ser exacto (o CamillaDSP não faz correspondência por substring).
 static const char *g_saida = OUT_DEV_NAME;
 
+// Passagem limpa COM O MESMO NÍVEL do processamento. Não é o mesmo que o
+// perfil «nenhum»: aqui as opções de processamento continuam a ser lidas, só
+// que em vez de serem aplicadas servem para calcular quanto é que elas baixavam
+// o sinal — a atenuação do libbs2b mais o «preamp» da equalização — e essa
+// atenuação é aplicada na mesma. Assim o botão do programa de música compara o
+// efeito do tratamento e não o volume, que é o que engana o ouvido.
+static int g_sem_processamento = 0;
+
 static int g_silencioso = 0;
 static int g_ajustar_relogio = 1;        // correcção de deriva, ligada
 static int g_tem_volume = 0;
@@ -226,6 +234,10 @@ static void imprimir_uso(const char *nome_prog) {
         "                   o fader está abaixo da referência: se o volume for feito\n"
         "                   fora do CamillaDSP (teclas do macOS), o fader fica a 0 e\n"
         "                   não há nada a compensar\n"
+        "  --sem-processamento   Passagem limpa, mas ao MESMO NÍVEL que o\n"
+        "                   processamento teria dado: não aplica crossfeed nem\n"
+        "                   equalização, e atenua o que elas atenuariam. Serve\n"
+        "                   para comparar o efeito sem comparar o volume\n"
         "  --sem-ajuste-relogio  Desliga a correcção de deriva entre relógios\n"
         "  --silencioso     Não escrever mensagens em stdout (apenas erros)\n"
         "  --mostrar-config Escrever o YAML gerado em stdout e sair (sem tocar)\n\n"
@@ -347,7 +359,14 @@ static void gerar_config(FILE *f, const Perfil *p) {
         "  chunksize: %d\n",
         p->nome, SAMPLE_RATE, CHUNK_SIZE);
 
-    const int sem_crossfeed = (strcmp(p->nome, PERFIL_NENHUM) == 0);
+    const int sem_crossfeed = (strcmp(p->nome, PERFIL_NENHUM) == 0) || g_sem_processamento;
+    const int aplicar_eq    = (g_num_eq > 0) && !g_sem_processamento;
+
+    // Em passagem igualada, o «comp» carrega com tudo o que o processamento
+    // teria tirado: a compensação do perfil e o «preamp» da equalização.
+    const double ganho_comp = g_sem_processamento
+                            ? p->comp_gain + g_eq_preamp
+                            : p->comp_gain;
 
     // Correcção de deriva: de 10 em 10 segundos o CamillaDSP compara o nível
     // do tampão com o alvo e pede ao BlackHole que ande um nadinha mais depressa
@@ -409,9 +428,9 @@ static void gerar_config(FILE *f, const Perfil *p) {
         "    parameters:\n"
         "      gain: %g\n"
         "      scale: dB\n",
-        p->comp_gain);
+        ganho_comp);
 
-    if (g_num_eq > 0) {
+    if (aplicar_eq) {
         fprintf(f,
             "  eq_preamp:\n"
             "    type: Gain\n"
@@ -521,7 +540,7 @@ static void gerar_config(FILE *f, const Perfil *p) {
         "      - comp\n");
     }
 
-    if (g_num_eq > 0) {
+    if (aplicar_eq) {
         fprintf(f, "      - eq_preamp\n");
         for (int i = 0; i < g_num_eq; ++i)
             fprintf(f, "      - eq%d\n", i + 1);
@@ -563,6 +582,10 @@ int main(int argc, char *argv[]) {
         }
         if (strcmp(arg, "--sem-ajuste-relogio") == 0) {
             g_ajustar_relogio = 0;
+            continue;
+        }
+        if (strcmp(arg, "--sem-processamento") == 0) {
+            g_sem_processamento = 1;
             continue;
         }
         if (strncmp(arg, "--saida=", 8) == 0) {
