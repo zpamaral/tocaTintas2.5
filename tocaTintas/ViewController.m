@@ -1951,6 +1951,23 @@ CoreAudioPlaybackState playbackState;
 
     NSMutableArray<NSString *> *argumentos =
         [@[@"--saida", nomeSaida, @"--silencioso"] mutableCopy];
+
+    // Dois interruptores escondidos, sem interface, para experimentar com os
+    // estalidos de arranque sem recompilar. Nenhum mexe em nada por omissão:
+    //
+    //   defaults write JPSdA.tocaTintas bs2bSemAjusteRelogio -bool YES
+    //   defaults write JPSdA.tocaTintas bs2bNivelAlvo -int 3072
+    //
+    // O primeiro desliga a correcção de deriva entre relógios; o segundo dá
+    // folga ao tampão (tem de ser >= chunksize, que são 1024 tramas).
+    NSUserDefaults *prefs = [NSUserDefaults standardUserDefaults];
+    if ([prefs boolForKey:@"bs2bSemAjusteRelogio"]) {
+        [argumentos addObject:@"--sem-ajuste-relogio"];
+    }
+    NSInteger nivelAlvo = [prefs integerForKey:@"bs2bNivelAlvo"];
+    if (nivelAlvo > 0) {
+        [argumentos addObjectsFromArray:@[@"--nivel-alvo", [NSString stringWithFormat:@"%ld", (long)nivelAlvo]]];
+    }
     if (processar) {
         [argumentos addObjectsFromArray:@[@"--perfil", perfil, @"--eq"]];
     } else if (comAuscultadores) {

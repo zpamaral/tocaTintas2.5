@@ -37,8 +37,12 @@ static const NSUInteger kNumPerfis = sizeof(kPerfis) / sizeof(kPerfis[0]);
 
 NSString * const kAirPlayNormalizationDefaultsKey        = @"airPlayNormalization";
 NSString * const kAirPlayNormalizationChangedNotification = @"AirPlayNormalizationChanged";
+NSString * const kAirPlayCompensateVolumeDefaultsKey        = @"airPlayCompensateSystemVolume";
+NSString * const kAirPlayCompensateVolumeChangedNotification = @"AirPlayCompensateVolumeChanged";
 
-static NSString * const kNormalizacoes[] = { @"none", @"track", @"album" };
+// A ordem é a do menu. «trackfull» é o ganho de faixa aplicado por inteiro,
+// sem o tecto do pico: pode ceifar, e é essa a diferença para «track».
+static NSString * const kNormalizacoes[] = { @"none", @"trackfull", @"track", @"album" };
 static const NSUInteger kNumNormalizacoes = sizeof(kNormalizacoes) / sizeof(kNormalizacoes[0]);
 
 static NSString *ZPCurrentAirPlayNormalization(void) {
@@ -59,6 +63,16 @@ void ZPResolveReplayGain(float trackGain, float trackPeak,
     if ([modo isEqualToString:@"none"]) {
         // Nem ganho nem limitação: a faixa toca ao nível a que foi masterizada.
         if (outGain) *outGain = 0.0f;
+        if (outPeak) *outPeak = 0.0f;
+        return;
+    }
+
+    if ([modo isEqualToString:@"trackfull"]) {
+        // Ganho de faixa integral. O pico vai a zero — «desconhecido» —, e o
+        // streamer não limita nada: o que passar de 0 dBFS é ceifado pelo
+        // limitador do tap. É o comportamento antigo, mantido de propósito para
+        // se poder comparar com o outro.
+        if (outGain) *outGain = trackGain;
         if (outPeak) *outPeak = 0.0f;
         return;
     }
@@ -88,6 +102,7 @@ NSString *ZPCurrentBS2BProfile(void) {
 @interface PreferencesWindowController ()
 @property (strong, nonatomic) NSPopUpButton *dspPopUp;
 @property (strong, nonatomic) NSPopUpButton *normPopUp;
+@property (strong, nonatomic) NSButton *compensarVolume;
 @end
 
 @implementation PreferencesWindowController
@@ -214,7 +229,8 @@ NSString *ZPCurrentBS2BProfile(void) {
              pequena:NO];
 
     self.normPopUp = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(20, 128, 330, 26) pullsDown:NO];
-    NSArray<NSString *> *chaves = @[@"prefs_norm_none", @"prefs_norm_track", @"prefs_norm_album"];
+    NSArray<NSString *> *chaves = @[@"prefs_norm_none", @"prefs_norm_track_full",
+                                    @"prefs_norm_track", @"prefs_norm_album"];
     for (NSUInteger i = 0; i < kNumNormalizacoes; ++i) {
         [self.normPopUp addItemWithTitle:NSLocalizedString(chaves[i], @"Modo de normalização de volume")];
         self.normPopUp.lastItem.representedObject = kNormalizacoes[i];
@@ -231,11 +247,28 @@ NSString *ZPCurrentBS2BProfile(void) {
         }
     }
 
-    [self etiquetaEm:vista moldura:NSMakeRect(20, 20, 440, 95)
+    self.compensarVolume = [[NSButton alloc] initWithFrame:NSMakeRect(20, 96, 440, 20)];
+    [self.compensarVolume setButtonType:NSButtonTypeSwitch];
+    self.compensarVolume.title = NSLocalizedString(@"prefs_norm_compensate", @"Compensar o volume do sistema");
+    NSNumber *guardado = [[NSUserDefaults standardUserDefaults] objectForKey:kAirPlayCompensateVolumeDefaultsKey];
+    self.compensarVolume.state = (!guardado || guardado.boolValue) ? NSControlStateValueOn : NSControlStateValueOff;
+    self.compensarVolume.toolTip = NSLocalizedString(@"prefs_norm_note2", @"Porquê compensar o volume do sistema");
+    self.compensarVolume.target = self;
+    self.compensarVolume.action = @selector(compensateVolumeChanged:);
+    [vista addSubview:self.compensarVolume];
+
+    [self etiquetaEm:vista moldura:NSMakeRect(20, 14, 440, 76)
                texto:NSLocalizedString(@"prefs_norm_note", @"Nota sobre a normalização")
              pequena:YES];
 
     return vista;
+}
+
+- (void)compensateVolumeChanged:(id)sender {
+    [[NSUserDefaults standardUserDefaults] setBool:(self.compensarVolume.state == NSControlStateValueOn)
+                                            forKey:kAirPlayCompensateVolumeDefaultsKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    [[NSNotificationCenter defaultCenter] postNotificationName:kAirPlayCompensateVolumeChangedNotification object:nil];
 }
 
 - (void)airPlayNormalizationChanged:(id)sender {

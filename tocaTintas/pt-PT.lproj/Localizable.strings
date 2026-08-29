@@ -54,6 +54,9 @@
 "prefs_norm_explanation" = "A normalização iguala o volume entre faixas, a partir das etiquetas ReplayGain do ficheiro. Aplica-se apenas ao que sai para o AirPlay; nos auscultadores e nas colunas cada faixa toca ao nível a que foi masterizada.";
 "prefs_norm_label" = "Normalização do volume:";
 "prefs_norm_none" = "Nenhuma — como está no ficheiro";
-"prefs_norm_track" = "Por faixa — todas ao mesmo volume";
-"prefs_norm_album" = "Por álbum — preserva o disco";
-"prefs_norm_note" = "Por faixa iguala tudo, mas achata as diferenças de nível que um disco tem de propósito. Por álbum iguala discos entre si e mantém intactas as diferenças lá dentro; quando o ficheiro não traz as etiquetas de álbum, recai na de faixa. Em qualquer dos casos o ganho é limitado pelo pico da faixa, para não ceifar. Faixas sem etiquetas nenhumas tocam como estão.";
+"prefs_norm_track" = "Por faixa — limitado pelo pico";
+"prefs_norm_album" = "Por álbum — limitado pelo pico";
+"prefs_norm_note" = "As duas opções por faixa põem tudo ao mesmo volume, mas achatam as diferenças de nível que um disco tem de propósito; a de álbum iguala discos entre si e mantém intactas as diferenças lá dentro, recaindo na de faixa quando faltam as etiquetas de álbum. «Ganho integral» aplica o que a etiqueta manda, mesmo que os picos passem de 0 dBFS e sejam ceifados; «limitado pelo pico» reduz o ganho ao máximo que a faixa comporta sem ceifar. Faixas sem etiquetas nenhumas tocam como estão.";
+"prefs_norm_compensate" = "Compensar a atenuação do volume do sistema";
+"prefs_norm_note2" = "A saída do sistema é o BlackHole, e o seu cursor de volume atenua o áudio antes de tudo o resto — inclusive antes da transmissão. Com esta opção, o que sai para o AirPlay vai sempre ao nível do ficheiro, e o cursor do Mac passa a governar só os auscultadores. Quem manda no volume da aparelhagem é a aparelhagem.";
+"prefs_norm_track_full" = "Por faixa — ganho integral (pode ceifar)";

@@ -27,7 +27,8 @@ SOFTWARE.
 //
 
 #import "ZPAirPlayStreamer.h"
-#import "ZPAudioCapture.h"                      // ZPBindEngineInputToLoopback
+#import "ZPAudioCapture.h"                      // ZPBindEngineInputToLoopback, ZPLoopbackAudioDevice
+#import "PreferencesWindowController.h"          // chaves das preferências
 #import <TPCircularBuffer/TPCircularBuffer.h>
 #import <AVFoundation/AVFoundation.h>
 #import <sys/stat.h>
@@ -312,6 +313,20 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
     // tocado dentro do tap, e é o que persegue o alvo bloco a bloco.
     _Atomic float _ganhoAlvo;
     float _ganhoActual;
+
+    // Compensação da atenuação que o cursor de volume do macOS aplica ao
+    // BlackHole. O que o tap multiplica é o produto dos dois.
+    _Atomic float _ganhoCompensacao;
+
+    // Contadores de áudio perdido. Incrementados no thread de áudio (só uma
+    // soma atómica, sem registo nenhum lá dentro) e relatados pelo temporizador
+    // de saúde. Ficam FORA do #ifdef DEBUG de propósito: perder amostras não é
+    // acontecimento de rotina, e sem isto a compilação de lançamento perde-as
+    // caladinha.
+    _Atomic uint64_t _blocosDescartadosTapCheio;
+    _Atomic uint64_t _bytesDescartadosTapCheio;
+    _Atomic uint64_t _cortesDeDeriva;
+    _Atomic uint64_t _bytesCortadosDeriva;
 }
 
 #pragma mark - Initialization
@@ -328,8 +343,11 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         // Sem pico conhecido à partida; quem souber chama depois o
         // -updateReplayGainValue:trackPeak:. No arranque o ganho actual já
         // parte do alvo, para a primeira faixa não entrar com rampa.
+        atomic_store(&_ganhoCompensacao, 1.0f);
+        [self refreshSystemVolumeCompensation];
+        [self observeSystemVolume];
         [self updateReplayGainValue:replayGainValue trackPeak:0.0f];
-        _ganhoActual = atomic_load(&_ganhoAlvo);
+        _ganhoActual = atomic_load(&_ganhoAlvo) * atomic_load(&_ganhoCompensacao);
 
         // Initialize the circular buffer with 10 seconds of stereo audio
         //TPCircularBufferInit(&_circularBuffer, 44100 * 2 * 10); // Original value
@@ -637,6 +655,27 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
     });
 }
 
+// Relata, uma vez por minuto e só se houver o que relatar, quanto áudio se
+// perdeu e onde. Fora do #ifdef DEBUG: é isto que permite diagnosticar
+// estalidos numa compilação de lançamento.
+- (void)relatarAudioPerdido {
+    uint64_t blocos = atomic_exchange(&_blocosDescartadosTapCheio, 0);
+    uint64_t bytes  = atomic_exchange(&_bytesDescartadosTapCheio, 0);
+    uint64_t cortes = atomic_exchange(&_cortesDeDeriva, 0);
+    uint64_t bytesCorte = atomic_exchange(&_bytesCortadosDeriva, 0);
+
+    const double bytesPorSegundo = 44100.0 * 4.0;
+
+    if (blocos > 0) {
+        NSLog(@"[Streaming] No último minuto o tampão circular esteve cheio %llu vezes; "
+               "perderam-se %.3f s de áudio no produtor.", blocos, bytes / bytesPorSegundo);
+    }
+    if (cortes > 0) {
+        NSLog(@"[Streaming] No último minuto houve %llu corte(s) de deriva, num total de %.2f s descartados.",
+              cortes, bytesCorte / bytesPorSegundo);
+    }
+}
+
 - (void)setupHealthCheckTimer {
     // Cancela um timer anterior para não acumular timers em cada restart
     if (self.healthCheckTimer) {
@@ -663,6 +702,7 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
             __strong typeof(weakSelf) strongSelf = weakSelf;
             if (strongSelf) {
                 [strongSelf checkRaopPlayHealth];
+                [strongSelf relatarAudioPerdido];
             }
         });
 
@@ -1027,10 +1067,11 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
             if (availableBytes > highWatermark) {
                 uint32_t excess = availableBytes - targetLevel;
                 TPCircularBufferConsume(&self->_circularBuffer, excess);
-                #ifdef DEBUG
-                NSLog(@"[Streaming] Deriva de relógio: tampão acima de %.0f s — descartados %u bytes (%.2f s) para repor a latência.",
-                      highWatermark / (double)bytesPerSecond, excess, excess / (double)bytesPerSecond);
-                #endif
+                atomic_fetch_add(&self->_cortesDeDeriva, 1);
+                atomic_fetch_add(&self->_bytesCortadosDeriva, excess);
+                NSLog(@"[Streaming] Deriva: tampão acima de %.0f s — descartados %.2f s de áudio para repor a latência. "
+                       "Isto ouve-se como um salto.",
+                      highWatermark / (double)bytesPerSecond, excess / (double)bytesPerSecond);
                 continue;
             }
 
@@ -1052,10 +1093,8 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
                 if (starvedSince == 0) {
                     starvedSince = now;
                 } else if (now - starvedSince >= 5.0) {
-                    #ifdef DEBUG
                     NSLog(@"[Streaming] Tampão circular vazio há %.0f s — a captura parou de produzir dados?",
                           now - starvedSince);
-                    #endif
                     starvedSince = now;
                 }
                 [NSThread sleepForTimeInterval:0.005];
@@ -1294,7 +1333,8 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
         // ouve-se como um estalo. O alvo é lido uma vez por bloco, e de forma
         // atómica, porque quem o escreve é o thread principal.
         const AVAudioFrameCount frames = floatBuffer.frameLength;
-        const float ganhoAlvo = atomic_load(&strongSelf->_ganhoAlvo);
+        const float ganhoAlvo = atomic_load(&strongSelf->_ganhoAlvo)
+                              * atomic_load(&strongSelf->_ganhoCompensacao);
         float ganho = strongSelf->_ganhoActual;
         const float passo = (frames > 0) ? (ganhoAlvo - ganho) / (float)frames : 0.0f;
 
@@ -1320,10 +1360,108 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
         // Passo 4: escrever no tampão circular. Se estiver cheio, o bloco é
         // descartado — regista-se para correlacionar com soluços audíveis.
         if (!TPCircularBufferProduceBytes(&strongSelf->_circularBuffer, pcmData, (uint32_t)byteCount)) {
-            #ifdef DEBUG
-            NSLog(@"[Streaming] Tampão circular cheio — descartados %lu bytes do tap.", (unsigned long)byteCount);
-            #endif
+            atomic_fetch_add(&strongSelf->_blocosDescartadosTapCheio, 1);
+            atomic_fetch_add(&strongSelf->_bytesDescartadosTapCheio, byteCount);
         }
+    }];
+}
+
+#pragma mark - Compensação do volume do sistema
+
+// Quanto é que o cursor de volume do macOS está a atenuar, em dB (<= 0).
+//
+// Isto existe porque a saída do sistema é o BlackHole, e o BlackHole — ao
+// contrário dos dispositivos agregados que aqui estiveram antes — TEM controlo
+// de volume. O cursor atenua antes do loopback, e por isso a atenuação vai
+// parar tanto aos auscultadores (onde a queremos) como à transmissão para o
+// AirPlay (onde não a queremos: quem manda no volume da aparelhagem é a
+// aparelhagem). Compensando-a aqui, a transmissão sai sempre ao nível do
+// ficheiro, seja qual for a posição do cursor.
+//
+// Repõe-se em vírgula flutuante e antes da conversão para int16, onde o sinal
+// ainda tem toda a precisão que o CoreAudio lhe deu: não se recupera ruído de
+// quantização nenhum, porque ainda não houve nenhum.
+static float ZPSystemVolumeAttenuationDB(void) {
+    AudioDeviceID dispositivo = ZPLoopbackAudioDevice();
+    if (dispositivo == kAudioObjectUnknown) {
+        return 0.0f;
+    }
+
+    // O «decibels» é o ganho que o dispositivo diz aplicar; o «scalar» é só a
+    // posição do cursor, e a curva entre os dois não é logarítmica simples.
+    // Prefere-se o primeiro, e o segundo fica de reserva.
+    AudioObjectPropertyAddress addr = {
+        .mSelector = kAudioDevicePropertyVolumeDecibels,
+        .mScope    = kAudioDevicePropertyScopeOutput,
+        .mElement  = kAudioObjectPropertyElementMain
+    };
+    if (!AudioObjectHasProperty(dispositivo, &addr)) {
+        addr.mElement = 1;
+    }
+    Float32 dB = 0.0f;
+    UInt32 tamanho = sizeof(dB);
+    if (AudioObjectHasProperty(dispositivo, &addr)
+        && AudioObjectGetPropertyData(dispositivo, &addr, 0, NULL, &tamanho, &dB) == noErr) {
+        return dB < 0.0f ? (float)dB : 0.0f;
+    }
+
+    addr.mSelector = kAudioDevicePropertyVolumeScalar;
+    addr.mElement  = kAudioObjectPropertyElementMain;
+    if (!AudioObjectHasProperty(dispositivo, &addr)) {
+        addr.mElement = 1;
+    }
+    Float32 escalar = 1.0f;
+    tamanho = sizeof(escalar);
+    if (AudioObjectHasProperty(dispositivo, &addr)
+        && AudioObjectGetPropertyData(dispositivo, &addr, 0, NULL, &tamanho, &escalar) == noErr
+        && escalar > 0.0f && escalar < 1.0f) {
+        return 20.0f * log10f(escalar);
+    }
+
+    return 0.0f;
+}
+
+- (void)refreshSystemVolumeCompensation {
+    BOOL ligada = YES;
+    NSNumber *guardado = [[NSUserDefaults standardUserDefaults] objectForKey:kAirPlayCompensateVolumeDefaultsKey];
+    if (guardado) {
+        ligada = guardado.boolValue;
+    }
+
+    float dB = ligada ? ZPSystemVolumeAttenuationDB() : 0.0f;
+    float factor = powf(10.0f, -dB / 20.0f);   // dB é negativo: o factor sobe
+    atomic_store(&_ganhoCompensacao, factor);
+
+    #ifdef DEBUG
+    NSLog(@"[ReplayGain] Compensação do volume do sistema: %@ (%.2f dB → ×%.3f).",
+          ligada ? @"ligada" : @"desligada", dB, factor);
+    #endif
+}
+
+// O cursor de volume mexe a qualquer momento; a compensação segue-o, e a rampa
+// do tap encarrega-se de a mudança não se ouvir como um degrau.
+- (void)observeSystemVolume {
+    AudioDeviceID dispositivo = ZPLoopbackAudioDevice();
+    if (dispositivo == kAudioObjectUnknown) {
+        return;
+    }
+
+    __weak typeof(self) weakSelf = self;
+    AudioObjectPropertyAddress addr = {
+        .mSelector = kAudioDevicePropertyVolumeScalar,
+        .mScope    = kAudioDevicePropertyScopeOutput,
+        .mElement  = kAudioObjectPropertyElementWildcard
+    };
+    AudioObjectAddPropertyListenerBlock(dispositivo, &addr, dispatch_get_main_queue(),
+                                        ^(UInt32 n, const AudioObjectPropertyAddress *a) {
+        [weakSelf refreshSystemVolumeCompensation];
+    });
+
+    [[NSNotificationCenter defaultCenter] addObserverForName:kAirPlayCompensateVolumeChangedNotification
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *nota) {
+        [weakSelf refreshSystemVolumeCompensation];
     }];
 }
 

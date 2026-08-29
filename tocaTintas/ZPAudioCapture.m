@@ -41,7 +41,7 @@ enum { kZPWavHeaderSize = 56 };   // constante de compilação: serve de dimens�
 static NSString * const kZPLoopbackNameSubstring = @"BlackHole";
 
 // Procura o dispositivo de loopback entre os que têm entrada estéreo.
-static AudioDeviceID ZPLoopbackInputDevice(void) {
+AudioDeviceID ZPLoopbackAudioDevice(void) {
     AudioObjectPropertyAddress devicesAddr = (AudioObjectPropertyAddress) {
         .mSelector = kAudioHardwarePropertyDevices,
         .mScope    = kAudioObjectPropertyScopeGlobal,
@@ -119,7 +119,7 @@ BOOL ZPBindEngineInputToLoopback(AVAudioEngine *engine) {
         return NO;
     }
 
-    AudioDeviceID dispositivo = ZPLoopbackInputDevice();
+    AudioDeviceID dispositivo = ZPLoopbackAudioDevice();
     if (dispositivo == kAudioObjectUnknown) {
         NSLog(@"[Audio Capture] Não encontrei nenhum dispositivo de entrada com \"%@\" no nome; "
                "a entrada fica no dispositivo por omissão do sistema.", kZPLoopbackNameSubstring);

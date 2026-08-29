@@ -47,6 +47,11 @@ extern NSString * const kAirPlayNormalizationDefaultsKey;
 /// Publicada quando essa escolha muda.
 extern NSString * const kAirPlayNormalizationChangedNotification;
 
+/// Compensar no AirPlay a atenuação que o cursor de volume do macOS aplica ao
+/// BlackHole. Ausente vale como ligada.
+extern NSString * const kAirPlayCompensateVolumeDefaultsKey;
+extern NSString * const kAirPlayCompensateVolumeChangedNotification;
+
 /// Aplica a política escolhida aos valores lidos das etiquetas e devolve o par
 /// (ganho, pico) a entregar ao streamer. Um pico de 0 significa «desconhecido»,
 /// e nesse caso o streamer não limita nada. Os valores de álbum a zero contam

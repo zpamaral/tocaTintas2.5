@@ -7,6 +7,7 @@
 
 #import <Foundation/Foundation.h>
 #import <AVFoundation/AVFoundation.h>
+#import <CoreAudio/CoreAudio.h>
 
 /// Prende a entrada de uma AVAudioEngine ao dispositivo de loopback (BlackHole),
 /// em vez de aceitar o dispositivo de entrada por omissão do sistema.
@@ -20,6 +21,11 @@
 /// entrada, que é o do dispositivo. Devolve NO se não houver BlackHole, e nesse
 /// caso a engine fica com o dispositivo por omissão, como dantes.
 BOOL ZPBindEngineInputToLoopback(AVAudioEngine *engine);
+
+/// O dispositivo de loopback (BlackHole), ou kAudioObjectUnknown se não houver.
+/// Exposto porque o caminho do AirPlay também precisa dele — para lhe ler o
+/// volume, que é aplicado antes de tudo o resto.
+AudioDeviceID ZPLoopbackAudioDevice(void);
 
 @interface ZPAudioCapture : NSObject
 

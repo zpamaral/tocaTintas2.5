@@ -200,6 +200,12 @@ static const char *g_saida = OUT_DEV_NAME;
 // o sinal — a atenuação do libbs2b mais o «preamp» da equalização — e essa
 // atenuação é aplicada na mesma. Assim o botão do programa de música compara o
 // efeito do tratamento e não o volume, que é o que engana o ouvido.
+// Nível-alvo do tampão, em tramas. Zero quer dizer «usa o chunksize», que era o
+// que estava fixo. Dar-lhe mais do que um bloco é a cura clássica para os
+// estalidos de arranque: o tampão passa a ter folga para absorver um atraso do
+// escalonador em vez de ficar sem amostras.
+static int g_nivel_alvo = 0;
+
 static int g_sem_processamento = 0;
 
 static int g_silencioso = 0;
@@ -234,6 +240,9 @@ static void imprimir_uso(const char *nome_prog) {
         "                   o fader está abaixo da referência: se o volume for feito\n"
         "                   fora do CamillaDSP (teclas do macOS), o fader fica a 0 e\n"
         "                   não há nada a compensar\n"
+        "  --nivel-alvo N   Nível-alvo do tampão, em tramas (pré-definido: o\n"
+        "                   chunksize, %d). Mais do que um bloco dá folga contra\n"
+        "                   os estalidos de arranque, ao custo de N/44100 s de atraso\n"
         "  --sem-processamento   Passagem limpa, mas ao MESMO NÍVEL que o\n"
         "                   processamento teria dado: não aplica crossfeed nem\n"
         "                   equalização, e atenua o que elas atenuariam. Serve\n"
@@ -250,7 +259,7 @@ static void imprimir_uso(const char *nome_prog) {
         "  CAMILLADSP_BIN   Caminho do executável CamillaDSP\n"
         "                   (pré-definido: %s)\n",
         nome_prog, (int)strlen(nome_prog), "", (int)strlen(nome_prog), "",
-        nome_prog, OUT_DEV_NAME, CAMILLADSP_BIN_DEFAULT);
+        nome_prog, OUT_DEV_NAME, CHUNK_SIZE, CAMILLADSP_BIN_DEFAULT);
 }
 
 static const Perfil *escolher_perfil(const char *nome) {
@@ -377,7 +386,7 @@ static void gerar_config(FILE *f, const Perfil *p) {
             "  enable_rate_adjust: true\n"
             "  target_level: %d\n"
             "  adjust_period: 10\n",
-            CHUNK_SIZE);
+            g_nivel_alvo > 0 ? g_nivel_alvo : CHUNK_SIZE);
     }
 
     fprintf(f,
@@ -586,6 +595,19 @@ int main(int argc, char *argv[]) {
         }
         if (strcmp(arg, "--sem-processamento") == 0) {
             g_sem_processamento = 1;
+            continue;
+        }
+        if (strcmp(arg, "--nivel-alvo") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "Erro: --nivel-alvo precisa de um número de tramas.\n\n");
+                imprimir_uso(argv[0]);
+                return 1;
+            }
+            g_nivel_alvo = atoi(argv[++i]);
+            if (g_nivel_alvo < CHUNK_SIZE) {
+                fprintf(stderr, "Erro: --nivel-alvo tem de ser pelo menos o chunksize (%d).\n", CHUNK_SIZE);
+                return 1;
+            }
             continue;
         }
         if (strncmp(arg, "--saida=", 8) == 0) {

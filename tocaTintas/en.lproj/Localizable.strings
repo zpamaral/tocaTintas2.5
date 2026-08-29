@@ -54,6 +54,9 @@
 "prefs_norm_explanation" = "Normalization evens out the volume between tracks, using the file's ReplayGain tags. It applies only to what goes out over AirPlay; on headphones and speakers each track plays at the level it was mastered at.";
 "prefs_norm_label" = "Volume normalization:";
 "prefs_norm_none" = "None — as it is in the file";
-"prefs_norm_track" = "Per track — every track equally loud";
-"prefs_norm_album" = "Per album — keeps the record intact";
-"prefs_norm_note" = "Per track evens everything out, but flattens the level differences a record has on purpose. Per album evens out records against each other and leaves the differences within one untouched; when the file carries no album tags, it falls back to the track ones. Either way the gain is capped by the track's peak, so it never clips. Tracks with no tags at all play as they are.";
+"prefs_norm_track" = "Per track — capped by the peak";
+"prefs_norm_album" = "Per album — capped by the peak";
+"prefs_norm_note" = "Both per-track options make everything equally loud, but flatten the level differences a record has on purpose; per album evens out records against each other and leaves the differences within one untouched, falling back to the track tags when the album ones are missing. “Full gain” applies what the tag says even if the peaks go past 0 dBFS and get clipped; “capped by the peak” reduces the gain to the most the track can take without clipping. Tracks with no tags at all play as they are.";
+"prefs_norm_compensate" = "Compensate for the system volume attenuation";
+"prefs_norm_note2" = "The system output is BlackHole, and its volume slider attenuates the audio before everything else — including before the stream. With this on, what goes out over AirPlay is always at the file's level, and the Mac slider governs the headphones only. The volume of the stereo is the stereo's business.";
+"prefs_norm_track_full" = "Per track — full gain (may clip)";
