@@ -31,6 +31,7 @@ SOFTWARE.
 
 #import <Cocoa/Cocoa.h>
 #import "ZPOpusDecoder.h"
+#import "PreferencesWindowController.h"   // política de normalização e ZPResolveReplayGain
 #import "ZPAirPlayStreamer.h"
 #import <Foundation/Foundation.h> // For base64 decoding
 
@@ -120,6 +121,8 @@ SOFTWARE.
     __block BOOL success = YES;
     __block float replayGainValue = 0.0f; // Default replay gain
     __block float replayGainPeak  = 0.0f; // 0 = pico desconhecido
+    __block float replayGainAlbum     = 0.0f;
+    __block float replayGainAlbumPeak = 0.0f;
 
     dispatch_block_t decodeBlock = dispatch_block_create(0, ^{
         if (self && self->opusFile) {
@@ -178,6 +181,18 @@ SOFTWARE.
                         #ifdef DEBUG
                         NSLog(@"[ReplayGain] Opus track peak: %.4f", replayGainPeak);
                         #endif
+                    } else if (strncasecmp(comment, "replaygain_album_gain=", 22) == 0) {
+                        NSString *g = [[NSString stringWithUTF8String:comment + 22]
+                                       stringByReplacingOccurrencesOfString:@" dB" withString:@""];
+                        replayGainAlbum = [g floatValue];
+                        #ifdef DEBUG
+                        NSLog(@"[ReplayGain] Opus album gain: %.2f", replayGainAlbum);
+                        #endif
+                    } else if (strncasecmp(comment, "replaygain_album_peak=", 22) == 0) {
+                        replayGainAlbumPeak = [[NSString stringWithUTF8String:comment + 22] floatValue];
+                        #ifdef DEBUG
+                        NSLog(@"[ReplayGain] Opus album peak: %.4f", replayGainAlbumPeak);
+                        #endif
                     }
                 }
             } else {
@@ -201,8 +216,11 @@ SOFTWARE.
             #ifdef DEBUG
             NSLog(@"[ReplayGain] Updating AirPlayStreamer with replay gain: %.2f", self.replayGainValue);
             #endif
-            [self.airPlayStreamer updateReplayGainValue:self.replayGainValue
-                                              trackPeak:replayGainPeak];
+            float ganho = 0.0f, pico = 0.0f;
+            ZPResolveReplayGain(replayGainValue, replayGainPeak,
+                                replayGainAlbum, replayGainAlbumPeak,
+                                &ganho, &pico);
+            [self.airPlayStreamer updateReplayGainValue:ganho trackPeak:pico];
         } else {
             NSLog(@"[ReplayGain] Opus error airPlayStreamer is nil when updating replay gain.");
         }

@@ -28,6 +28,33 @@ SOFTWARE.
 
 #import <Cocoa/Cocoa.h>
 
+/// Chave em NSUserDefaults com o perfil de crossfeed escolhido nas preferências.
+/// Os valores são os nomes que o bs2b_bridge conhece: "default", "cmoy" e
+/// "jmeier". Ausente ou desconhecido vale como "cmoy".
+extern NSString * const kBS2BProfileDefaultsKey;
+
+/// Publicada quando o perfil muda, para quem estiver a correr a ponte a poder
+/// relançar com o perfil novo.
+extern NSString * const kBS2BProfileChangedNotification;
+
+/// Perfil válido guardado nas preferências, já com o valor por omissão aplicado.
+NSString *ZPCurrentBS2BProfile(void);
+
+/// Chave em NSUserDefaults com a normalização de volume do AirPlay:
+/// "none", "track" ou "album". Ausente ou desconhecida vale como "track".
+extern NSString * const kAirPlayNormalizationDefaultsKey;
+
+/// Publicada quando essa escolha muda.
+extern NSString * const kAirPlayNormalizationChangedNotification;
+
+/// Aplica a política escolhida aos valores lidos das etiquetas e devolve o par
+/// (ganho, pico) a entregar ao streamer. Um pico de 0 significa «desconhecido»,
+/// e nesse caso o streamer não limita nada. Os valores de álbum a zero contam
+/// como ausentes, e a normalização por álbum recai então na de faixa.
+void ZPResolveReplayGain(float trackGain, float trackPeak,
+                         float albumGain, float albumPeak,
+                         float *outGain, float *outPeak);
+
 @interface PreferencesWindowController : NSWindowController
 
 @property (weak) IBOutlet NSButton *saveButton; // Button for saving

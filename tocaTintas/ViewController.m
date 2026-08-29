@@ -315,6 +315,7 @@ static WavpackStreamReader memoryReader = {
 // Com que configuração é que a ponte que está a correr foi lançada. Serve para
 // não a reiniciar à toa: reiniciar corta o som por um instante.
 @property (copy,   nonatomic) NSString *bs2bRunningOutputName;
+@property (copy,   nonatomic) NSString *bs2bRunningProfile;
 @property (assign, nonatomic) BOOL bs2bRunningProcessing;
 - (void)updateBs2bToggleButtonAppearance;
 - (void)applyBs2bConfigurationWithOutput:(NSString *)nomeSaida;
@@ -1683,6 +1684,7 @@ CoreAudioPlaybackState playbackState;
 
     if (self.bs2bTask && self.bs2bTask.isRunning
         && [self.bs2bRunningOutputName isEqualToString:saida]
+        && [self.bs2bRunningProfile isEqualToString:ZPCurrentBS2BProfile()]
         && self.bs2bRunningProcessing == processar) {
         return;   // já está como deve estar
     }
@@ -1790,6 +1792,24 @@ CoreAudioPlaybackState playbackState;
 - (void)setupBs2bHeadphoneMonitoring
 {
     #if ENABLE_BS2B_BRIDGE
+    // Mudar a normalização nas preferências reenvia o ganho de imediato.
+    __weak typeof(self) weakSelfNorm = self;
+    [[NSNotificationCenter defaultCenter] addObserverForName:kAirPlayNormalizationChangedNotification
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *nota) {
+        [weakSelfNorm pushReplayGainToStreamer];
+    }];
+
+    // Mudar o perfil nas preferências relança a ponte com ele.
+    __weak typeof(self) weakSelfPerfil = self;
+    [[NSNotificationCenter defaultCenter] addObserverForName:kBS2BProfileChangedNotification
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *nota) {
+        [weakSelfPerfil applyBs2bConfiguration];
+    }];
+
     AudioObjectPropertyAddress addr = (AudioObjectPropertyAddress) {
         .mSelector = kAudioHardwarePropertyDefaultOutputDevice,
         .mScope    = kAudioObjectPropertyScopeGlobal,
@@ -1926,12 +1946,15 @@ CoreAudioPlaybackState playbackState;
     BOOL comAuscultadores =
         [nomeSaida rangeOfString:kBS2BHeadphonesNameSubstring options:NSCaseInsensitiveSearch].location != NSNotFound;
 
+    // O perfil vem das preferências; sem escolha feita vale "cmoy".
+    NSString *perfil = ZPCurrentBS2BProfile();
+
     NSMutableArray<NSString *> *argumentos =
         [@[@"--saida", nomeSaida, @"--silencioso"] mutableCopy];
     if (processar) {
-        [argumentos addObjectsFromArray:@[@"--perfil", @"cmoy", @"--eq"]];
+        [argumentos addObjectsFromArray:@[@"--perfil", perfil, @"--eq"]];
     } else if (comAuscultadores) {
-        [argumentos addObjectsFromArray:@[@"--perfil", @"cmoy", @"--eq", @"--sem-processamento"]];
+        [argumentos addObjectsFromArray:@[@"--perfil", perfil, @"--eq", @"--sem-processamento"]];
     } else {
         [argumentos addObjectsFromArray:@[@"--perfil", @"nenhum"]];
     }
@@ -1959,10 +1982,11 @@ CoreAudioPlaybackState playbackState;
         [task launch];
         self.bs2bTask = task;
         self.bs2bRunningOutputName = nomeSaida;
+        self.bs2bRunningProfile = perfil;
         self.bs2bRunningProcessing = processar;
         #ifdef DEBUG
-        NSLog(@"[bs2b] bs2b_bridge lançado: saída «%@», processamento %@.",
-              nomeSaida, processar ? @"ligado" : @"desligado");
+        NSLog(@"[bs2b] bs2b_bridge lançado: saída «%@», perfil «%@», processamento %@.",
+              nomeSaida, perfil, processar ? @"ligado" : @"desligado");
         #endif
     } @catch (NSException *exception) {
         #ifdef DEBUG
@@ -1993,6 +2017,7 @@ CoreAudioPlaybackState playbackState;
     }
     self.bs2bTask = nil;
     self.bs2bRunningOutputName = nil;
+    self.bs2bRunningProfile = nil;
             #endif
 }
 
@@ -2989,14 +3014,29 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
         #endif
         return;
     }
-    [self.airPlayStreamer updateReplayGainValue:self.replayGainValue
-                                      trackPeak:self.replayGainPeak];
+
+    // A política — nenhuma, por faixa ou por álbum — está nas preferências, e
+    // é resolvida num sítio só para o leitor de Opus poder usar a mesma.
+    float ganho = 0.0f, pico = 0.0f;
+    ZPResolveReplayGain(self.replayGainValue, self.replayGainPeak,
+                        self.replayGainAlbumValue, self.replayGainAlbumPeak,
+                        &ganho, &pico);
+
+    #ifdef DEBUG
+    NSLog(@"[ReplayGain] A enviar %.2f dB (pico %.4f) — faixa %.2f/%.4f, álbum %.2f/%.4f.",
+          ganho, pico, self.replayGainValue, self.replayGainPeak,
+          self.replayGainAlbumValue, self.replayGainAlbumPeak);
+    #endif
+
+    [self.airPlayStreamer updateReplayGainValue:ganho trackPeak:pico];
 }
 
 - (void)extractAndDisplayFlacMetadataWithLibFLAC:(NSURL *)fileURL {
     // Always default to 1.0 before reading metadata
     self.replayGainValue = 0.0f;
     self.replayGainPeak  = 0.0f;
+    self.replayGainAlbumValue = 0.0f;
+    self.replayGainAlbumPeak  = 0.0f;
 
     // Initialize the FLAC decoder
     FLAC__StreamDecoder *decoder = FLAC__stream_decoder_new();
@@ -3132,6 +3172,30 @@ NSString *print_vorbis_comment(const FLAC__StreamMetadata_VorbisComment_Entry *e
             self.replayGainValue = gainValue;
             #ifdef DEBUG
             NSLog(@"[ReplayGain] FLAC track gain: %f dB", self.replayGainValue);
+            #endif
+            [self pushReplayGainToStreamer];
+        });
+    }
+    else if ([entry_str hasPrefix:@"REPLAYGAIN_ALBUM_GAIN="]) {
+        NSString *gainString = [[entry_str substringFromIndex:22]
+                                stringByReplacingOccurrencesOfString:@" dB" withString:@""];
+        float gainValue = [gainString floatValue];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.replayGainAlbumValue = gainValue;
+            #ifdef DEBUG
+            NSLog(@"[ReplayGain] FLAC album gain: %f dB", self.replayGainAlbumValue);
+            #endif
+            [self pushReplayGainToStreamer];
+        });
+    }
+    else if ([entry_str hasPrefix:@"REPLAYGAIN_ALBUM_PEAK="]) {
+        float peakValue = [[entry_str substringFromIndex:22] floatValue];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.replayGainAlbumPeak = peakValue;
+            #ifdef DEBUG
+            NSLog(@"[ReplayGain] FLAC album peak: %f", self.replayGainAlbumPeak);
             #endif
             [self pushReplayGainToStreamer];
         });
@@ -4139,6 +4203,35 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
             [self pushReplayGainToStreamer];
         });
 }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Extract replaygain_album_gain / _peak
+    // ─────────────────────────────────────────────────────────────────────────────
+    for (int alvo = 0; alvo < 2; ++alvo) {
+        const char *chave = alvo == 0 ? "replaygain_album_gain" : "replaygain_album_peak";
+        tagSize = WavpackGetTagItem(wpc, chave, NULL, 0);
+        if (tagSize <= 0) {
+            continue;
+        }
+        tagValue = (char *)malloc(tagSize + 1);
+        WavpackGetTagItem(wpc, chave, tagValue, tagSize + 1);
+        NSString *texto = [NSString stringWithUTF8String:tagValue];
+        free(tagValue);
+
+        float valor = [[texto stringByReplacingOccurrencesOfString:@" dB" withString:@""] floatValue];
+        BOOL ehGanho = (alvo == 0);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (ehGanho) {
+                self.replayGainAlbumValue = valor;
+            } else {
+                self.replayGainAlbumPeak = valor;
+            }
+            #ifdef DEBUG
+            NSLog(@"[ReplayGain] WavPack album %@: %.4f", ehGanho ? @"gain" : @"peak", valor);
+            #endif
+            [self pushReplayGainToStreamer];
+        });
+    }
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Extract replaygain_track_peak (0…1)
@@ -5952,6 +6045,8 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     [self extractAndDisplayMetadataFromURL:trackURL];  // Extract and display metadata
     self.replayGainValue = 0.0f;
     self.replayGainPeak  = 0.0f;
+    self.replayGainAlbumValue = 0.0f;
+    self.replayGainAlbumPeak  = 0.0f;
 }
 
 // Start updating the progress bar every second
@@ -6840,6 +6935,27 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
                         NSLog(@"[ReplayGain] AAC/ALAC/MP3 track peak: %f", replayGainPeak);
                         #endif
                         break;
+                    }
+
+                    // ---- Ganho e pico de álbum ----
+                    NSArray *paresAlbum = @[ @[@"replaygain_album_gain", @"g"], @[@"replaygain_album_peak", @"p"] ];
+                    for (NSArray *par in paresAlbum) {
+                        for (AVMetadataItem *metadataItem in [iTunesItems arrayByAddingObjectsFromArray:id3Items]) {
+                            if (![palhaDoItem(metadataItem) containsString:par[0]]) continue;
+                            NSString *valueString = textoDoItem(metadataItem);
+                            if (!valueString.length) continue;
+                            NSRange dbRange = [valueString rangeOfString:@" dB" options:NSCaseInsensitiveSearch];
+                            if (dbRange.location != NSNotFound) valueString = [valueString substringToIndex:dbRange.location];
+                            if ([par[1] isEqualToString:@"g"]) {
+                                self.replayGainAlbumValue = [valueString floatValue];
+                            } else {
+                                self.replayGainAlbumPeak = [valueString floatValue];
+                            }
+                            #ifdef DEBUG
+                            NSLog(@"[ReplayGain] AAC/ALAC/MP3 %@: %@", par[0], valueString);
+                            #endif
+                            break;
+                        }
                     }
 
                     // ---- iTunes (AAC/ALAC) ----

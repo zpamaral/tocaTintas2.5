@@ -58,6 +58,10 @@ SOFTWARE.
 // `replaygain_track_peak` da faixa (0…1). Zero significa «não vinha nas
 // etiquetas», e nesse caso não há como impedir o ceifar da normalização.
 @property (nonatomic, assign) float replayGainPeak;
+// Equivalentes de álbum. Zero significa «não vinha nas etiquetas», e nesse caso
+// a normalização por álbum recai na de faixa.
+@property (nonatomic, assign) float replayGainAlbumValue;
+@property (nonatomic, assign) float replayGainAlbumPeak;
 @property (nonatomic, assign) BOOL isStreaming;
 
 @end

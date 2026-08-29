@@ -38,3 +38,22 @@
 "NSLocalNetworkUsageDescription" = "This app requires access to the local network to discover and connect to AirPlay devices.";
 "NSMicrophoneUsageDescription" = "This app requires access to the microphone to visualize audio.";
 "Searching for AirPlay devices" = "  Searching for AirPlay devices    ";
+
+/* Preferences — tabs */
+"prefs_tab_music" = "Music";
+"prefs_tab_dsp" = "DSP";
+"prefs_no_path" = "No folder chosen yet…";
+"prefs_choose_directory_title" = "Choose the music folder";
+"prefs_dsp_explanation" = "Crossfeed mixes a little of the opposite channel, filtered, into each ear — as your head would if you were listening to speakers. It undoes the sense that the sound is inside your head. It applies to headphones only.";
+"prefs_dsp_profile_label" = "Crossfeed strength:";
+"prefs_dsp_profile_default" = "Light — 700 Hz / 4.5 dB";
+"prefs_dsp_profile_cmoy" = "Medium — 700 Hz / 6.0 dB (C. Moy)";
+"prefs_dsp_profile_jmeier" = "Strong — 650 Hz / 9.5 dB (Jan Meier)";
+"prefs_dsp_note" = "The change takes effect at once: the sound goes quiet for a moment while the filter restarts. The headphones button in the main window turns the processing on and off without changing the volume, so the two can be compared. Through the speakers the audio always passes untreated.";
+"prefs_tab_airplay" = "AirPlay";
+"prefs_norm_explanation" = "Normalization evens out the volume between tracks, using the file's ReplayGain tags. It applies only to what goes out over AirPlay; on headphones and speakers each track plays at the level it was mastered at.";
+"prefs_norm_label" = "Volume normalization:";
+"prefs_norm_none" = "None — as it is in the file";
+"prefs_norm_track" = "Per track — every track equally loud";
+"prefs_norm_album" = "Per album — keeps the record intact";
+"prefs_norm_note" = "Per track evens everything out, but flattens the level differences a record has on purpose. Per album evens out records against each other and leaves the differences within one untouched; when the file carries no album tags, it falls back to the track ones. Either way the gain is capped by the track's peak, so it never clips. Tracks with no tags at all play as they are.";

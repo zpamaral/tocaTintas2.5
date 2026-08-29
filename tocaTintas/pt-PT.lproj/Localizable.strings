@@ -38,3 +38,22 @@
 "NSLocalNetworkUsageDescription" = "Este programa requer acesso à rede local para descobrir e ligar-se a aparelhos AirPlay.";
 "NSMicrophoneUsageDescription" = "Este programa requer acesso ao microfone para ver o áudio.";
 "Searching for AirPlay devices" = "  A procurar aparelhos AirPlay    ";
+
+/* Preferências — separadores */
+"prefs_tab_music" = "Música";
+"prefs_tab_dsp" = "DSP";
+"prefs_no_path" = "Ainda não há pasta escolhida…";
+"prefs_choose_directory_title" = "Escolher a pasta de música";
+"prefs_dsp_explanation" = "O crossfeed mistura em cada ouvido um pouco do canal oposto, filtrado, como a cabeça faria se estivesse a ouvir colunas. Desfaz a sensação de o som estar dentro da cabeça. Aplica-se apenas aos auscultadores.";
+"prefs_dsp_profile_label" = "Intensidade do crossfeed:";
+"prefs_dsp_profile_default" = "Suave — 700 Hz / 4,5 dB";
+"prefs_dsp_profile_cmoy" = "Médio — 700 Hz / 6,0 dB (C. Moy)";
+"prefs_dsp_profile_jmeier" = "Forte — 650 Hz / 9,5 dB (Jan Meier)";
+"prefs_dsp_note" = "A mudança tem efeito imediato: o som cala-se por um instante enquanto o filtro reinicia. O botão dos auscultadores, na janela principal, liga e desliga o tratamento sem alterar o volume, para poder comparar-se um com o outro. Nas colunas o áudio passa sempre sem tratamento.";
+"prefs_tab_airplay" = "AirPlay";
+"prefs_norm_explanation" = "A normalização iguala o volume entre faixas, a partir das etiquetas ReplayGain do ficheiro. Aplica-se apenas ao que sai para o AirPlay; nos auscultadores e nas colunas cada faixa toca ao nível a que foi masterizada.";
+"prefs_norm_label" = "Normalização do volume:";
+"prefs_norm_none" = "Nenhuma — como está no ficheiro";
+"prefs_norm_track" = "Por faixa — todas ao mesmo volume";
+"prefs_norm_album" = "Por álbum — preserva o disco";
+"prefs_norm_note" = "Por faixa iguala tudo, mas achata as diferenças de nível que um disco tem de propósito. Por álbum iguala discos entre si e mantém intactas as diferenças lá dentro; quando o ficheiro não traz as etiquetas de álbum, recai na de faixa. Em qualquer dos casos o ganho é limitado pelo pico da faixa, para não ceifar. Faixas sem etiquetas nenhumas tocam como estão.";
