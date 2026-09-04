@@ -2557,8 +2557,8 @@ CoreAudioPlaybackState playbackState;
         // Some files have been removed
         self.audioFiles = [validFiles copy];
         // Adjust currentTrackIndex if necessary
-        if (self.currentTrackIndex >= self.audioFiles.count) {
-            self.currentTrackIndex = self.audioFiles.count - 1;
+        if (self.currentTrackIndex >= (NSInteger)self.audioFiles.count) {
+            self.currentTrackIndex = (NSInteger)self.audioFiles.count - 1;
         }
     }
 }
@@ -2843,14 +2843,21 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
     [[NSDocumentController sharedDocumentController] noteNewRecentDocumentURL:playlistURL];
 
     
-    // Preserve the currently playing track's path before updating audioFiles
+    // Abrir uma lista não interrompe o que se está a ouvir: se a faixa em curso
+    // também pertencer à lista, a reprodução continua nela. Com o tocador parado
+    // não há faixa em curso nenhuma, e era esse o erro de antes — tomava-se o
+    // índice à letra, pelo que à cabeça da aplicação a primeira música da
+    // biblioteca passava por «a tocar» e a lista arrancava na posição em que ela
+    // calhasse aparecer.
     NSString *currentTrackPath = nil;
-    if (self.currentTrackIndex >= 0) {
-        NSURL *currentTrackURL = nil;
-        if (self.isPlaylistModeActive && self.audioFiles.count > self.currentTrackIndex) {
-            currentTrackURL = self.audioFiles[self.currentTrackIndex];
-        } else if (self.cachedAudioFiles.count > self.currentTrackIndex) {
-            currentTrackURL = self.cachedAudioFiles[self.currentTrackIndex];
+    if ([self isPlaybackEngaged]) {
+        NSURL *currentTrackURL = self.currentTrackURL;
+        if (!currentTrackURL && self.currentTrackIndex >= 0) {
+            if (self.isPlaylistModeActive && (NSInteger)self.audioFiles.count > self.currentTrackIndex) {
+                currentTrackURL = self.audioFiles[self.currentTrackIndex];
+            } else if ((NSInteger)self.cachedAudioFiles.count > self.currentTrackIndex) {
+                currentTrackURL = self.cachedAudioFiles[self.currentTrackIndex];
+            }
         }
         currentTrackPath = [currentTrackURL.path stringByStandardizingPath];
     }
@@ -2861,8 +2868,19 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
     // Set playlist mode active
     self.isPlaylistModeActive = YES;
     
-    // Reset currentTrackIndex to the first track
-    self.currentTrackIndex = 0;
+    // −1 marca «desta lista ainda não se tocou nada», que é diferente de «está-se
+    // na primeira faixa». O -playAudio normaliza-o para a primeira faixa, portanto
+    // o ▶️ arranca no princípio; e a passagem automática de faixa, que incrementa
+    // antes de tocar, passa a entrar na lista pela primeira música. Com 0 entrava
+    // pela segunda: a primeira dava-se por tocada sem nunca o ter sido.
+    self.currentTrackIndex = -1;
+
+    // Sem faixa em curso também não há faixa seleccionada: a lista de músicas tem
+    // de mostrar o marcador, e não a última faixa que se ouviu da biblioteca, que
+    // podia por acaso pertencer também a esta lista.
+    if (!currentTrackPath) {
+        self.currentTrackURL = nil;
+    }
 
     // Reinitialize shuffled tracks if shuffle mode is active
     if (self.isShuffleModeActive) {
@@ -3907,7 +3925,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
         [self playNextTrack];  // Play next shuffled track
     } else {
         // Check if we're at the end of the track list
-        if (self.currentTrackIndex < self.audioFiles.count - 1) {
+        if (self.currentTrackIndex + 1 < (NSInteger)self.audioFiles.count) {
             // Move to the next track in the list
             self.currentTrackIndex++;
             #ifdef DEBUG
@@ -4063,7 +4081,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
             #endif
         }
     } else {
-        if (self.currentTrackIndex < self.audioFiles.count - 1) {
+        if (self.currentTrackIndex + 1 < (NSInteger)self.audioFiles.count) {
             self.currentTrackIndex++;
             NSURL *nextTrackURL = self.audioFiles[self.currentTrackIndex];
 
@@ -5501,14 +5519,16 @@ enum {
         currentPlaybackTime = self.audioPlayer.currentTime;
     }
 
-    // Em pausa, ligar ou desligar o aleatório não retoma a reprodução. Nos dois
-    // sentidos a faixa em curso é a mesma — só muda o índice que aponta para
-    // ela, porque se passa a contá-lo noutra lista — portanto não há nada para
-    // recarregar, e chamar aqui o -playAudio punha a tocar quem tinha pedido
-    // pausa. Não querer continuar a tocar aleatoriamente não é querer voltar a
-    // tocar. O botão de repetir nunca teve este defeito por nem sequer mexer na
-    // reprodução.
-    BOOL estavaEmPausa = self.isPlaybackPaused;
+    // Ligar ou desligar o aleatório não muda o estado do tocador: só se volta a
+    // tocar aqui se já se estivesse a tocar. Nos dois sentidos a faixa em curso é
+    // a mesma — só muda o índice que aponta para ela, porque se passa a contá-lo
+    // noutra lista —, portanto não há nada para recarregar. Perguntar apenas pela
+    // pausa não chegava: parado também não é «em pausa», e o -playAudio punha-se
+    // a tocar a quem tinha carregado no ⏹️ e depois desseleccionado o aleatório.
+    // Não querer continuar a tocar aleatoriamente não é querer voltar a tocar, e
+    // parar é ainda mais explícito do que pausar. O botão de repetir nunca teve
+    // este defeito por nem sequer mexer na reprodução.
+    BOOL estavaATocar = playbackState.isPlaying || self.audioPlayer.isPlaying;
 
     // Toggle shuffle mode
     self.isShuffleModeActive = !self.isShuffleModeActive;
@@ -5545,7 +5565,7 @@ enum {
                                                               : [self randomShuffledStartIndex];
 
         // Start playing from the shuffled list
-        if (!estavaEmPausa && self.shuffledTracks.count > 0) {
+        if (estavaATocar && self.shuffledTracks.count > 0) {
             [self playAudio];
             // Resume playback from the captured position
             [self.audioPlayer setCurrentTime:currentPlaybackTime];
@@ -5570,17 +5590,13 @@ enum {
             originalIndex = [self.audioFiles indexOfObject:currentShuffledTrackURL];
         }
 
-        self.currentTrackIndex = (originalIndex != NSNotFound) ? originalIndex : 0;
+        self.currentTrackIndex = (originalIndex != NSNotFound) ? (NSInteger)originalIndex : -1;
 
         // Resume playback from the original track
-        if (estavaEmPausa) {
-            // Fica como estava: em pausa, na mesma faixa.
-        } else if (self.audioFiles.count > 0) {
+        if (estavaATocar && self.audioFiles.count > 0) {
             [self playAudio];
             // Resume playback from the captured position
             [self.audioPlayer setCurrentTime:currentPlaybackTime];
-        } else {
-            [self stopAudio];
         }
 
         // Update combo box to show the currently playing track
@@ -6648,7 +6664,8 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     [self stopAudio];
 
     // Move to the previous track (loop back if at the first track)
-    self.currentTrackIndex = (self.currentTrackIndex - 1 + self.audioFiles.count) % self.audioFiles.count;
+    self.currentTrackIndex = (self.currentTrackIndex <= 0) ? (NSInteger)self.audioFiles.count - 1
+                                                           : self.currentTrackIndex - 1;
 
     // Reset the progress bar to zero
     [self.progressBar setDoubleValue:0];
