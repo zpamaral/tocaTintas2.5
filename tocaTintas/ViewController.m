@@ -2549,10 +2549,10 @@ CoreAudioPlaybackState playbackState;
 
     if (validFiles.count == 0) {
         // All files have been removed, exit playlist mode
-        self.isPlaylistModeActive = NO;
-        self.currentTrackIndex = 0;
         self.audioFiles = @[];
-        [self loadAudioFiles]; // Load from directory
+        // Pela porta do costume, para que a lista baralhada e o índice fiquem a
+        // contar posições na biblioteca e não na lista que desapareceu.
+        [self exitPlaylistMode];
     } else if (validFiles.count < self.audioFiles.count) {
         // Some files have been removed
         self.audioFiles = [validFiles copy];
@@ -2931,9 +2931,63 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
 }
 
 - (void)exitPlaylistMode {
+    // Sair da lista não interrompe o que se está a ouvir: a faixa em curso passa
+    // apenas a ser contada na biblioteca. Antes punha-se o índice a 0 antes de
+    // recarregar, e como em modo aleatório o índice conta posições na lista
+    // baralhada, a faixa que se dava por «em curso» passava a ser a que calhara em
+    // primeiro lugar no baralho da lista de reprodução. Daí que desligar o
+    // aleatório a seguir saltasse para uma música qualquer em vez de continuar
+    // naquela que se estava mesmo a ouvir.
+    NSURL *faixaEmCurso = nil;
+    if ([self isPlaybackEngaged]) {
+        faixaEmCurso = self.currentTrackURL;
+        if (!faixaEmCurso && self.currentTrackIndex >= 0) {
+            NSArray<NSURL *> *listaActual = self.isShuffleModeActive ? self.shuffledTracks : self.audioFiles;
+            if (self.currentTrackIndex < (NSInteger)listaActual.count) {
+                faixaEmCurso = listaActual[self.currentTrackIndex];
+            }
+        }
+    }
+
     self.isPlaylistModeActive = NO;
-    self.currentTrackIndex = 0;
+
+    // −1 marca «da biblioteca ainda não se tocou nada», tal como ao abrir uma
+    // lista. Se a faixa em curso também estiver na biblioteca, o índice certo é
+    // reposto mais abaixo. Sem faixa em curso também não há faixa seleccionada.
+    self.currentTrackIndex = -1;
+    if (!faixaEmCurso) {
+        self.currentTrackURL = nil;
+    }
+
     [self loadAudioFiles]; // Reload audio files from the directory
+
+    // A lista baralhada tinha sido construída a partir da lista de reprodução; com
+    // a biblioteca de volta tem de ser refeita, senão o ⏭️ e o fim de faixa
+    // continuariam a ir buscar músicas à lista de que já se saiu.
+    if (self.isShuffleModeActive) {
+        [self initializeShuffledTrackList];
+    }
+
+    // Voltar a localizar a faixa em curso na lista onde o índice passa a ser
+    // contado: a baralhada, com o aleatório ligado; a biblioteca, sem ele. Assim
+    // desligar o aleatório mantém-se na mesma música e segue depois para a que lhe
+    // sucede na biblioteca.
+    if (faixaEmCurso) {
+        NSArray<NSURL *> *listaDeReproducao = self.isShuffleModeActive ? self.shuffledTracks : self.audioFiles;
+        NSString *caminhoEmCurso = [faixaEmCurso.path stringByStandardizingPath];
+        for (NSInteger i = 0; i < (NSInteger)listaDeReproducao.count; i++) {
+            NSString *caminho = [listaDeReproducao[i].path stringByStandardizingPath];
+            if ([caminho compare:caminhoEmCurso options:NSCaseInsensitiveSearch] == NSOrderedSame) {
+                self.currentTrackIndex = i;
+                break;
+            }
+        }
+    }
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self createComboBox];
+        [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
+    });
     //[self playAudio]; // Start playback from the first track
 }
 
