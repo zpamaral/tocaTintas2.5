@@ -34,6 +34,7 @@ SOFTWARE.
 #import <sys/stat.h>
 #import <fcntl.h>
 #import <errno.h>
+#import <string.h>
 #import <stdatomic.h>
 
 @interface ZPAirPlayStreamer ()
@@ -64,6 +65,12 @@ SOFTWARE.
 @property (nonatomic, strong) dispatch_source_t healthCheckTimer;
 @property (nonatomic, assign) int lockFileDescriptor; // File descriptor for the lock file
 
+// Relógio do raop_play (ver «Relógio do raop_play», mais abaixo).
+@property (nonatomic, strong) dispatch_source_t raopClockSource;
+@property (nonatomic, assign) int raopClockWriterFD;
+@property (nonatomic, strong) NSMutableData *raopClockPartial;
+@property (nonatomic, assign) NSTimeInterval raopClockStartedAt;
+
 // Observer da reconfiguração do engine (mudanças de dispositivos de áudio)
 @property (nonatomic, strong) id engineConfigObserver;
 
@@ -82,6 +89,11 @@ SOFTWARE.
 // (morte do raop_play ou perda do tap). Sem isto, startStreaming aborta
 // em "Already streaming" porque isStreaming nunca volta a NO.
 - (void)restartStreamingAfterFailure;
+
+// Relógio do raop_play
+- (void)startRaopClockReader;
+- (void)stopRaopClockReader;
+- (void)relatarRelogio;
 
 @end
 
@@ -327,6 +339,18 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
     _Atomic uint64_t _bytesDescartadosTapCheio;
     _Atomic uint64_t _cortesDeDeriva;
     _Atomic uint64_t _bytesCortadosDeriva;
+
+    // Relógio do raop_play. Escritas na fila do relógio (e, no caso dos bytes
+    // entregues, no thread consumidor do tampão); leituras em qualquer lado,
+    // incluindo pelas propriedades públicas.
+    _Atomic uint64_t _bytesCapturados;        // o que o tap meteu no tampão
+    _Atomic uint64_t _bytesCortadosTotal;     // o que a deriva deitou fora depois
+    _Atomic uint64_t _bytesEntreguesAoRaop;   // quanto já enfiámos no tubo
+    _Atomic uint64_t _relogioBlocos;          // contador de blocos da última linha
+    _Atomic uint64_t _relogioHeadTs;          // head_ts da última linha
+    _Atomic uint64_t _relogioLinhas;          // quantas linhas já chegaram
+    _Atomic double   _relogioInstante;        // quando chegou a última
+    _Atomic double   _relogioAtraso;          // Δ em segundos; 0 = desconhecido
 }
 
 #pragma mark - Initialization
@@ -337,6 +361,10 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         _ipAddress = ipAddress;
         //_latency = 132300; // 3 s of latency
         _latency = 44100; // Default latency
+        // Descritores por atribuir. Zero é um descritor válido — a entrada
+        // padrão —, e o -stopStreaming fecha o que aqui estiver.
+        _raopClockFD = -1;
+        _raopClockWriterFD = -1;
         _port = port;
         _audioEngine = [[AVAudioEngine alloc] init];
         _isStreaming = NO;
@@ -636,7 +664,11 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
     // nunca funcionava e era preciso re-seleccionar o alvo à mão.
     self.isStreaming = NO;
 
-    // Fecha o fd do FIFO antigo para não vazar quando o restart criar outro
+    // Fecha o fd do FIFO antigo para não vazar quando o restart criar outro.
+    // O leitor primeiro, pela mesma razão do -stopStreaming: com a fonte de
+    // leitura viva, o descritor é dela.
+    [self stopRaopClockReader];
+
     int fd = self.raopClockFD;
     self.raopClockFD = -1;
     if (fd >= 0) {
@@ -703,6 +735,7 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
             if (strongSelf) {
                 [strongSelf checkRaopPlayHealth];
                 [strongSelf relatarAudioPerdido];
+                [strongSelf relatarRelogio];
             }
         });
 
@@ -911,6 +944,290 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
     return YES;
 }
 
+#pragma mark - Relógio do raop_play
+
+// O raop_play lançado com `-f CAMINHO` escreve no FIFO uma linha por segundo,
+// do seu controlador de sincronismo, com dois números decimais separados por um
+// espaço:
+//
+//     <blocos enviados> <head_ts>\n
+//
+// O primeiro é o contador de blocos que ele já pôs na rede, a começar em zero
+// com o fluxo; o segundo é a marca temporal RTP do próximo bloco a enviar, cuja
+// origem é o relógio NTP no arranque e portanto não nos diz nada em absoluto.
+// Cada bloco são 352 tramas — é o máximo que o protocolo permite e o raop_play
+// usa sempre esse valor. Daí o que interessa:
+//
+//     tramas já enviadas = blocos * 352
+//
+// Do nosso lado sabemos quantas tramas o tap capturou (`_bytesCapturados`, a
+// 4 bytes por trama) e quantas a correcção de deriva deitou fora depois de
+// capturadas (`_bytesCortadosTotal`) — essas foram capturadas mas nunca chegam a
+// ser enviadas, portanto saem da conta. A diferença para as que o raop_play já
+// pôs na rede é tudo o que está em trânsito, e cobre a cadeia inteira: o tampão
+// circular cá dentro, o tubo do sistema, e o que o raop_play tem na mão.
+// Somando a latência que lhe pedimos (`-l`, que é quanto o aparelho segura antes
+// de tocar) fica o atraso total entre o que o tap está a capturar neste instante
+// e o que se ouve do outro lado:
+//
+//     Δ = (capturadas - cortadas - enviadas + latência) / 44100
+//
+// Contar a partir do que foi entregue ao tubo, e não do que foi capturado,
+// deixava de fora o tampão circular — que em regime é quase nada, mas que a
+// deriva entre relógios pode encher até seis segundos, e é exactamente aí que
+// saber o atraso interessa.
+//
+// É este Δ que permitirá atrasar a reprodução local até ela coincidir com a
+// remota. Sem ele só havia a latência nominal, que ignora tudo o que está em
+// trânsito.
+//
+// Nota sobre o contador: o raop_play não o incrementa quando reenvia blocos
+// depois de uma pausa, ao contrário do head_ts. Numa retoma dessas o Δ sai
+// sobrestimado até o fluxo assentar. Não se corrige aqui porque a linha não traz
+// com que o fazer; nota-se no registo por o Δ dar um salto e voltar.
+
+static const uint64_t kRaopFramesPerChunk = 352;   // MAX_SAMPLES_PER_CHUNK
+static const double   kRaopSampleRate     = 44100.0;
+static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = parado
+
+- (void)startRaopClockReader {
+    [self stopRaopClockReader];
+
+    if (self.raopClockFD < 0) {
+        NSLog(@"[RAOP relógio] Sem descritor do FIFO; o relógio não vai ser lido.");
+        return;
+    }
+
+    // Um escritor nosso, aberto e deixado quieto. Sem ele, sempre que o
+    // raop_play não tivesse o FIFO aberto — antes de arrancar, ou depois de
+    // morrer — o tubo ficava em fim-de-ficheiro, e uma fonte de leitura sobre um
+    // fim-de-ficheiro acorda em ciclo fechado a ler zero bytes: um núcleo a
+    // 100 % sem nada para ler. Com um escritor sempre presente o FIFO nunca
+    // chega ao fim, e a fonte só acorda quando há mesmo linha.
+    int escritor = open(kRaopClockPath.fileSystemRepresentation, O_WRONLY | O_NONBLOCK);
+    if (escritor < 0) {
+        NSLog(@"[RAOP relógio] Não consegui abrir o lado escritor do FIFO (%s); "
+               "o leitor arranca à mesma, mas gasta CPU se o raop_play fechar.", strerror(errno));
+    }
+    self.raopClockWriterFD = escritor;
+
+    self.raopClockPartial   = [NSMutableData data];
+    self.raopClockStartedAt = [NSDate timeIntervalSinceReferenceDate];
+    atomic_store(&_relogioLinhas, 0);
+    atomic_store(&_relogioInstante, 0.0);
+    atomic_store(&_relogioAtraso, 0.0);
+
+    int fd = self.raopClockFD;
+    dispatch_queue_t fila = dispatch_queue_create("JPSdA.tocaTintas.raopclock", DISPATCH_QUEUE_SERIAL);
+    dispatch_source_t fonte = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, (uintptr_t)fd, 0, fila);
+    if (!fonte) {
+        NSLog(@"[RAOP relógio] Não consegui criar a fonte de leitura.");
+        return;
+    }
+
+    __weak typeof(self) weakSelf = self;
+    dispatch_source_set_event_handler(fonte, ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (strongSelf) {
+            [strongSelf drenarRelogio:fd];
+        }
+    });
+
+    // O descritor passa a ser desta fonte, e é fechado aqui e só aqui: fechá-lo
+    // com a fonte ainda viva é dos poucos erros que o GCD castiga com um estoiro.
+    dispatch_source_set_cancel_handler(fonte, ^{
+        while (close(fd) == -1 && errno == EINTR) { /* repetir */ }
+    });
+
+    self.raopClockSource = fonte;
+    dispatch_resume(fonte);
+
+    // O raop_play escreve de segundo a segundo; se ao fim de cinco não veio
+    // nada, não é lentidão, é ausência. Vale a pena dizê-lo alto: o `-f` está a
+    // ser passado (ver -startStreamingAfterWakeUp), portanto o que falta é do
+    // outro lado — um raop_play compilado sem o subcomando, ou com ele desligado.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)),
+                   dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf || !strongSelf.isStreaming) return;
+        if (atomic_load(&strongSelf->_relogioLinhas) == 0) {
+            NSLog(@"[RAOP relógio] Cinco segundos de transmissão e nem uma linha em %@. "
+                   "O raop_play foi lançado com -f, portanto ou a compilação instalada não "
+                   "tem o subcomando dos tempos, ou ele está desligado. Sem isto não há "
+                   "medição do atraso remoto: fica só a latência nominal de %ld tramas.",
+                  kRaopClockPath, (long)strongSelf.latency);
+        }
+    });
+
+    #ifdef DEBUG
+    NSLog(@"[RAOP relógio] Leitor do FIFO iniciado (fd=%d, escritor=%d).", fd, escritor);
+    #endif
+}
+
+- (void)stopRaopClockReader {
+    dispatch_source_t fonte = self.raopClockSource;
+    if (fonte) {
+        self.raopClockSource = nil;
+        // A partir daqui o descritor é do manipulador de cancelamento; quem vier
+        // a seguir não o pode fechar outra vez.
+        self.raopClockFD = -1;
+        dispatch_source_cancel(fonte);
+    }
+
+    int escritor = self.raopClockWriterFD;
+    self.raopClockWriterFD = -1;
+    if (escritor >= 0) {
+        while (close(escritor) == -1 && errno == EINTR) { /* repetir */ }
+    }
+
+    self.raopClockPartial = nil;
+}
+
+// Corre na fila do relógio. Esvazia o que houver no FIFO e parte-o em linhas.
+- (void)drenarRelogio:(int)fd {
+    char bloco[512];
+
+    for (;;) {
+        ssize_t lidos = read(fd, bloco, sizeof(bloco));
+
+        if (lidos > 0) {
+            [self.raopClockPartial appendBytes:bloco length:(NSUInteger)lidos];
+            [self consumirLinhasDoRelogio];
+            continue;
+        }
+        if (lidos == 0) {
+            return;  // sem escritor do outro lado; o nosso keep-alive evita isto
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        return;      // EAGAIN/EWOULDBLOCK: acabou por agora
+    }
+}
+
+- (void)consumirLinhasDoRelogio {
+    NSMutableData *acumulado = self.raopClockPartial;
+    if (!acumulado) return;
+
+    const char *bytes = (const char *)acumulado.bytes;
+    NSUInteger total = acumulado.length;
+    NSUInteger inicio = 0;
+
+    for (NSUInteger i = 0; i < total; i++) {
+        if (bytes[i] != '\n') continue;
+
+        NSUInteger comprimento = i - inicio;
+        if (comprimento > 0 && comprimento < 128) {
+            char linha[128];
+            memcpy(linha, bytes + inicio, comprimento);
+            linha[comprimento] = '\0';
+            [self processarLinhaDoRelogio:linha];
+        }
+        inicio = i + 1;
+    }
+
+    if (inicio > 0) {
+        [acumulado replaceBytesInRange:NSMakeRange(0, inicio) withBytes:NULL length:0];
+    }
+
+    // Se alguém encher isto sem nunca mandar uma mudança de linha, mais vale
+    // perder o que lá está do que crescer sem fim.
+    if (acumulado.length > 4096) {
+        acumulado.length = 0;
+    }
+}
+
+- (void)processarLinhaDoRelogio:(const char *)linha {
+    unsigned long long blocos = 0, headTs = 0;
+    if (sscanf(linha, "%llu %llu", &blocos, &headTs) != 2) {
+        #ifdef DEBUG
+        NSLog(@"[RAOP relógio] Linha que não percebi: «%s»", linha);
+        #endif
+        return;
+    }
+
+    // Tudo em tramas; o áudio é int16 estéreo, 4 bytes por trama.
+    const uint64_t capturadas = atomic_load(&_bytesCapturados) / 4;
+    const uint64_t cortadas   = atomic_load(&_bytesCortadosTotal) / 4;
+    const uint64_t enviadas   = (uint64_t)blocos * kRaopFramesPerChunk;
+    const uint64_t uteis      = (capturadas > cortadas) ? (capturadas - cortadas) : 0;
+
+    // Em trânsito: o que já foi capturado e ainda não foi para a rede. Negativo
+    // não faz sentido — seria ele ter enviado mais do que lhe demos —, e aparece
+    // nos primeiros instantes e depois de uma retoma com reenvios.
+    double emTransito = (uteis > enviadas) ? (double)(uteis - enviadas) : 0.0;
+    double atraso = (emTransito + (double)self.latency) / kRaopSampleRate;
+
+    atomic_store(&_relogioBlocos, blocos);
+    atomic_store(&_relogioHeadTs, headTs);
+    atomic_store(&_relogioAtraso, atraso);
+    atomic_store(&_relogioInstante, [NSDate timeIntervalSinceReferenceDate]);
+
+    uint64_t linhas = atomic_fetch_add(&_relogioLinhas, 1) + 1;
+    if (linhas == 1) {
+        NSLog(@"[RAOP relógio] Tempos a chegar de %@: primeira linha «%s». "
+               "Atraso remoto estimado: %.3f s.", kRaopClockPath, linha, atraso);
+    }
+    #ifdef DEBUG
+    else if (linhas % 30 == 0) {
+        // Onde é que o áudio em trânsito está parado: deste lado do tubo ou já
+        // lá dentro. Distingue «o tampão encheu» de «a rede está lenta».
+        const uint64_t entregues = atomic_load(&_bytesEntreguesAoRaop) / 4;
+        double caDentro = (uteis > entregues) ? (double)(uteis - entregues) : 0.0;
+        if (caDentro > emTransito) caDentro = emTransito;
+        double noTubo = emTransito - caDentro;
+
+        NSLog(@"[RAOP relógio] %llu linhas. Blocos: %llu (%.1f s enviados). "
+               "Em trânsito: %.3f s (%.3f no tampão, %.3f no tubo). "
+               "Latência pedida: %.3f s. Atraso remoto: %.3f s.",
+              linhas, blocos, enviadas / kRaopSampleRate,
+              emTransito / kRaopSampleRate, caDentro / kRaopSampleRate,
+              noTubo / kRaopSampleRate, self.latency / kRaopSampleRate, atraso);
+    }
+    #endif
+}
+
+// Relatório periódico, pendurado no temporizador de saúde que já existia.
+- (void)relatarRelogio {
+    if (!self.isStreaming) return;
+
+    uint64_t linhas = atomic_load(&_relogioLinhas);
+    if (linhas == 0) {
+        NSLog(@"[RAOP relógio] Sem tempos do raop_play desde que a transmissão começou "
+               "(há %.0f s). Atraso remoto por medir.",
+              [NSDate timeIntervalSinceReferenceDate] - self.raopClockStartedAt);
+        return;
+    }
+
+    double silencio = [NSDate timeIntervalSinceReferenceDate] - atomic_load(&_relogioInstante);
+    if (silencio > kRaopClockSilencioMaximo) {
+        NSLog(@"[RAOP relógio] Os tempos pararam há %.0f s (recebidas %llu linhas). "
+               "O raop_play ainda está vivo?", silencio, linhas);
+        return;
+    }
+
+    #ifdef DEBUG
+    NSLog(@"[RAOP relógio] Vivo: %llu linhas, última há %.1f s, atraso remoto %.3f s.",
+          linhas, silencio, atomic_load(&_relogioAtraso));
+    #endif
+}
+
+#pragma mark - Estado do relógio, para fora
+
+- (BOOL)raopClockIsRunning {
+    double ultima = atomic_load(&_relogioInstante);
+    if (ultima <= 0.0) return NO;
+    return ([NSDate timeIntervalSinceReferenceDate] - ultima) < kRaopClockSilencioMaximo;
+}
+
+- (NSTimeInterval)remoteAudioLag {
+    // Sem relógio a bater não se devolve o último valor conhecido: um atraso
+    // velho é pior do que nenhum, porque quem o usar para alinhar o som local
+    // alinha-o com uma coisa que já não é verdade.
+    return self.raopClockIsRunning ? atomic_load(&_relogioAtraso) : 0.0;
+}
+
+
 // Remaining setup performed after the wake-up call completes
 - (void)startStreamingAfterWakeUp {
 
@@ -977,7 +1294,17 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
         return;
     }
 
-    // Configure the RAOP task
+    // Configure the RAOP task.
+    //
+    // Atenção ao «-a»: não é o endereço, é «Send ALAC compressed audio», uma
+    // opção sem argumento (ver USAGE em src/main.rs do rust-raop-player-mod). O
+    // endereço é posicional, e só calha ficar certo porque vem logo a seguir —
+    // o docopt lê «-a» como bandeira e «self.ipAddress» como <server-ip>. O «-»
+    // final é o <filename>, e quer dizer «lê da entrada padrão», que é o tubo.
+    // Escrito por extenso para ninguém «corrigir» isto para «-a» com argumento.
+    //
+    // O «-f» é o que faz o raop_play escrever os tempos no FIFO. Sem ele não há
+    // relógio nenhum para ler — ver «Relógio do raop_play».
     self.raopTask.launchPath = raopPlayPath;
     self.raopTask.arguments = @[
         @"-a", self.ipAddress,
@@ -1035,6 +1362,15 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
     // Update streaming state
     self.isStreaming = YES;
 
+    // Fluxo novo, contas do zero: o contador de blocos do raop_play recomeça com
+    // ele, e o nosso das tramas entregues tem de recomeçar ao mesmo tempo, senão
+    // a diferença entre os dois — que é o áudio em trânsito — vem do fluxo
+    // anterior.
+    atomic_store(&_bytesCapturados, 0);
+    atomic_store(&_bytesCortadosTotal, 0);
+    atomic_store(&_bytesEntreguesAoRaop, 0);
+    [self startRaopClockReader];
+
     // Iniciar thread consumidor do tampão circular
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         // int16 estéreo a 44,1 kHz
@@ -1069,6 +1405,10 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
                 TPCircularBufferConsume(&self->_circularBuffer, excess);
                 atomic_fetch_add(&self->_cortesDeDeriva, 1);
                 atomic_fetch_add(&self->_bytesCortadosDeriva, excess);
+                // O de cima é zerado pelo relatório de minuto a minuto; este é
+                // acumulado e serve a conta do atraso, que precisa de saber que
+                // este áudio foi capturado mas nunca chegou a ser enviado.
+                atomic_fetch_add(&self->_bytesCortadosTotal, excess);
                 NSLog(@"[Streaming] Deriva: tampão acima de %.0f s — descartados %.2f s de áudio para repor a latência. "
                        "Isto ouve-se como um salto.",
                       highWatermark / (double)bytesPerSecond, excess / (double)bytesPerSecond);
@@ -1080,6 +1420,9 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
                 NSData *data = [NSData dataWithBytes:bufferPointer length:availableBytes];
                 @try {
                     [self->_inputPipe.fileHandleForWriting writeData:data];
+                    // Só depois de a escrita passar: o que ficou por escrever não
+                    // está em trânsito, está perdido.
+                    atomic_fetch_add(&self->_bytesEntreguesAoRaop, availableBytes);
                 } @catch (NSException *exception) {
                     #ifdef DEBUG
                     NSLog(@"[Streaming] Pipe fechado, a terminar consumidor: %@", exception.reason);
@@ -1168,6 +1511,12 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
     }
 
     // 4) Always close the FIFO keep-alive
+    // O leitor primeiro: enquanto a fonte de leitura viver, o descritor é dela e
+    // fechá-lo por baixo dela é um estoiro. O -stopRaopClockReader devolve o
+    // raopClockFD a -1 quando o entrega ao cancelamento, e o que se segue
+    // encarrega-se do caso em que não chegou a haver leitor nenhum.
+    [self stopRaopClockReader];
+
     int fd = self.raopClockFD;
     self.raopClockFD = -1;            // to avoid double-close in races
 
@@ -1362,6 +1711,10 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
         if (!TPCircularBufferProduceBytes(&strongSelf->_circularBuffer, pcmData, (uint32_t)byteCount)) {
             atomic_fetch_add(&strongSelf->_blocosDescartadosTapCheio, 1);
             atomic_fetch_add(&strongSelf->_bytesDescartadosTapCheio, byteCount);
+        } else {
+            // Só o que entrou mesmo. É a ponta de cima da contabilidade do
+            // atraso remoto — ver «Relógio do raop_play».
+            atomic_fetch_add(&strongSelf->_bytesCapturados, (uint64_t)byteCount);
         }
     }];
 }

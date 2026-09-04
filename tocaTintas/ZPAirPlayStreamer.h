@@ -51,6 +51,21 @@ SOFTWARE.
 
 - (void)startStreaming;
 - (void)stopStreaming;
+
+/// O relógio do raop_play está mesmo a chegar? O raop_play só escreve os tempos
+/// no FIFO se for lançado com `-f`, e a escrita vive num subcomando que pode não
+/// estar presente na compilação que estiver instalada. Isto é NO enquanto não
+/// chegar linha nenhuma, e volta a NO se as linhas pararem (deve vir uma por
+/// segundo).
+@property (nonatomic, readonly) BOOL raopClockIsRunning;
+
+/// Quanto tempo separa o que está a ser capturado agora do que se ouve no
+/// aparelho AirPlay, em segundos. É a soma da latência pedida ao raop_play com o
+/// áudio que ainda não saiu — o que está no tubo e dentro do próprio raop_play.
+/// Zero significa «não sei», e não «estão sincronizados»: sem relógio não há
+/// medição. É este o número com que se pode atrasar a reprodução local para a
+/// pôr de acordo com a remota.
+@property (nonatomic, readonly) NSTimeInterval remoteAudioLag;
 + (void)cleanupRaopPlayLockFile;
 
 /// Sends a DMAP "play" command to the currently configured AirPlay device.

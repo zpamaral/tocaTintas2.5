@@ -214,6 +214,12 @@ static WavpackStreamReader memoryReader = {
 - (void)updatePauseButtonAppearance:(BOOL)isActive;
 - (BOOL)isPlaybackEngaged;
 - (NSInteger)randomShuffledStartIndex;
+- (NSArray<NSURL *> *)currentPlaybackList;
+- (void)prefetchNextTrack;
+- (void)prefetchTrackAtURL:(NSURL *)trackURL;
+- (void)discardPrefetchedTrack;
+- (NSData *)prefetchedDataForTrack:(NSURL *)trackURL;
+- (NSData *)takePrefetchedDataForTrack:(NSURL *)trackURL;
 
 @property (nonatomic, strong) NSImageView *coverArtView;
 @property (nonatomic, strong) NSTextField *artistLabel;
@@ -243,9 +249,11 @@ static WavpackStreamReader memoryReader = {
 
 @property (nonatomic, strong) AVAudioPlayer *audioPlayer;
 
-// Prefetching the next track to reduce loading latency
+// A faixa adiantada em memória. Ver «Faixa adiantada em memória», mais abaixo:
+// nada disto se lê ou escreve directamente, é tudo pelos métodos de lá.
 @property (nonatomic, strong) NSData *prefetchedData;
 @property (nonatomic, strong) NSURL *prefetchedTrackURL;
+@property (nonatomic, assign) uint64_t prefetchGeneration;
 
 // Properties to cache the directory modification date and audio files
 @property (nonatomic, strong) NSDate *directoryModificationDate;
@@ -2916,6 +2924,8 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
         [self createComboBox];
         // Update combo box selection
         [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
+        // A fila é outra, e a faixa adiantada quase de certeza também.
+        [self prefetchNextTrack];
         // Do not start playing the first track automatically
         //[self playAudio];
     });
@@ -2987,6 +2997,8 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
     dispatch_async(dispatch_get_main_queue(), ^{
         [self createComboBox];
         [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
+        // Idem: volta-se à biblioteca, a vizinha da faixa em curso é outra.
+        [self prefetchNextTrack];
     });
     //[self playAudio]; // Start playback from the first track
 }
@@ -2999,12 +3011,7 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
     [self terminateOpusPlayback];
 
     // Step 2: Open the new Opus file
-    NSData *dataToUse = nil;
-    if (self.prefetchedTrackURL && [self.prefetchedTrackURL isEqual:trackURL]) {
-        dataToUse = self.prefetchedData;
-        self.prefetchedData = nil;
-        self.prefetchedTrackURL = nil;
-    }
+    NSData *dataToUse = [self takePrefetchedDataForTrack:trackURL];
 
     int error;
     OggOpusFile *opusFile = NULL;
@@ -3650,18 +3657,16 @@ static NSData *gWvKeptData = nil;
     // Open the WAVPack file and extract metadata
     [self extractAndDisplayMetadataForWavPack:trackURL];
 
-    NSData *dataToUse = nil;
-    if (self.prefetchedTrackURL && [self.prefetchedTrackURL isEqual:trackURL]) {
-        dataToUse = self.prefetchedData;
-        self.prefetchedData = nil;
-        self.prefetchedTrackURL = nil;
-    }
+    NSData *dataToUse = [self takePrefetchedDataForTrack:trackURL];
 
     char error[80];
     if (dataToUse) {
         if (gWvMemBuffer) { free(gWvMemBuffer); gWvMemBuffer = NULL; }
         gWvKeptData = nil;
-        gWvKeptData = [NSData dataWithData:dataToUse];
+        // Sem cópia: -takePrefetchedDataForTrack: já esvaziou a ranhura, portanto
+        // estes bytes são nossos e ninguém lhes mexe. O -dataWithData: que aqui
+        // estava duplicava o ficheiro todo em memória.
+        gWvKeptData = dataToUse;
         gWvMemBuffer = (MemoryBuffer *)malloc(sizeof(MemoryBuffer));
         gWvMemBuffer->data = gWvKeptData.bytes;
         gWvMemBuffer->size = gWvKeptData.length;
@@ -4126,8 +4131,16 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
             };
             dispatch_async(dispatch_get_main_queue(), updateComboBox);
 
-            // Prefetch the subsequent track
-            [self prefetchNextTrack];
+            // Adiantar a faixa a seguir a esta — mas só depois de esta ter ido
+            // buscar a sua à ranhura. A reprodução, acima, foi despachada para a
+            // fila principal; pedir o adiantamento já fazia a ranhura passar a
+            // apontar para a faixa seguinte antes de esta a consumir, e a
+            // transição no fim da música — que é o caso para que o adiantamento
+            // foi feito — acabava sempre a ler do disco.
+            dispatch_block_t prefetchBlock = ^{
+                [self prefetchNextTrack];
+            };
+            dispatch_async(dispatch_get_main_queue(), prefetchBlock);
 
         } else {
             #ifdef DEBUG
@@ -4219,8 +4232,16 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
             };
             dispatch_async(dispatch_get_main_queue(), updateComboBox);
 
-            // Prefetch the subsequent track
-            [self prefetchNextTrack];
+            // Adiantar a faixa a seguir a esta — mas só depois de esta ter ido
+            // buscar a sua à ranhura. A reprodução, acima, foi despachada para a
+            // fila principal; pedir o adiantamento já fazia a ranhura passar a
+            // apontar para a faixa seguinte antes de esta a consumir, e a
+            // transição no fim da música — que é o caso para que o adiantamento
+            // foi feito — acabava sempre a ler do disco.
+            dispatch_block_t prefetchBlock = ^{
+                [self prefetchNextTrack];
+            };
+            dispatch_async(dispatch_get_main_queue(), prefetchBlock);
 
         } else {
             #ifdef DEBUG
@@ -4352,11 +4373,9 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     // 1. Parse the WavPack metadata.
     const char *filePath = [trackURL.path UTF8String];
 
-    // Open the WAVPack file to extract metadata
-    NSData *dataToUse = nil;
-    if (self.prefetchedTrackURL && [self.prefetchedTrackURL isEqual:trackURL]) {
-        dataToUse = self.prefetchedData;
-    }
+    // Open the WAVPack file to extract metadata. Espreita-se a ranhura sem a
+    // esvaziar: quem a consome é o -playWavPack: que vem logo a seguir.
+    NSData *dataToUse = [self prefetchedDataForTrack:trackURL];
     char error[80];
     WavpackContext *wpc = NULL;
     if (dataToUse) {
@@ -4717,7 +4736,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     self.stopButton = [[NSButton alloc] initWithFrame:NSMakeRect(startX, buttonYPosition, buttonWidth, buttonHeight)];
     ZPPreparaBotaoDeTransporte(self.stopButton, @"⏹️");
     self.stopButton.target = self;
-    self.stopButton.action = @selector(stopAudio);
+    self.stopButton.action = @selector(stopButtonPressed);
     [self.view addSubview:self.stopButton];
 
     // ⏭️
@@ -5497,6 +5516,12 @@ enum {
 
     // Ensure the delegate is set for track completion
     self.audioPlayer.delegate = self;
+
+    // Na última faixa da biblioteca, e só aí, o repetir muda quem vem a seguir:
+    // sem ele não vem nada, com ele volta-se ao princípio. Nos outros sítios da
+    // lista isto não dá trabalho nenhum — a faixa adiantada continua a ser a
+    // mesma e o pedido não faz nada.
+    [self prefetchNextTrack];
 }
 
 // Audio player delegate method - Handle completion of a track
@@ -5558,7 +5583,45 @@ enum {
     return (NSInteger)arc4random_uniform((uint32_t)self.shuffledTracks.count);
 }
 
-// Shuffle tracks method: Initialize and shuffle the track list
+// Qual é a fila de reprodução em vigor: a baralhada com o aleatório ligado, a
+// biblioteca sem ele.
+- (NSArray<NSURL *> *)currentPlaybackList {
+    return self.isShuffleModeActive ? self.shuffledTracks : self.audioFiles;
+}
+
+// Linha da lista de músicas correspondente à posição actual da fila. A lista
+// mostra sempre a biblioteca por ordem alfabética, portanto o índice tem de ser
+// traduzido pela faixa, não copiado.
+//
+// Parece-se com -comboBoxIndexForCurrentTrack mas parte do outro extremo, e é de
+// propósito: ali manda o URL carregado, porque quem o chama acabou de reler a
+// biblioteca e o índice é que pode ter ficado desactualizado; aqui manda o
+// índice, porque quem chama acabou de lhe mexer e o URL é que pode ser o de uma
+// reprodução anterior, já parada.
+- (NSInteger)comboBoxIndexForPlaybackPosition {
+    NSArray<NSURL *> *lista = [self currentPlaybackList];
+    if (self.currentTrackIndex < 0 || self.currentTrackIndex >= (NSInteger)lista.count) {
+        return 0; // Marcador
+    }
+    NSUInteger index = [self.audioFiles indexOfObject:lista[self.currentTrackIndex]];
+    return (index != NSNotFound) ? (NSInteger)(index + 1) : 0;
+}
+
+// Ligar ou desligar o aleatório só muda a ordem por que se hão-de escolher as
+// faixas *seguintes*. A que está em curso não é abrangida pela mudança: fica a
+// tocar, no mesmo ponto, sem se recarregar.
+//
+// Recarregá-la — como se fazia, com -playAudio seguido de -setCurrentTime: —
+// custava caro e ouvia-se: -playAudio passa por -stopAudio, que deita fora o
+// AVAudioPlayer (estalido no corte) e repõe a barra de duração a zero, e só
+// depois é que o novo tocador saltava para o ponto guardado, o que redesenhava a
+// barra do princípio para a posição de origem. Nos formatos que não passam pelo
+// AVAudioPlayer — FLAC, WavPack, Opus — nem sequer havia ponto guardado para
+// onde saltar, e a faixa recomeçava do zero. Nada disto era preciso: a lista
+// baralhada é uma permutação da biblioteca, tem os mesmos objectos lá dentro, e
+// portanto a faixa em curso continua a estar na fila nova — muda-lhe só a
+// posição. Basta reapontar o índice para ela. É o que o botão de repetir sempre
+// fez, e por isso nunca teve este defeito.
 - (void)shuffleTracks {
     if (self.audioFiles.count == 0) {
         #ifdef DEBUG
@@ -5567,27 +5630,23 @@ enum {
         return;
     }
 
-    // Capture the current playback time to resume later if needed
-    NSTimeInterval currentPlaybackTime = 0;
-    if (self.audioPlayer.isPlaying) {
-        currentPlaybackTime = self.audioPlayer.currentTime;
+    // Há faixa carregada — a tocar ou em pausa — que a mudança de modo não deva
+    // tocar? É isso que distingue «ligar o aleatório a meio de uma música» de
+    // «ligar o aleatório com o tocador parado».
+    BOOL comFaixaEmCurso = [self isPlaybackEngaged];
+
+    // A faixa a que o índice aponta antes da mudança: em marcha, a que se está a
+    // ouvir; parado, a que estava à espera de arrancar. Só com o tocador em
+    // marcha é que o URL carregado manda, porque parado pode ter ficado para trás
+    // de uma reprodução anterior.
+    NSArray<NSURL *> *listaAnterior = [self currentPlaybackList];
+    NSURL *faixaAnterior = comFaixaEmCurso ? self.currentTrackURL : nil;
+    if (!faixaAnterior && self.currentTrackIndex >= 0 &&
+        self.currentTrackIndex < (NSInteger)listaAnterior.count) {
+        faixaAnterior = listaAnterior[self.currentTrackIndex];
     }
 
-    // Ligar ou desligar o aleatório não muda o estado do tocador: só se volta a
-    // tocar aqui se já se estivesse a tocar. Nos dois sentidos a faixa em curso é
-    // a mesma — só muda o índice que aponta para ela, porque se passa a contá-lo
-    // noutra lista —, portanto não há nada para recarregar. Perguntar apenas pela
-    // pausa não chegava: parado também não é «em pausa», e o -playAudio punha-se
-    // a tocar a quem tinha carregado no ⏹️ e depois desseleccionado o aleatório.
-    // Não querer continuar a tocar aleatoriamente não é querer voltar a tocar, e
-    // parar é ainda mais explícito do que pausar. O botão de repetir nunca teve
-    // este defeito por nem sequer mexer na reprodução.
-    BOOL estavaATocar = playbackState.isPlaying || self.audioPlayer.isPlaying;
-
-    // Toggle shuffle mode
     self.isShuffleModeActive = !self.isShuffleModeActive;
-
-    // Update shuffle button appearance (implement this method as needed)
     [self updateShuffleButtonAppearance:self.isShuffleModeActive];
 
     if (self.isShuffleModeActive) {
@@ -5595,67 +5654,42 @@ enum {
         NSLog(@"Shuffle mode activated.");
         #endif
 
-        // Initialize shuffled track list
+        // A fila baralha-se de novo de cada vez que o aleatório se liga.
         [self initializeShuffledTrackList];
-
-        // Com faixa em curso, ligar o modo aleatório não a interrompe: passa-se
-        // apenas a apontar para a posição que lhe calhou na lista baralhada.
-        // Com o tocador parado, a faixa de arranque é sorteada. Preservar o
-        // índice às cegas fazia com que a primeira música do modo aleatório
-        // fosse sempre a primeira da lista (índice 0 de origem), com
-        // probabilidade de 100 %, quando devia ter 1/N como qualquer outra.
-        NSURL *playingTrackURL = nil;
-        if ([self isPlaybackEngaged]) {
-            playingTrackURL = self.currentTrackURL;
-            if (!playingTrackURL && self.currentTrackIndex >= 0 &&
-                self.currentTrackIndex < (NSInteger)self.audioFiles.count) {
-                playingTrackURL = self.audioFiles[self.currentTrackIndex];
-            }
-        }
-
-        NSUInteger shuffledIndex = playingTrackURL ? [self.shuffledTracks indexOfObject:playingTrackURL]
-                                                  : NSNotFound;
-        self.currentTrackIndex = (shuffledIndex != NSNotFound) ? (NSInteger)shuffledIndex
-                                                              : [self randomShuffledStartIndex];
-
-        // Start playing from the shuffled list
-        if (estavaATocar && self.shuffledTracks.count > 0) {
-            [self playAudio];
-            // Resume playback from the captured position
-            [self.audioPlayer setCurrentTime:currentPlaybackTime];
-        }
-
-        // Update combo box to show placeholder in shuffle mode
-        [self.songComboBox selectItemAtIndex:0]; // Placeholder at index 0
-
     } else {
         #ifdef DEBUG
         NSLog(@"Shuffle mode deactivated.");
         #endif
-
-        // Map the current shuffled track back to the original track
-        NSURL *currentShuffledTrackURL = nil;
-        if (self.currentTrackIndex >= 0 && self.currentTrackIndex < self.shuffledTracks.count) {
-            currentShuffledTrackURL = self.shuffledTracks[self.currentTrackIndex];
-        }
-
-        NSUInteger originalIndex = NSNotFound;
-        if (currentShuffledTrackURL) {
-            originalIndex = [self.audioFiles indexOfObject:currentShuffledTrackURL];
-        }
-
-        self.currentTrackIndex = (originalIndex != NSNotFound) ? (NSInteger)originalIndex : -1;
-
-        // Resume playback from the original track
-        if (estavaATocar && self.audioFiles.count > 0) {
-            [self playAudio];
-            // Resume playback from the captured position
-            [self.audioPlayer setCurrentTime:currentPlaybackTime];
-        }
-
-        // Update combo box to show the currently playing track
-        [self.songComboBox selectItemAtIndex:self.currentTrackIndex + 1]; // Adjust for placeholder
     }
+
+    // Reapontar o índice para a mesma faixa, agora contada na fila nova.
+    NSArray<NSURL *> *lista = [self currentPlaybackList];
+    NSUInteger posicao = faixaAnterior ? [lista indexOfObject:faixaAnterior] : NSNotFound;
+
+    if (!comFaixaEmCurso && self.isShuffleModeActive) {
+        // Ligar o aleatório com o tocador parado: não há faixa em curso a
+        // respeitar e a de arranque sorteia-se. Herdar a que lá estivesse fazia
+        // com que a primeira música do modo aleatório fosse sempre a primeira da
+        // biblioteca — o índice 0 com que a aplicação abre —, com probabilidade
+        // de 100 % quando devia ter 1/N como qualquer outra.
+        self.currentTrackIndex = [self randomShuffledStartIndex];
+    } else if (posicao != NSNotFound) {
+        self.currentTrackIndex = (NSInteger)posicao;
+    } else if (!comFaixaEmCurso) {
+        self.currentTrackIndex = 0;
+    }
+    // Faixa em curso que não esteja na fila nova não devia acontecer — as duas
+    // listas têm os mesmos ficheiros —, mas se acontecer o índice fica como
+    // estava: mais vale a faixa seguinte sair trocada do que interromper esta.
+
+    // A linha seleccionada na lista de músicas não muda de faixa, só de índice de
+    // origem, portanto isto costuma ser um não-evento; deixá-la no marcador, como
+    // se fazia ao ligar o aleatório, é que dava pela mudança.
+    [self.songComboBox selectItemAtIndex:[self comboBoxIndexForPlaybackPosition]];
+
+    // O que muda mesmo é a faixa seguinte: a que estava adiantada em memória já
+    // não é a que vem a seguir nesta fila.
+    [self prefetchNextTrack];
 }
 
 // Initialize and shuffle the track list
@@ -6056,6 +6090,11 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
                 // Stop playback since the current track was removed
                 //[self stopAudio];
             }
+
+            // A biblioteca mudou: a faixa que estava adiantada pode já não ser a
+            // vizinha da actual, ou pode nem existir. Se continuar a ser, o
+            // pedido não faz nada e a leitura já feita aproveita-se.
+            [self prefetchNextTrack];
         });
     }
 }
@@ -6169,12 +6208,7 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     
     // Initialize the audio player with the FLAC file, using prefetched data if available
     NSError *error = nil;
-    NSData *dataToUse = nil;
-    if (self.prefetchedTrackURL && [self.prefetchedTrackURL isEqual:trackURL]) {
-        dataToUse = self.prefetchedData;
-        self.prefetchedData = nil;
-        self.prefetchedTrackURL = nil;
-    }
+    NSData *dataToUse = [self takePrefetchedDataForTrack:trackURL];
 
     if (dataToUse) {
         self.audioPlayer = [[AVAudioPlayer alloc] initWithData:dataToUse error:&error];
@@ -6218,15 +6252,10 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
 - (void)handleStandardAudioPlayback:(NSURL *)trackURL {
     NSError *error = nil;
 
-    NSData *dataToUse = nil;
-    if (self.prefetchedTrackURL && [self.prefetchedTrackURL isEqual:trackURL]) {
-        dataToUse = self.prefetchedData;
-    }
+    NSData *dataToUse = [self takePrefetchedDataForTrack:trackURL];
 
     if (dataToUse) {
         self.audioPlayer = [[AVAudioPlayer alloc] initWithData:dataToUse error:&error];
-        self.prefetchedData = nil;
-        self.prefetchedTrackURL = nil;
     } else {
         self.audioPlayer = [[AVAudioPlayer alloc] initWithContentsOfURL:trackURL error:&error];
     }
@@ -6708,9 +6737,15 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     return gaps;
 }
 
-// Go back to the previous track in the directory
+// Os botões ⏮️ e ⏭️ andam pela fila que estiver em vigor — a baralhada com o
+// aleatório ligado, a biblioteca sem ele. Andarem sempre por -audioFiles, como
+// faziam, dava um tocador de duas cabeças: com o aleatório ligado, o fim de uma
+// música seguia a baralhada mas os botões seguiam a ordem alfabética, e recuar
+// logo a seguir a avançar podia nem sequer voltar à faixa de onde se tinha
+// vindo.
 - (void)backwardTrack {
-    if (self.audioFiles.count == 0) {
+    NSArray<NSURL *> *lista = [self currentPlaybackList];
+    if (lista.count == 0) {
         return;
     }
 
@@ -6718,7 +6753,7 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     [self stopAudio];
 
     // Move to the previous track (loop back if at the first track)
-    self.currentTrackIndex = (self.currentTrackIndex <= 0) ? (NSInteger)self.audioFiles.count - 1
+    self.currentTrackIndex = (self.currentTrackIndex <= 0) ? (NSInteger)lista.count - 1
                                                            : self.currentTrackIndex - 1;
 
     // Reset the progress bar to zero
@@ -6729,21 +6764,38 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
 }
 
 - (void)forwardTrack {
-    if (self.audioFiles.count == 0) {
+    NSArray<NSURL *> *lista = [self currentPlaybackList];
+    if (lista.count == 0) {
         return;
     }
 
     // Clean up current playback before switching to a new track
     [self stopAudio];
 
-    // Move to the next track (loop to the first track if at the last track)
-    self.currentTrackIndex = (self.currentTrackIndex + 1) % self.audioFiles.count;
+    // Move to the next track (loop to the first track if at the last track).
+    // Índice fora da lista conta como «antes da primeira», para o ⏭️ dar a
+    // primeira faixa em vez de a segunda.
+    NSInteger actual = self.currentTrackIndex;
+    if (actual < 0 || actual >= (NSInteger)lista.count) {
+        actual = -1;
+    }
+    self.currentTrackIndex = (actual + 1) % (NSInteger)lista.count;
 
     // Reset the progress bar to zero
     [self.progressBar setDoubleValue:0];
 
     // Play the new track
     [self playAudio];
+}
+
+// O botão ⏹️. Parar é o fim da audição, não uma transição: além de calar o
+// tocador, deita-se fora a faixa adiantada em memória, que são dezenas de MB à
+// espera de alguém que já não vem. Tem de ser um método à parte do -stopAudio
+// porque este também é o primeiro passo de -playAudio, e aí a ranhura é
+// justamente o que a faixa que vai arrancar está prestes a consumir.
+- (void)stopButtonPressed {
+    [self stopAudio];
+    [self discardPrefetchedTrack];
 }
 
 // Ensure the timer is invalidated if playback is stopped or a new track is played
@@ -7338,40 +7390,133 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     [ZPAirPlayStreamer cleanupRaopPlayLockFile];
 }
 
-// Prefetch the data for the next track in the playlist to reduce latency
-- (void)prefetchNextTrack {
-    NSInteger nextIndex;
-    NSURL *nextURL = nil;
+#pragma mark - Faixa adiantada em memória
 
-    if (self.isShuffleModeActive) {
-        if (self.shuffledTracks.count == 0) return;
-        nextIndex = (self.currentTrackIndex + 1) % self.shuffledTracks.count;
-        nextURL = self.shuffledTracks[nextIndex];
-    } else {
-        if (self.audioFiles.count == 0) return;
-        nextIndex = self.currentTrackIndex + 1;
-        if (nextIndex >= self.audioFiles.count) {
-            if (self.isRepeatModeActive) {
-                nextIndex = 0;
-            } else {
-                self.prefetchedTrackURL = nil;
-                self.prefetchedData = nil;
-                return;
-            }
-        }
-        nextURL = self.audioFiles[nextIndex];
+// A ranhura do adiantamento leva uma faixa só: os bytes do ficheiro e o URL a
+// que eles pertencem. Ler um ficheiro inteiro para memória enquanto a faixa
+// anterior ainda toca é o que permite que a transição não espere pelo disco —
+// que aqui é externo e tem a biblioteca toda —, nem para as etiquetas nem para
+// o arranque.
+//
+// Tudo o que lhe toca passa por estes métodos, e todos eles fecham
+// `@synchronized (self)`: o URL é escrito pela thread que pede o adiantamento, os
+// bytes por uma fila de fundo, e os consumidores estão espalhados por quatro
+// formatos. Antes disto só a escrita dos bytes é que estava trancada.
+//
+// O `prefetchGeneration` é o que amarra os bytes ao URL. Sem ele, uma leitura
+// lançada para a faixa A que só terminasse depois de a ranhura já apontar para B
+// — dois saltos seguidos no ⏭️, ou o disco a demorar — publicava os bytes de A
+// por baixo do URL de B, e a seguir tocava-se A a pensar que era B. Cada leitura
+// leva o número da geração em que nasceu e só publica se ele ainda for o
+// corrente; quem mexe na ranhura faz o número avançar.
+
+// Deita fora o que estiver adiantado e invalida a leitura que esteja a caminho.
+- (void)discardPrefetchedTrack {
+    @synchronized (self) {
+        self.prefetchGeneration++;
+        self.prefetchedTrackURL = nil;
+        self.prefetchedData = nil;
+    }
+}
+
+// Manda ler uma faixa para memória. Pedir a que já lá está não faz nada — é o
+// que permite chamar isto sempre que alguma coisa mexe na fila, sem se estar a
+// reler o mesmo ficheiro.
+- (void)prefetchTrackAtURL:(NSURL *)trackURL {
+    if (!trackURL) {
+        [self discardPrefetchedTrack];
+        return;
     }
 
-    if (!nextURL) return;
+    uint64_t geracao;
+    @synchronized (self) {
+        if ([self.prefetchedTrackURL isEqual:trackURL]) {
+            return;
+        }
+        self.prefetchGeneration++;
+        geracao = self.prefetchGeneration;
+        self.prefetchedTrackURL = trackURL;
+        self.prefetchedData = nil;  // os bytes que lá estavam são de outra faixa
+    }
 
-    self.prefetchedTrackURL = nextURL;
-
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
-        NSData *data = [NSData dataWithContentsOfURL:nextURL options:NSDataReadingMappedIfSafe error:nil];
+    // QOS_CLASS_UTILITY, e não a prioridade «background» que aqui estava: o
+    // macOS estrangula deliberadamente a entrada e saída das threads de fundo
+    // (IOPOL_THROTTLE), e isto tem prazo — a leitura tem de estar feita antes de
+    // a faixa actual acabar. «Utility» continua a ser trabalho de segundo plano,
+    // que não disputa a thread principal, mas sem o estrangulamento do disco.
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSData *data = [NSData dataWithContentsOfURL:trackURL options:NSDataReadingMappedIfSafe error:nil];
         @synchronized (self) {
+            if (self.prefetchGeneration != geracao) {
+                return;  // a ranhura mudou de faixa enquanto se lia
+            }
             self.prefetchedData = data;
         }
     });
+}
+
+// Os bytes desta faixa, se forem os que estão adiantados, sem esvaziar a
+// ranhura. Serve a leitura de etiquetas do WavPack, que acontece mesmo antes de
+// -playWavPack: os ir buscar a sério.
+- (NSData *)prefetchedDataForTrack:(NSURL *)trackURL {
+    @synchronized (self) {
+        if (trackURL && [self.prefetchedTrackURL isEqual:trackURL]) {
+            return self.prefetchedData;
+        }
+        return nil;
+    }
+}
+
+// Como o anterior, mas esvaziando a ranhura: é assim que se arranca uma faixa.
+// Devolver nil com a leitura ainda a meio é o que se quer — quem chama vai ao
+// disco, e a leitura em curso deixa de interessar a alguém.
+- (NSData *)takePrefetchedDataForTrack:(NSURL *)trackURL {
+    @synchronized (self) {
+        if (!trackURL || ![self.prefetchedTrackURL isEqual:trackURL]) {
+            return nil;
+        }
+        NSData *data = self.prefetchedData;
+        self.prefetchGeneration++;
+        self.prefetchedTrackURL = nil;
+        self.prefetchedData = nil;
+        return data;
+    }
+}
+
+// Qual é a faixa que vem a seguir à actual, na fila que estiver em vigor. É a
+// mesma conta que -playNextTrack faz para andar para a frente, e tem de ser: o
+// adiantamento é uma aposta, e uma aposta noutra faixa não serve para nada.
+- (NSURL *)upcomingTrackURL {
+    NSArray<NSURL *> *lista = [self currentPlaybackList];
+    if (lista.count == 0) {
+        return nil;
+    }
+
+    // Sem faixa escolhida ainda, a seguinte é a primeira: assim o primeiro ▶️
+    // também arranca de memória.
+    NSInteger actual = self.currentTrackIndex;
+    if (actual < 0 || actual >= (NSInteger)lista.count) {
+        actual = -1;
+    }
+
+    if (self.isShuffleModeActive) {
+        return lista[(actual + 1) % (NSInteger)lista.count];
+    }
+
+    NSInteger seguinte = actual + 1;
+    if (seguinte >= (NSInteger)lista.count) {
+        // Fim da biblioteca: só há faixa seguinte se o repetir estiver ligado.
+        return self.isRepeatModeActive ? lista.firstObject : nil;
+    }
+    return lista[seguinte];
+}
+
+// Adianta a faixa que vier a seguir à actual. Chamado de todos os sítios que
+// possam mudar quem é essa faixa: ao arrancar uma música, ao saltar de uma para
+// a outra, ao ligar ou desligar o aleatório e o repetir, e ao recarregar a
+// biblioteca.
+- (void)prefetchNextTrack {
+    [self prefetchTrackAtURL:[self upcomingTrackURL]];
 }
 
 @end
