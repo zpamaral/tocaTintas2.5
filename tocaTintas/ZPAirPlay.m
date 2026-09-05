@@ -28,443 +28,386 @@ SOFTWARE.
 
 #import "ZPAirPlay.h"
 
-@interface ZPAirPlay ()
+#import <arpa/inet.h>
+#import <netinet/in.h>
+#import <sys/socket.h>
 
-// Properties for discovery and management
-@property (nonatomic, strong) NSTask *discoveryTask;
-@property (nonatomic, strong) NSPipe *outputPipe;
-@property (nonatomic, strong) NSMutableData *bufferedData;
-@property (nonatomic, strong) NSMutableDictionary<NSString *, NSTask *> *deviceTasks; // Track tasks for each device
+NSNotificationName const kZPAirPlayDispositivosMudaram = @"kZPAirPlayDispositivosMudaram";
 
-// File paths
-@property (nonatomic, strong) NSString *ipFilePath;      // Path to AirPlay_IP.txt in Application Support
-@property (nonatomic, strong) NSString *bonjourFilePath; // Path to AirPlay_BonJour.txt in Application Support
+/// Quanto tempo se espera por cada resolução. Cinco segundos são muito para uma
+/// rede local — o Apple TV desta casa resolve em dezenas de milissegundos —, mas
+/// um aparelho a acordar do sono demora, e desistir cedo custa mais do que
+/// esperar.
+static const NSTimeInterval kZPTempoLimiteResolucao = 5.0;
+
+/// Quantas vezes se insiste antes de largar um aparelho que não resolve. Não é
+/// uma lista negra: largar só quer dizer que se deixa de esperar por ele. Se
+/// voltar a anunciar-se, o browser chama outra vez o -didFindService: e a conta
+/// recomeça.
+static const NSInteger kZPMaximoTentativas = 3;
+
+/// Pausa entre tentativas, para uma resolução que falhe de imediato não fazer
+/// um ciclo apertado.
+static const NSTimeInterval kZPEsperaEntreTentativas = 0.5;
+
+#pragma mark - Utilitários
+
+/// O mDNS anuncia os RAOP como «A0EDCDE18416@Apple TV (NAD)»: doze dígitos
+/// hexadecimais com o endereço MAC, um arroba, e só depois o nome que o dono deu
+/// ao aparelho. Tira-se o prefixo — mas só quando ele tem mesmo esse feitio, que
+/// há receptores de terceiros cujo nome não o traz e outros que têm arrobas a
+/// sério no meio.
+static NSString *ZPNomeLegivel(NSString *nomeDoServico) {
+    if (nomeDoServico.length <= 13) return nomeDoServico;
+    if ([nomeDoServico characterAtIndex:12] != '@') return nomeDoServico;
+
+    static NSCharacterSet *naoHexadecimais = nil;
+    static dispatch_once_t umaVez;
+    dispatch_once(&umaVez, ^{
+        naoHexadecimais = [[NSCharacterSet characterSetWithCharactersInString:
+                            @"0123456789abcdefABCDEF"] invertedSet];
+    });
+
+    NSString *prefixo = [nomeDoServico substringToIndex:12];
+    if ([prefixo rangeOfCharacterFromSet:naoHexadecimais].location != NSNotFound) {
+        return nomeDoServico;
+    }
+
+    NSString *resto = [nomeDoServico substringFromIndex:13];
+    return resto.length > 0 ? resto : nomeDoServico;
+}
+
+/// O NSNetService entrega os endereços já resolvidos como `sockaddr` em bruto,
+/// um por interface. O raop_play só come IPv4 na linha de comando, portanto o
+/// que interessa é o primeiro AF_INET — e obtê-lo não custa processo nenhum,
+/// muito menos um `ping`, que era como a versão anterior descobria o endereço e
+/// que devolvia «N/A» sempre que o aparelho estava a dormir e não respondia ao
+/// ICMP a tempo.
+static NSString * _Nullable ZPPrimeiroIPv4(NSArray<NSData *> *enderecos) {
+    for (NSData *dados in enderecos) {
+        if (dados.length < sizeof(struct sockaddr_in)) continue;
+
+        const struct sockaddr *sa = (const struct sockaddr *)dados.bytes;
+        if (sa->sa_family != AF_INET) continue;
+
+        const struct sockaddr_in *sin = (const struct sockaddr_in *)(const void *)sa;
+        char texto[INET_ADDRSTRLEN] = {0};
+        if (inet_ntop(AF_INET, &sin->sin_addr, texto, sizeof(texto)) == NULL) continue;
+
+        return @(texto);
+    }
+    return nil;
+}
+
+#pragma mark - ZPAparelhoAirPlay
+
+@interface ZPAparelhoAirPlay ()
+- (instancetype)initComNome:(NSString *)nome
+                         ip:(NSString *)ip
+                      porta:(NSString *)porta
+                  anfitriao:(NSString *)anfitriao;
+@end
+
+@implementation ZPAparelhoAirPlay
+
+- (instancetype)initComNome:(NSString *)nome
+                         ip:(NSString *)ip
+                      porta:(NSString *)porta
+                  anfitriao:(NSString *)anfitriao {
+    self = [super init];
+    if (self) {
+        _nome = [nome copy];
+        _ip = [ip copy];
+        _porta = [porta copy];
+        _anfitriao = [anfitriao copy];
+    }
+    return self;
+}
+
+- (NSString *)description {
+    return [NSString stringWithFormat:@"<%@ %@ — %@:%@ (%@)>",
+            NSStringFromClass(self.class), self.nome, self.ip, self.porta, self.anfitriao];
+}
+
+- (BOOL)isEqual:(id)outro {
+    if (self == outro) return YES;
+    if (![outro isKindOfClass:[ZPAparelhoAirPlay class]]) return NO;
+    ZPAparelhoAirPlay *aquele = outro;
+    return [self.nome isEqualToString:aquele.nome]
+        && [self.ip isEqualToString:aquele.ip]
+        && [self.porta isEqualToString:aquele.porta];
+}
+
+- (NSUInteger)hash {
+    return self.nome.hash ^ self.ip.hash ^ self.porta.hash;
+}
+
+@end
+
+#pragma mark - ZPAirPlay
+
+@interface ZPAirPlay () <NSNetServiceBrowserDelegate, NSNetServiceDelegate>
+
+@property (nonatomic, strong, nullable) NSNetServiceBrowser *browser;
+
+/// Os serviços que estão a resolver. Segurá-los aqui é obrigatório: o browser
+/// larga-os assim que o -didFindService: retorna, e um NSNetService libertado a
+/// meio da resolução nunca chega a chamar o delegado. É a armadilha clássica
+/// desta API.
+@property (nonatomic, strong) NSMutableSet<NSNetService *> *porResolver;
+
+/// Tentativas já gastas em cada serviço, pelo nome do serviço (o de rede, com o
+/// prefixo do MAC, que é o que identifica o anúncio).
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *tentativas;
+
+/// Os aparelhos já resolvidos, pelo nome legível.
+@property (nonatomic, strong) NSMutableDictionary<NSString *, ZPAparelhoAirPlay *> *porNome;
+
+/// Uma notificação já agendada para o fim deste ciclo do run loop, para uma
+/// rajada de eventos não dar uma rajada de redesenhos.
+@property (nonatomic, assign) BOOL notificacaoAgendada;
 
 @end
 
 @implementation ZPAirPlay
 
-#pragma mark - Initialization
+#pragma mark Ciclo de vida
 
 - (instancetype)init {
     self = [super init];
     if (self) {
-        // Set up the Application Support path for AirPlay files
-        NSString *supportPath = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"tocaTintas"];
-        NSError *error = nil;
-        [[NSFileManager defaultManager] createDirectoryAtPath:supportPath withIntermediateDirectories:YES attributes:nil error:&error];
-        
-        if (error) {
-            #ifdef DEBUG
-            NSLog(@"[Initialization] Error creating directory at path %@: %@", supportPath, error);
-            #endif
-        } else {
-            #ifdef DEBUG
-            NSLog(@"[Initialization] Directory confirmed at path %@", supportPath);
-            #endif
-        }
-
-        // Initialize file paths
-        _ipFilePath = [supportPath stringByAppendingPathComponent:@"AirPlay_IP.txt"];
-        _bonjourFilePath = [supportPath stringByAppendingPathComponent:@"AirPlay_BonJour.txt"];
-
-        // Ensure the AirPlay_IP.txt file exists
-        if (![[NSFileManager defaultManager] fileExistsAtPath:_ipFilePath]) {
-            [[NSFileManager defaultManager] createFileAtPath:_ipFilePath contents:nil attributes:nil];
-            #ifdef DEBUG
-            NSLog(@"[Initialization] AirPlay_IP.txt created at path %@", _ipFilePath);
-            #endif
-        }
-
-        // Initialize other properties
-        _deviceTasks = [NSMutableDictionary dictionary];
-        _capturedAddresses = [NSMutableSet set];
-        _bufferedData = [NSMutableData data];
+        _porResolver = [NSMutableSet set];
+        _tentativas = [NSMutableDictionary dictionary];
+        _porNome = [NSMutableDictionary dictionary];
+        [ZPAirPlay apagarFicheirosDaDescobertaAntiga];
     }
     return self;
 }
 
-#pragma mark - Discovery Methods
+- (void)dealloc {
+    [self pararTudo];
+}
+
+/// A descoberta antiga guardava a lista em AirPlay_IP.txt e AirPlay_BonJour.txt
+/// e voltava a lê-los para saber o endereço de cada aparelho. Já ninguém os lê;
+/// ficariam ali a enganar quem fosse depurar isto daqui a um ano.
++ (void)apagarFicheirosDaDescobertaAntiga {
+    static dispatch_once_t umaVez;
+    dispatch_once(&umaVez, ^{
+        NSString *pasta = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory,
+                                                               NSUserDomainMask, YES).firstObject
+                           stringByAppendingPathComponent:@"tocaTintas"];
+        if (!pasta) return;
+        for (NSString *nome in @[@"AirPlay_IP.txt", @"AirPlay_BonJour.txt"]) {
+            [[NSFileManager defaultManager] removeItemAtPath:
+             [pasta stringByAppendingPathComponent:nome] error:NULL];
+        }
+    });
+}
+
+#pragma mark Descoberta
 
 - (void)startDiscovery {
-    if (_discoveryTask && _discoveryTask.isRunning) {
-        [self stopDiscovery];
+    if (self.browser) {
+        // Já está à procura. O browser não precisa de ser reiniciado para dar
+        // por aparelhos novos — ele avisa sozinho.
+        return;
     }
 
+    self.browser = [[NSNetServiceBrowser alloc] init];
+    self.browser.delegate = self;
+
+    // Modos comuns, e não o modo por omissão: sem isto os eventos deixam de
+    // chegar enquanto um menu ou um popover está a seguir o rato, que é
+    // exactamente o momento em que a lista tem de estar viva.
+    [self.browser scheduleInRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    [self.browser searchForServicesOfType:@"_raop._tcp." inDomain:@"local."];
+
     #ifdef DEBUG
-    NSLog(@"[AirPlay devices 01] Starting discovery task...");
-    #endif
-
-    _discoveryTask = [[NSTask alloc] init];
-    _discoveryTask.launchPath = @"/usr/bin/dns-sd";
-    _discoveryTask.arguments = @[@"-B", @"_raop._tcp", @"local"];
-
-    _outputPipe = [NSPipe pipe];
-    _discoveryTask.standardOutput = _outputPipe;
-    _discoveryTask.standardError = _outputPipe;
-
-    NSFileHandle *fileHandle = [_outputPipe fileHandleForReading];
-
-    __weak typeof(self) weakSelf = self;
-    fileHandle.readabilityHandler = ^(NSFileHandle *handle) {
-        NSData *outputData = [handle availableData];
-        if (outputData.length > 0) {
-            [weakSelf.bufferedData appendData:outputData];
-            NSString *outputString = [[NSString alloc] initWithData:weakSelf.bufferedData encoding:NSUTF8StringEncoding];
-            NSRange range = [outputString rangeOfString:@"\n" options:NSBackwardsSearch];
-            if (range.location != NSNotFound) {
-                NSString *completeLines = [outputString substringToIndex:range.location];
-                weakSelf.bufferedData = [[outputString substringFromIndex:range.location + 1] dataUsingEncoding:NSUTF8StringEncoding].mutableCopy;
-                [weakSelf parseAndWriteDevicesToFileFromOutput:completeLines];
-            }
-        }
-    };
-
-    [_discoveryTask launch];
-    #ifdef DEBUG
-    NSLog(@"[AirPlay devices 02] Discovery task launched and running.");
+    NSLog(@"[AirPlay] Descoberta iniciada (_raop._tcp em local.).");
     #endif
 }
 
 - (void)stopDiscovery {
+    [self pararTudo];
+    [self.porNome removeAllObjects];
+    [self notificarMudanca];
+
     #ifdef DEBUG
-    NSLog(@"[AirPlay devices 03] Stopping discovery task...");
+    NSLog(@"[AirPlay] Descoberta parada.");
     #endif
-    if (_discoveryTask) {
-        [_discoveryTask terminate];
-        _discoveryTask = nil;
-        _outputPipe.fileHandleForReading.readabilityHandler = nil;
-    }
-
-    // Terminate any running device-specific tasks
-    for (NSString *deviceName in _deviceTasks) {
-        NSTask *task = _deviceTasks[deviceName];
-        [task terminate];
-    }
-    [_deviceTasks removeAllObjects];
 }
 
-#pragma mark - Device Parsing and Writing
+- (void)pararTudo {
+    [self.browser stop];
+    self.browser.delegate = nil;
+    self.browser = nil;
 
-- (void)parseAndWriteDevicesToFileFromOutput:(NSString *)output {
-    #ifdef DEBUG
-    NSLog(@"[AirPlay devices 07] Raw discovery output: %@", output);
-    #endif
-    
-    // Extract all unique instance names (e.g., A0EDCDE18416@Apple TV (NAD))
-    NSMutableSet<NSString *> *uniqueDeviceNames = [NSMutableSet set];
-    
-    NSArray<NSString *> *lines = [output componentsSeparatedByString:@"\n"];
-    // Update the regular expression to capture the entire Instance Name, including spaces and symbols
-    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"[A-F0-9]+@.+$" options:0 error:nil];
-    
-    for (NSString *line in lines) {
-        #ifdef DEBUG
-        NSLog(@"[AirPlay devices 08] Processing line: %@", line);
-        #endif
-        
-        if ([line containsString:@"Add"]) {  // Only process lines with "Add"
-            NSTextCheckingResult *match = [regex firstMatchInString:line options:0 range:NSMakeRange(0, line.length)];
-            
-            if (match) {
-                NSString *deviceName = [line substringWithRange:match.range];
-                [uniqueDeviceNames addObject:deviceName];
-            }
-        }
+    for (NSNetService *servico in self.porResolver) {
+        servico.delegate = nil;
+        [servico stop];
     }
-    
-    // Sort the unique device names alphabetically
-    NSArray *sortedDeviceNames = [[uniqueDeviceNames allObjects] sortedArrayUsingSelector:@selector(caseInsensitiveCompare:)];
-    
-    // Write sorted device names to AirPlay_IP.txt
-    [self writeDeviceNamesToFile:sortedDeviceNames];
-    // After writing to AirPlay_IP.txt, start Bonjour lookup
-    [self lookupBonjourAddresses];
-
+    [self.porResolver removeAllObjects];
+    [self.tentativas removeAllObjects];
 }
 
-- (void)writeDeviceNamesToFile:(NSArray<NSString *> *)deviceNames {
-    // Convert the sorted device names array to a single newline-separated string
-    NSString *outputContent = [deviceNames componentsJoinedByString:@"\n"];
-    
-    NSError *error = nil;
-    [outputContent writeToFile:_ipFilePath atomically:YES encoding:NSUTF8StringEncoding error:&error];
-    
-    if (error) {
-        #ifdef DEBUG
-        NSLog(@"Error writing to AirPlay_IP.txt: %@", error);
-        #endif
-    } else {
-        #ifdef DEBUG
-        NSLog(@"[AirPlay devices 04] Sorted device names written to AirPlay_IP.txt");
-        #endif
-    }
-}
+#pragma mark Consulta
 
-#pragma mark - Bonjour Lookup
-
-- (void)lookupBonjourAddresses {
-    NSError *error = nil;
-    NSString *ipFileContents = [NSString stringWithContentsOfFile:_ipFilePath encoding:NSUTF8StringEncoding error:&error];
-    if (error) {
-        #ifdef DEBUG
-        NSLog(@"Error reading AirPlay_IP.txt: %@", error);
-        #endif
-        return;
-    }
-
-    NSArray<NSString *> *deviceNames = [ipFileContents componentsSeparatedByString:@"\n"];
-    for (NSString *deviceName in deviceNames) {
-        if (deviceName.length > 0) {
-            @synchronized (self) {
-                if (![_capturedAddresses containsObject:deviceName]) {
-                    [_capturedAddresses addObject:deviceName];
-                    [self runDnsSdLookupForDevice:deviceName];
-                }
-            }
-        }
-    }
-}
-
-- (void)runDnsSdLookupForDevice:(NSString *)deviceName {
-    NSString *command = [NSString stringWithFormat:@"dns-sd -L \"%@\" _raop._tcp local", deviceName];
-
-    NSTask *task = [[NSTask alloc] init];
-    [task setLaunchPath:@"/bin/sh"];
-    [task setArguments:@[@"-c", command]];
-
-    NSPipe *pipe = [NSPipe pipe];
-    [task setStandardOutput:pipe];
-    [task setStandardError:pipe];
-
-    NSFileHandle *fileHandle = [pipe fileHandleForReading];
-
-    __weak typeof(self) weakSelf = self;
-    fileHandle.readabilityHandler = ^(NSFileHandle *handle) {
-        NSData *data = [handle availableData];
-        if (data.length > 0) {
-            NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-            [weakSelf parseAndSaveBonjourOutput:output forDevice:deviceName];
-        }
-        [task terminate];
-        
-        // **Add these lines to prevent high CPU usage**
-        [handle setReadabilityHandler:nil];
-        [handle closeFile];
-        
-        @synchronized (weakSelf) {
-            [weakSelf.deviceTasks removeObjectForKey:deviceName];
-        }
-    };
-
-    @synchronized (self) {
-        _deviceTasks[deviceName] = task;
-    }
-    [task launch];
-}
-
-- (void)parseAndSaveBonjourOutput:(NSString *)output forDevice:(NSString *)deviceName {
-    #ifdef DEBUG
-    NSLog(@"[Bonjour lookup] Output for %@: %@", deviceName, output);
-    #endif
-
-    // Regular expression to parse the Bonjour output
-    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"can be reached at ([^\\s]+)\\.:([0-9]+)" options:0 error:nil];
-    NSTextCheckingResult *match = [regex firstMatchInString:output options:0 range:NSMakeRange(0, output.length)];
-
-    if (match) {
-        NSString *address = [output substringWithRange:[match rangeAtIndex:1]];
-        NSString *port = [output substringWithRange:[match rangeAtIndex:2]];
-
-        // Obtain IP address by running ping -c 1
-        NSString *ipAddress = [self resolveIPAddressForHostname:address];
-
-        // Load AirPlay_IP.txt to find the human-readable device name
-        NSString *airPlayIPFilePath = @"/Users/amaral/Library/Application Support/tocaTintas/AirPlay_IP.txt";
-        NSError *error = nil;
-        NSString *airPlayIPContents = [NSString stringWithContentsOfFile:airPlayIPFilePath encoding:NSUTF8StringEncoding error:&error];
-
-        if (error) {
-            #ifdef DEBUG
-            NSLog(@"Error reading AirPlay_IP.txt: %@", error.localizedDescription);
-            #endif
-            return;
-        }
-
-        // Parse the AirPlay_IP.txt file to find the matching device name
-        NSString *deviceHumanName = @"";
-        NSArray<NSString *> *lines = [airPlayIPContents componentsSeparatedByString:@"\n"];
-        for (NSString *line in lines) {
-            if ([line containsString:deviceName]) {
-                NSArray<NSString *> *components = [line componentsSeparatedByString:@"@"];
-                if (components.count == 2) {
-                    deviceHumanName = components[1]; // Human-readable name
-                    break;
-                }
-            }
-        }
-
-        if (deviceHumanName.length == 0) {
-            #ifdef DEBUG
-            NSLog(@"Device name not found in AirPlay_IP.txt for %@", deviceName);
-            #endif
-            return;
-        }
-
-        // Prepare output line with the new format
-        NSString *outputLine = [NSString stringWithFormat:@"%@\t%@\t%@\t%@\n", deviceHumanName, address, ipAddress, port];
-        [self saveBonjourResultToFile:outputLine];
-
-        #ifdef DEBUG
-        NSLog(@"Parsed and saved: %@\t%@\t%@\t%@", deviceHumanName, address, ipAddress, port);
-        #endif
-    } else {
-        #ifdef DEBUG
-        NSLog(@"Failed to parse Bonjour output for device: %@", deviceName);
-        #endif
-    }
-}
-
-#pragma mark - IP Resolution
-
-- (NSString *)resolveIPAddressForHostname:(NSString *)hostname {
-    NSString *command = [NSString stringWithFormat:@"ping -c 1 %@", hostname];
-
-    NSTask *task = [[NSTask alloc] init];
-    task.launchPath = @"/bin/sh";
-    task.arguments = @[@"-c", command];
-
-    NSPipe *pipe = [NSPipe pipe];
-    task.standardOutput = pipe;
-    task.standardError = pipe;
-
-    NSFileHandle *fileHandle = [pipe fileHandleForReading];
-    [task launch];
-    [task waitUntilExit];
-
-    NSData *outputData = [fileHandle readDataToEndOfFile];
-    NSString *output = [[NSString alloc] initWithData:outputData encoding:NSUTF8StringEncoding];
-
-    NSRegularExpression *ipRegex = [NSRegularExpression regularExpressionWithPattern:@"\\((\\d+\\.\\d+\\.\\d+\\.\\d+)\\)" options:0 error:nil];
-    NSTextCheckingResult *match = [ipRegex firstMatchInString:output options:0 range:NSMakeRange(0, output.length)];
-
-    return match ? [output substringWithRange:[match rangeAtIndex:1]] : @"N/A";
-}
-
-#pragma mark - Saving Results
-
-- (void)saveBonjourResultToFile:(NSString *)outputLine {
-    NSError *error = nil;
-    #ifdef DEBUG
-    NSLog(@"Attempting to save to AirPlay_BonJour.txt: %@", outputLine);
-    #endif
-
-    NSString *directoryPath = [_bonjourFilePath stringByDeletingLastPathComponent];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:directoryPath]) {
-        BOOL dirSuccess = [[NSFileManager defaultManager] createDirectoryAtPath:directoryPath withIntermediateDirectories:YES attributes:nil error:&error];
-        if (!dirSuccess || error) {
-            #ifdef DEBUG
-            NSLog(@"[Bonjour save] Error creating directory at path: %@, error: %@", directoryPath, error);
-            #endif
-            return;
-        } else {
-            #ifdef DEBUG
-            NSLog(@"[Bonjour save] Directory created successfully at path: %@", directoryPath);
-            #endif
-        }
-    }
-
-    if (![[NSFileManager defaultManager] fileExistsAtPath:_bonjourFilePath]) {
-        BOOL fileSuccess = [[NSFileManager defaultManager] createFileAtPath:_bonjourFilePath contents:nil attributes:nil];
-        if (!fileSuccess) {
-            #ifdef DEBUG
-            NSLog(@"[Bonjour save] Error creating AirPlay_BonJour.txt at path: %@", _bonjourFilePath);
-            #endif
-            return;
-        } else {
-            #ifdef DEBUG
-            NSLog(@"[Bonjour save] AirPlay_BonJour.txt created successfully.");
-            #endif
-        }
-    }
-
-    NSString *currentFileContents = [NSString stringWithContentsOfFile:_bonjourFilePath encoding:NSUTF8StringEncoding error:&error];
-    NSMutableArray<NSString *> *entries = [NSMutableArray array];
-    if (error) {
-        #ifdef DEBUG
-        NSLog(@"[Bonjour save] Error reading AirPlay_BonJour.txt: %@", error);
-        #endif
-        currentFileContents = @"";
-    } else if (currentFileContents.length > 0) {
-        entries = [[currentFileContents componentsSeparatedByString:@"\n"] mutableCopy];
-    }
-
-    NSArray<NSString *> *outputColumns = [outputLine componentsSeparatedByString:@"\t"];
-    if (outputColumns.count < 3) {
-        #ifdef DEBUG
-        NSLog(@"[Bonjour save] Invalid output line, skipping save: %@", outputLine);
-        #endif
-        return;
-    }
-    NSString *hostname = outputColumns[0];
-    BOOL found = NO;
-    
-    for (NSInteger i = 0; i < entries.count; i++) {
-        NSString *entry = entries[i];
-        NSArray<NSString *> *columns = [entry componentsSeparatedByString:@"\t"];
-        if (columns.count >= 3 && [columns[0] isEqualToString:hostname]) {
-            entries[i] = [outputLine stringByTrimmingCharactersInSet:[NSCharacterSet newlineCharacterSet]];
-            found = YES;
-            break;
-        }
-    }
-    if (!found) {
-        [entries addObject:[outputLine stringByTrimmingCharactersInSet:[NSCharacterSet newlineCharacterSet]]];
-    }
-
-    NSMutableSet<NSString *> *uniqueEntries = [NSMutableSet set];
-    for (NSString *entry in entries) {
-        NSString *trimmedEntry = [entry stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        if (trimmedEntry.length > 0) {
-            [uniqueEntries addObject:trimmedEntry];
-        }
-    }
-
-    NSArray<NSString *> *sortedEntries = [[uniqueEntries allObjects] sortedArrayUsingComparator:^NSComparisonResult(NSString *obj1, NSString *obj2) {
-        NSString *hostname1 = [[obj1 componentsSeparatedByString:@"\t"] firstObject];
-        NSString *hostname2 = [[obj2 componentsSeparatedByString:@"\t"] firstObject];
-        return [hostname1 caseInsensitiveCompare:hostname2];
+- (NSArray<ZPAparelhoAirPlay *> *)dispositivos {
+    return [self.porNome.allValues sortedArrayUsingComparator:
+            ^NSComparisonResult(ZPAparelhoAirPlay *um, ZPAparelhoAirPlay *outro) {
+        return [um.nome localizedCaseInsensitiveCompare:outro.nome];
     }];
+}
 
-    NSString *updatedContents = [sortedEntries componentsJoinedByString:@"\n"];
-    BOOL writeSuccess = [updatedContents writeToFile:_bonjourFilePath atomically:YES encoding:NSUTF8StringEncoding error:&error];
-    if (!writeSuccess || error) {
-        #ifdef DEBUG
-        NSLog(@"[Bonjour save] Error writing to AirPlay_BonJour.txt: %@", error);
-        #endif
-    } else {
-        #ifdef DEBUG
-        NSLog(@"[Bonjour save] Successfully updated AirPlay_BonJour.txt with device info.");
-        #endif
+- (ZPAparelhoAirPlay *)dispositivoComNome:(NSString *)nome {
+    if (nome.length == 0) return nil;
+    return self.porNome[nome];
+}
+
+#pragma mark Notificação
+
+- (void)notificarMudanca {
+    if (self.notificacaoAgendada) return;
+    self.notificacaoAgendada = YES;
+
+    __weak typeof(self) fraco = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        __strong typeof(fraco) forte = fraco;
+        if (!forte) return;
+        forte.notificacaoAgendada = NO;
+        [[NSNotificationCenter defaultCenter] postNotificationName:kZPAirPlayDispositivosMudaram
+                                                            object:forte];
+    });
+}
+
+#pragma mark Delegado do browser
+
+- (void)netServiceBrowser:(NSNetServiceBrowser *)browser
+           didFindService:(NSNetService *)servico
+               moreComing:(BOOL)maisAVir {
+    #ifdef DEBUG
+    NSLog(@"[AirPlay] Encontrado «%@»; a resolver.", servico.name);
+    #endif
+
+    self.tentativas[servico.name] = @0;
+    [self resolver:servico];
+}
+
+- (void)netServiceBrowser:(NSNetServiceBrowser *)browser
+         didRemoveService:(NSNetService *)servico
+               moreComing:(BOOL)maisAVir {
+    NSString *nome = ZPNomeLegivel(servico.name);
+
+    #ifdef DEBUG
+    NSLog(@"[AirPlay] «%@» desapareceu da rede.", servico.name);
+    #endif
+
+    [self esquecerServicoChamado:servico.name];
+
+    if (self.porNome[nome]) {
+        [self.porNome removeObjectForKey:nome];
+        [self notificarMudanca];
     }
 }
 
-#pragma mark - Cleanup
+- (void)netServiceBrowser:(NSNetServiceBrowser *)browser
+             didNotSearch:(NSDictionary<NSString *, NSNumber *> *)erro {
+    NSLog(@"[AirPlay] A busca não arrancou: %@. Não vai haver aparelhos na lista.", erro);
+    self.browser = nil;
+}
 
-- (void)cleanupBonjourFile {
-    if ([[NSFileManager defaultManager] fileExistsAtPath:_bonjourFilePath]) {
-        NSError *error = nil;
-        [[NSFileManager defaultManager] removeItemAtPath:_bonjourFilePath error:&error];
-        if (error) {
-            #ifdef DEBUG
-            NSLog(@"[Cleanup] Error deleting AirPlay_BonJour.txt: %@", error);
-            #endif
-        } else {
-            #ifdef DEBUG
-            NSLog(@"[Cleanup] AirPlay_BonJour.txt has been reset.");
-            #endif
+#pragma mark Resolução
+
+- (void)resolver:(NSNetService *)servico {
+    servico.delegate = self;
+    [self.porResolver addObject:servico];
+    [servico scheduleInRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    [servico resolveWithTimeout:kZPTempoLimiteResolucao];
+}
+
+- (void)netServiceDidResolveAddress:(NSNetService *)servico {
+    NSString *ip = ZPPrimeiroIPv4(servico.addresses);
+
+    if (ip == nil || servico.port <= 0) {
+        // Resolveu, mas sem nada que se aproveite: só IPv6, ou uma porta que não
+        // faz sentido. Vale a pena insistir — os anúncios chegam interface a
+        // interface e o IPv4 pode vir no seguinte.
+        #ifdef DEBUG
+        NSLog(@"[AirPlay] «%@» resolveu sem IPv4 utilizável (porta %ld).",
+              servico.name, (long)servico.port);
+        #endif
+        [self tentarOutraVez:servico];
+        return;
+    }
+
+    NSString *nome = ZPNomeLegivel(servico.name);
+    ZPAparelhoAirPlay *aparelho =
+        [[ZPAparelhoAirPlay alloc] initComNome:nome
+                                            ip:ip
+                                         porta:[NSString stringWithFormat:@"%ld", (long)servico.port]
+                                     anfitriao:servico.hostName ?: @""];
+
+    BOOL mudou = ![aparelho isEqual:self.porNome[nome]];
+    self.porNome[nome] = aparelho;
+
+    // Resolvido: já não é preciso segurar o serviço. Se o endereço mudar, o
+    // aparelho volta a anunciar-se e passamos outra vez por aqui.
+    [self esquecerServicoChamado:servico.name];
+
+    #ifdef DEBUG
+    NSLog(@"[AirPlay] %@", aparelho);
+    #endif
+
+    if (mudou) [self notificarMudanca];
+}
+
+- (void)netService:(NSNetService *)servico
+     didNotResolve:(NSDictionary<NSString *, NSNumber *> *)erro {
+    #ifdef DEBUG
+    NSLog(@"[AirPlay] «%@» não resolveu: %@", servico.name, erro);
+    #endif
+    [self tentarOutraVez:servico];
+}
+
+- (void)tentarOutraVez:(NSNetService *)servico {
+    NSString *nomeDoServico = servico.name;
+    NSInteger gastas = self.tentativas[nomeDoServico].integerValue + 1;
+
+    if (gastas >= kZPMaximoTentativas) {
+        NSLog(@"[AirPlay] Desisti de resolver «%@» ao fim de %ld tentativas. "
+               "Volta à lista se se anunciar outra vez.", nomeDoServico, (long)gastas);
+        [self esquecerServicoChamado:nomeDoServico];
+        return;
+    }
+
+    self.tentativas[nomeDoServico] = @(gastas);
+
+    __weak typeof(self) fraco = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                 (int64_t)(kZPEsperaEntreTentativas * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        __strong typeof(fraco) forte = fraco;
+        // Entretanto pode ter desaparecido da rede, ou a descoberta ter parado.
+        if (!forte || ![forte.porResolver containsObject:servico]) return;
+        [servico resolveWithTimeout:kZPTempoLimiteResolucao];
+    });
+}
+
+/// O NSNetService que chega no -didRemoveService: não é forçosamente o mesmo
+/// objecto que chegou no -didFindService:, por isso a correspondência faz-se
+/// pelo nome do serviço e não por identidade.
+- (void)esquecerServicoChamado:(NSString *)nomeDoServico {
+    NSMutableSet<NSNetService *> *aTirar = [NSMutableSet set];
+    for (NSNetService *servico in self.porResolver) {
+        if ([servico.name isEqualToString:nomeDoServico]) {
+            servico.delegate = nil;
+            [servico stop];
+            [aTirar addObject:servico];
         }
     }
+    [self.porResolver minusSet:aTirar];
+    [self.tentativas removeObjectForKey:nomeDoServico];
 }
 
 @end

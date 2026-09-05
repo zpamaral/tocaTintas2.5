@@ -32,8 +32,10 @@ SOFTWARE.
 #import <TPCircularBuffer/TPCircularBuffer.h>
 #import <AVFoundation/AVFoundation.h>
 #import <sys/stat.h>
+#import <sys/file.h>      // flock
 #import <fcntl.h>
 #import <errno.h>
+#import <signal.h>        // kill
 #import <string.h>
 #import <stdatomic.h>
 
@@ -82,8 +84,16 @@ SOFTWARE.
 // New helper that wakes up the device using `atvremote`
 - (void)sendWakeUpCallToDeviceWithIP:(NSString *)deviceIP;
 
-// Continuation of streaming setup executed after the wake-up call
-- (void)startStreamingAfterWakeUp;
+// Monta a transmissão: lança o raop_play, o consumidor do tampão, o leitor do
+// relógio e a captura. Chama-se logo, sem esperar pelo acordar, que corre ao
+// lado.
+- (void)arrancarTransmissao;
+
+// Tranco do raop_play e limpeza de instâncias deixadas por sessões anteriores.
+// Ver o bloco «Uma só instância do raop_play».
+- (BOOL)adquirirTrancoDoRaopPlay;
+- (void)largarTrancoDoRaopPlay;
+- (NSUInteger)matarRaopPlayOrfaos;
 
 // Repõe o estado interno e relança o streaming depois de uma falha
 // (morte do raop_play ou perda do tap). Sem isto, startStreaming aborta
@@ -231,15 +241,41 @@ static NSDictionary *runPythonScriptAndParseJSON(NSString *deviceIP) {
         return nil;
     }
 
+    // O interpretador deixou de estar escrito a martelo. Se o /usr/local/bin
+    // desaparecer numa arrumação do Homebrew, o -launch do NSTask levanta uma
+    // NSException que ninguém apanha e a aplicação vai abaixo — a acordar um
+    // aparelho, que é a coisa mais dispensável que aqui se faz.
+    NSString *python = nil;
+    for (NSString *candidato in @[@"/usr/local/bin/python3",
+                                  @"/opt/homebrew/bin/python3",
+                                  @"/usr/bin/python3"]) {
+        if ([[NSFileManager defaultManager] isExecutableFileAtPath:candidato]) {
+            python = candidato;
+            break;
+        }
+    }
+    if (!python) {
+        NSLog(@"[Acordar ATV] Não encontrei um python3; o aparelho terá de acordar sozinho.");
+        [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
+        return nil;
+    }
+
     NSTask *task = [[NSTask alloc] init];
-    task.launchPath = @"/usr/local/bin/python3";
+    task.launchPath = python;
     task.arguments = @[tempPath];
 
     NSPipe *pipe = [NSPipe pipe];
     task.standardOutput = pipe;
     task.standardError = pipe;
 
-    [task launch];
+    @try {
+        [task launch];
+    } @catch (NSException *excepcao) {
+        NSLog(@"[Acordar ATV] Não consegui lançar o %@: %@", python, excepcao.reason);
+        [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
+        return nil;
+    }
+
     NSData *data = [[pipe fileHandleForReading] readDataToEndOfFile];
     [task waitUntilExit];
 
@@ -296,9 +332,14 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         [req addValue:active forHTTPHeaderField:@"Active-Remote"];
     }
 
-    dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+    // Sem semáforo: manda-se e segue-se. O que aqui estava esperava pela
+    // resposta com DISPATCH_TIME_FOREVER, e como isto corria antes de a
+    // transmissão sequer arrancar, um aparelho que aceitasse a ligação e não
+    // respondesse segurava o arranque todo o tempo que quisesse.
+    NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+    config.timeoutIntervalForRequest = 10.0;
 
-    NSURLSessionDataTask *task = [[NSURLSession sharedSession]
+    NSURLSessionDataTask *task = [[NSURLSession sessionWithConfiguration:config]
         dataTaskWithRequest:req
           completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
               if (error) {
@@ -312,11 +353,9 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
                   NSLog(@"[Acordar ATV] Comando '%@' enviado. Código HTTP: %ld", command, (long)http.statusCode);
                   #endif
               }
-              dispatch_semaphore_signal(sema);
           }];
 
     [task resume];
-    dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
 }
 
 @implementation ZPAirPlayStreamer {
@@ -362,9 +401,12 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         //_latency = 132300; // 3 s of latency
         _latency = 44100; // Default latency
         // Descritores por atribuir. Zero é um descritor válido — a entrada
-        // padrão —, e o -stopStreaming fecha o que aqui estiver.
+        // padrão —, e o -stopStreaming fecha o que aqui estiver. O do tranco
+        // faltava nesta lista: ficava a zero, e os caminhos em que o tranco não
+        // chegava a ser adquirido acabavam a fechar o stdin da aplicação.
         _raopClockFD = -1;
         _raopClockWriterFD = -1;
+        _lockFileDescriptor = -1;
         _port = port;
         _audioEngine = [[AVAudioEngine alloc] init];
         _isStreaming = NO;
@@ -432,145 +474,157 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         [[NSNotificationCenter defaultCenter] removeObserver:_engineConfigObserver];
         _engineConfigObserver = nil;
     }
+
+    // Rede de segurança: se algum caminho de erro deixou o tranco por largar, é
+    // aqui que ele morre. Sem isto, um streamer que morresse com o tranco na mão
+    // calava todos os seguintes — e cada selecção de aparelho cria um streamer
+    // novo.
+    if (_lockFileDescriptor >= 0) {
+        flock(_lockFileDescriptor, LOCK_UN);
+        close(_lockFileDescriptor);
+        _lockFileDescriptor = -1;
+    }
+
     TPCircularBufferCleanup(&_circularBuffer);
 }
 
-#pragma mark - Keep just one instance of raop_play
+#pragma mark - Uma só instância do raop_play
 
-- (BOOL)isRaopPlayAlreadyRunning {
-    // Get Application Support folder path
-    NSArray<NSURL *> *appSupportURLs = [[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask];
-    NSURL *appSupportURL = [appSupportURLs firstObject];
-    NSURL *appSpecificDirectory = [appSupportURL URLByAppendingPathComponent:@"tocaTintas" isDirectory:YES];
+// Um ficheiro de tranco só serve para alguma coisa se ninguém lhe mexer: o
+// flock vive no inode, portanto apagar o ficheiro e voltar a criá-lo dá um
+// inode novo e um tranco que ninguém disputa. Era exactamente o que aqui se
+// fazia — o -startStreaming apagava-o mesmo antes de o testar —, e por isso
+// este mecanismo nunca detectou instância nenhuma em toda a sua vida. Agora o
+// ficheiro é criado uma vez e nunca mais é apagado; o tranco larga-se fechando
+// o descritor, e morre sozinho com o processo se a app estoirar. Um ficheiro de
+// tranco que fique para trás não é lixo nem sinal de nada: é assim que isto
+// funciona.
 
-    // Ensure the directory exists
-    NSError *error = nil;
-    if (![[NSFileManager defaultManager] fileExistsAtPath:[appSpecificDirectory path]]) {
-        [[NSFileManager defaultManager] createDirectoryAtURL:appSpecificDirectory withIntermediateDirectories:YES attributes:nil error:&error];
-        if (error) {
-            #ifdef DEBUG
-            NSLog(@"[Streaming] Error creating directory: %@", error.localizedDescription);
-            #endif
-            return NO;
-        }
-    }
++ (NSString *)caminhoDoTrancoDoRaopPlay {
+    NSURL *appSupport = [[[NSFileManager defaultManager]
+                          URLsForDirectory:NSApplicationSupportDirectory
+                                 inDomains:NSUserDomainMask] firstObject];
+    if (!appSupport) return nil;
 
-    // Define the lock file path
-    NSString *lockFilePath = [[appSpecificDirectory URLByAppendingPathComponent:@"raop_play.lock"] path];
+    NSURL *pasta = [appSupport URLByAppendingPathComponent:@"tocaTintas" isDirectory:YES];
+    [[NSFileManager defaultManager] createDirectoryAtURL:pasta
+                            withIntermediateDirectories:YES
+                                             attributes:nil
+                                                  error:NULL];
 
-    // Try to open the lock file
-    int lockFileDescriptor = open([lockFilePath UTF8String], O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
-    if (lockFileDescriptor < 0) {
-        #ifdef DEBUG
-        NSLog(@"[Streaming] Failed to open lock file: %s", strerror(errno));
-        #endif
-        return NO;
-    }
-
-    // Use flock to check if the lock is already held
-    if (flock(lockFileDescriptor, LOCK_EX | LOCK_NB) < 0) {
-        if (errno == EWOULDBLOCK) {
-            // Lock is already held, indicating raop_play might be running
-            #ifdef DEBUG
-            NSLog(@"[Streaming] Lock file is locked. Checking for active raop_play instances…");
-            #endif
-
-            // Use pgrep to count active instances of raop_play
-            NSTask *pgrepTask = [[NSTask alloc] init];
-            pgrepTask.launchPath = @"/usr/bin/pgrep";
-            pgrepTask.arguments = @[@"-c", @"raop_play"]; // -c: Count the number of matching processes
-
-            NSPipe *outputPipe = [NSPipe pipe];
-            pgrepTask.standardOutput = outputPipe;
-
-            @try {
-                [pgrepTask launch];
-                [pgrepTask waitUntilExit];
-            } @catch (NSException *exception) {
-                #ifdef DEBUG
-                NSLog(@"[Streaming] Exception while checking process count: %@", exception.reason);
-                #endif
-                close(lockFileDescriptor);
-                return YES; // Assume running if pgrep fails
-            }
-
-            // Parse the output of pgrep
-            NSData *outputData = [[outputPipe fileHandleForReading] readDataToEndOfFile];
-            NSString *processCountString = [[NSString alloc] initWithData:outputData encoding:NSUTF8StringEncoding];
-            NSInteger processCount = [processCountString integerValue];
-
-            if (processCount > 1) {
-                // More than one instance detected; trigger cleanup
-                #ifdef DEBUG
-                NSLog(@"[Streaming] Detected %ld instances of raop_play. Cleaning up and restarting…", (long)processCount);
-                #endif
-
-                // Cleanup existing instances
-                [self stopStreaming];
-
-                // Return NO so that startStreaming can safely start a new instance
-                close(lockFileDescriptor);
-                return NO;
-            } else if (processCount == 1) {
-                #ifdef DEBUG
-                NSLog(@"[Streaming] One active instance of raop_play found. No action needed.");
-                #endif
-                close(lockFileDescriptor);
-                return YES; // One instance is running as expected
-            } else {
-                // No instances found; treat as stale lock file
-                #ifdef DEBUG
-                NSLog(@"[Streaming] No active raop_play instances found. Removing stale lock file.");
-                #endif
-                [[NSFileManager defaultManager] removeItemAtPath:lockFilePath error:nil];
-                close(lockFileDescriptor);
-                return NO;
-            }
-        }
-
-        #ifdef DEBUG
-        NSLog(@"[Streaming] Failed to acquire lock: %s", strerror(errno));
-        #endif
-        close(lockFileDescriptor);
-        return NO;
-    }
-
-    // Lock acquired successfully
-    #ifdef DEBUG
-    NSLog(@"[Streaming] Lock acquired successfully. No existing raop_play instances detected.");
-    #endif
-    self.lockFileDescriptor = lockFileDescriptor; // Store descriptor to maintain lock
-    return NO;
+    return [pasta URLByAppendingPathComponent:@"raop_play.lock"].path;
 }
 
-+ (void)cleanupRaopPlayLockFile {
-    // Get Application Support folder path
-    NSArray<NSURL *> *appSupportURLs = [[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask];
-    NSURL *appSupportURL = [appSupportURLs firstObject];
-    NSURL *appSpecificDirectory = [appSupportURL URLByAppendingPathComponent:@"tocaTintas" isDirectory:YES];
+/// Tenta ficar com o tranco. Devolve NO só quando outra coisa o tem de facto.
+/// Não conseguir abrir o ficheiro não é motivo para não tocar — o tranco é uma
+/// rede de segurança, não uma condição de arranque.
+- (BOOL)adquirirTrancoDoRaopPlay {
+    if (self.lockFileDescriptor >= 0) return YES;   // já é nosso
 
-    // Define the lock file path
-    NSURL *lockFileURL = [appSpecificDirectory URLByAppendingPathComponent:@"raop_play.lock"];
-    NSString *lockFilePath = lockFileURL.path;
+    NSString *caminho = [ZPAirPlayStreamer caminhoDoTrancoDoRaopPlay];
+    if (!caminho) return YES;
 
-    // Remove the lock file
-    if ([[NSFileManager defaultManager] fileExistsAtPath:lockFilePath]) {
-        NSError *error = nil;
-        [[NSFileManager defaultManager] removeItemAtPath:lockFilePath error:&error];
-        if (error) {
-            #ifdef DEBUG
-            NSLog(@"[Lockfile] Failed to remove lock file: %@", error.localizedDescription);
-            #endif
-        } else {
-            #ifdef DEBUG
-            NSLog(@"[Lockfile] Lock file removed successfully.");
-            #endif
-        }
-    } else {
-        #ifdef DEBUG
-        NSLog(@"[Lockfile] No lock file exists at %@", lockFilePath);
-        #endif
+    int fd = open(caminho.fileSystemRepresentation, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
+    if (fd < 0) {
+        NSLog(@"[Streaming] Não consegui abrir o ficheiro de tranco (%s); sigo sem ele.",
+              strerror(errno));
+        return YES;
     }
+
+    if (flock(fd, LOCK_EX | LOCK_NB) < 0) {
+        int erro = errno;
+        close(fd);
+        if (erro == EWOULDBLOCK) {
+            NSLog(@"[Streaming] O tranco do raop_play está tomado; não abro outra instância.");
+            return NO;
+        }
+        NSLog(@"[Streaming] O flock falhou (%s); sigo sem tranco.", strerror(erro));
+        return YES;
+    }
+
+    self.lockFileDescriptor = fd;
+    #ifdef DEBUG
+    NSLog(@"[Streaming] Tranco do raop_play adquirido (fd=%d).", fd);
+    #endif
+    return YES;
+}
+
+- (void)largarTrancoDoRaopPlay {
+    if (self.lockFileDescriptor < 0) return;
+
+    flock(self.lockFileDescriptor, LOCK_UN);
+    close(self.lockFileDescriptor);
+    self.lockFileDescriptor = -1;
+
+    #ifdef DEBUG
+    NSLog(@"[Streaming] Tranco do raop_play largado.");
+    #endif
+}
+
+/// Mata os raop_play deixados por sessões anteriores — um estoiro, um «forçar a
+/// saída», um relançamento que não esperou pelo anterior. Isto importa porque o
+/// Apple TV só aceita uma sessão RAOP de cada vez: com um órfão vivo, a ligação
+/// nova falha, o terminationHandler relança, e ficava um ciclo de tentativas que
+/// só saía quando o aparelho largasse a sessão velha por si.
+///
+/// Só mata o executável que vem dentro deste pacote — nunca um raop_play de
+/// outra proveniência — e nunca o nosso próprio filho.
+- (NSUInteger)matarRaopPlayOrfaos {
+    NSString *executavel = [[NSBundle mainBundle] pathForResource:@"raop_play" ofType:nil];
+    if (!executavel) return 0;
+
+    pid_t oNosso = self.raopTask.isRunning ? self.raopTask.processIdentifier : 0;
+    NSMutableArray<NSNumber *> *orfaos = [NSMutableArray array];
+
+    NSTask *pgrep = [[NSTask alloc] init];
+    pgrep.launchPath = @"/usr/bin/pgrep";
+    pgrep.arguments = @[@"-f", executavel];
+
+    NSPipe *tubo = [NSPipe pipe];
+    pgrep.standardOutput = tubo;
+    pgrep.standardError = [NSFileHandle fileHandleWithNullDevice];
+
+    @try {
+        [pgrep launch];
+        NSData *saida = [tubo.fileHandleForReading readDataToEndOfFile];
+        [pgrep waitUntilExit];
+
+        NSString *texto = [[NSString alloc] initWithData:saida encoding:NSUTF8StringEncoding];
+        for (NSString *linha in [texto componentsSeparatedByString:@"\n"]) {
+            pid_t pid = (pid_t)linha.integerValue;
+            if (pid > 0 && pid != oNosso && pid != getpid()) {
+                [orfaos addObject:@(pid)];
+            }
+        }
+    } @catch (NSException *excepcao) {
+        NSLog(@"[Streaming] Não consegui procurar raop_play órfãos: %@", excepcao.reason);
+        return 0;
+    }
+
+    if (orfaos.count == 0) return 0;
+
+    NSLog(@"[Streaming] %lu raop_play de sessões anteriores ainda vivo(s); a terminá-lo(s) "
+           "antes de abrir sessão nova.", (unsigned long)orfaos.count);
+
+    for (NSNumber *pid in orfaos) kill(pid.intValue, SIGTERM);
+
+    // Meio segundo para saírem em condições: o raop_play fecha a sessão RTSP ao
+    // sair, e é isso que liberta o aparelho do outro lado. Quem não sair leva
+    // SIGKILL, que deixa a sessão pendurada mas pelo menos larga a rede.
+    for (int i = 0; i < 10; i++) {
+        BOOL algumVivo = NO;
+        for (NSNumber *pid in orfaos) {
+            if (kill(pid.intValue, 0) == 0) { algumVivo = YES; break; }
+        }
+        if (!algumVivo) break;
+        [NSThread sleepForTimeInterval:0.05];
+    }
+
+    for (NSNumber *pid in orfaos) {
+        if (kill(pid.intValue, 0) == 0) kill(pid.intValue, SIGKILL);
+    }
+
+    return orfaos.count;
 }
 
 - (void)checkRaopPlayHealth {
@@ -593,65 +647,26 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         return;
     }
 
-    // 3. Check for the existence of the lock file
-    NSArray<NSURL *> *appSupportURLs = [[NSFileManager defaultManager]
-                                        URLsForDirectory:NSApplicationSupportDirectory
-                                               inDomains:NSUserDomainMask];
-    if (appSupportURLs.count == 0) {
-        // Could not locate the Application Support directory; bail out
+    // 3. O sinal de saúde é o nosso próprio processo, e mais nada.
+    //
+    // Havia aqui duas verificações e ambas mentiam. A existência do ficheiro de
+    // tranco não diz nada — agora existe sempre, é essa a ideia, e antes o
+    // -startStreaming apagava-o no arranque, portanto uma verificação que
+    // calhasse nesse instante mandava relançar uma transmissão que estava
+    // precisamente a começar. E o `pgrep raop_play` encontrava qualquer
+    // raop_play, incluindo um órfão de outra sessão: com a nossa transmissão
+    // morta e um órfão vivo, isto dava «está tudo bem» e ninguém relançava
+    // coisa nenhuma.
+    if (self.raopTask && self.raopTask.isRunning) {
+        #ifdef DEBUG
+        NSLog(@"[checkRaopPlayHealth] O raop_play desta transmissão está vivo.");
+        #endif
         return;
     }
 
-    NSURL *appSupportURL = [appSupportURLs firstObject];
-    NSURL *appSpecificDirectory = [appSupportURL URLByAppendingPathComponent:@"tocaTintas" isDirectory:YES];
-    NSURL *lockFileURL = [appSpecificDirectory URLByAppendingPathComponent:@"raop_play.lock"];
-    NSString *lockFilePath = lockFileURL.path;
-
-    if (![[NSFileManager defaultManager] fileExistsAtPath:lockFilePath]) {
-        // Lock file is missing, indicating raop_play may not be running
-        #ifdef DEBUG
-        NSLog(@"[checkRaopPlayHealth] No lock file found, but user defaults say device is '%@'. Restarting raop_play…", selectedDevice);
-        #endif
-
-        // Restart streaming
-        [self restartStreamingAfterFailure];
-        return;
-    }
-
-    // 4. Check if the raop_play process is running using pgrep
-    NSTask *pgrepTask = [[NSTask alloc] init];
-    pgrepTask.launchPath = @"/usr/bin/pgrep";
-    pgrepTask.arguments = @[@"raop_play"];
-
-    NSPipe *outputPipe = [NSPipe pipe];
-    pgrepTask.standardOutput = outputPipe;
-
-    @try {
-        [pgrepTask launch];
-        [pgrepTask waitUntilExit];
-    } @catch (NSException *exception) {
-        #ifdef DEBUG
-        NSLog(@"[checkRaopPlayHealth] Exception during pgrep: %@", exception.reason);
-        #endif
-        // If pgrep fails, we can't confirm anything. Exit the method.
-        return;
-    }
-
-    int status = pgrepTask.terminationStatus;
-    if (status != 0) {
-        // pgrep didn't find the raop_play process
-        #ifdef DEBUG
-        NSLog(@"[checkRaopPlayHealth] No raop_play process found (status=%d). Restarting streaming for device '%@'.", status, selectedDevice);
-        #endif
-
-        // Restart streaming
-        [self restartStreamingAfterFailure];
-    } else {
-        // Process is running, no action needed
-        #ifdef DEBUG
-        NSLog(@"[checkRaopPlayHealth] raop_play process found via pgrep. All is well.");
-        #endif
-    }
+    NSLog(@"[checkRaopPlayHealth] O raop_play desta transmissão já não está vivo; "
+           "a relançar para «%@».", selectedDevice);
+    [self restartStreamingAfterFailure];
 }
 
 - (void)restartStreamingAfterFailure {
@@ -659,7 +674,7 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
     NSLog(@"[Streaming] A repor o estado interno antes de relançar o streaming.");
     #endif
 
-    // Sem este reset, startStreamingAfterWakeUp vê isStreaming == YES e
+    // Sem este reset, arrancarTransmissao vê isStreaming == YES e
     // aborta com "Already streaming" — era por isto que o auto-restart
     // nunca funcionava e era preciso re-seleccionar o alvo à mão.
     self.isStreaming = NO;
@@ -890,8 +905,6 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
 - (void)startStreaming {
     // Clear any previous cancel flag
     self.cancelPendingStart = NO;
-    // Ensure local playback and AirPlay streaming coexist
-    [ZPAirPlayStreamer cleanupRaopPlayLockFile];
 
     // Check if a device is selected
     NSString *selectedDevice = [[NSUserDefaults standardUserDefaults] objectForKey:@"SelectedAirPlayDevice"];
@@ -902,14 +915,25 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         self.isStreaming = NO;
         return;
     }
-    
-    // Wake up the AirPlay device on a background queue to avoid blocking the UI
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        [self sendWakeUpCallToDeviceWithIP:self.ipAddress];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self startStreamingAfterWakeUp];
-        });
+
+    // O acordar corre ao lado do arranque, e não à frente dele.
+    //
+    // Antes a transmissão ficava à espera: o ajudante em Python tem oito
+    // segundos de tolerância, e o pedido HTTP que se lhe seguia esperava sem
+    // limite nenhum, portanto entre carregar na caixa e o raop_play sequer
+    // arrancar podia ir mais de um minuto. Pior: o ajudante está feito para um
+    // Apple TV em concreto, com o identificador escrito no próprio script, de
+    // modo que para qualquer outro aparelho esse tempo todo era gasto só para
+    // falhar. E é dispensável na maioria dos casos — o raop_play acorda o
+    // aparelho sozinho quando abre a sessão RTSP.
+    __weak typeof(self) fraco = self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        __strong typeof(fraco) forte = fraco;
+        if (!forte || forte.cancelPendingStart) return;
+        [forte sendWakeUpCallToDeviceWithIP:forte.ipAddress];
     });
+
+    [self arrancarTransmissao];
 }
 
 // Make sure that the fifo file for raop_play exists
@@ -1044,7 +1068,7 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
 
     // O raop_play escreve de segundo a segundo; se ao fim de cinco não veio
     // nada, não é lentidão, é ausência. Vale a pena dizê-lo alto: o `-f` está a
-    // ser passado (ver -startStreamingAfterWakeUp), portanto o que falta é do
+    // ser passado (ver -arrancarTransmissao), portanto o que falta é do
     // outro lado — um raop_play compilado sem o subcomando, ou com ele desligado.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)),
                    dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
@@ -1229,13 +1253,13 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
 
 
 // Remaining setup performed after the wake-up call completes
-- (void)startStreamingAfterWakeUp {
+- (void)arrancarTransmissao {
 
     // Abort if the pending start was cancelled or device was deselected
     NSString *selectedDevice = [[NSUserDefaults standardUserDefaults] objectForKey:@"SelectedAirPlayDevice"];
     if (self.cancelPendingStart || !selectedDevice) {
         #ifdef DEBUG
-        NSLog(@"[Streaming] Start cancelled before wake-up completed.");
+        NSLog(@"[Streaming] Arranque cancelado antes de começar.");
         #endif
         return;
     }
@@ -1248,17 +1272,15 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
         return;
     }
 
-    // Check if raop_play is already running
-    if ([self isRaopPlayAlreadyRunning]) {
-        #ifdef DEBUG
-        NSLog(@"[Streaming] raop_play is already running. Cannot start another instance.");
-        #endif
-        return;
-    }
-
     // Stop any existing streaming before starting new streaming
     if (self.raopTask || self.inputPipe) {
+        // O -stopStreaming levanta a bandeira de cancelamento, que é o que faz
+        // uma paragem pedida de fora abortar um arranque a meio. Só que esta
+        // paragem fomos nós que a pedimos, para limpar o que sobrou do fluxo
+        // anterior — se a bandeira ficasse levantada, este arranque
+        // cancelava-se a si próprio mais à frente.
         [self stopStreaming];
+        self.cancelPendingStart = NO;
     }
 
     // Initialize the input pipe and RAOP task
@@ -1325,7 +1347,9 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
 
-        [ZPAirPlayStreamer cleanupRaopPlayLockFile];
+        // O raop_play morreu, portanto o tranco que o guardava deixa de fazer
+        // sentido. Largar é fechar o descritor, nunca apagar o ficheiro.
+        [strongSelf largarTrancoDoRaopPlay];
 
         NSString *selectedDevice = [[NSUserDefaults standardUserDefaults] objectForKey:@"SelectedAirPlayDevice"];
         if (selectedDevice) {
@@ -1343,6 +1367,29 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
         }
     };
 
+    // Órfãos de sessões anteriores: enquanto um deles estiver vivo, o aparelho
+    // não aceita a sessão nova e o relançamento anda em círculos. Isto e o
+    // tranco ficam aqui, coladinhos ao -launch, para não haver caminho de erro
+    // entre tomar o tranco e usá-lo — cada selecção cria um streamer novo, e um
+    // tranco esquecido por um deles calava o seguinte.
+    [self matarRaopPlayOrfaos];
+
+    if (![self adquirirTrancoDoRaopPlay]) {
+        // Outra transmissão desta app ainda não o largou. Não se desiste —
+        // desistir em silêncio era o que obrigava a desmarcar e voltar a marcar
+        // o aparelho à mão —, tenta-se outra vez daqui a um segundo.
+        self.isStreaming = NO;
+        self.inputPipe = nil;
+        self.raopTask = nil;
+        __weak typeof(self) fraco = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            __strong typeof(fraco) forte = fraco;
+            if (forte && !forte.cancelPendingStart) [forte arrancarTransmissao];
+        });
+        return;
+    }
+
     #ifdef DEBUG
     NSLog(@"[Streaming] Starting RAOP task…");
     #endif
@@ -1355,7 +1402,7 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
         NSLog(@"[Streaming] Failed to start RAOP task: %@", exception.reason);
         #endif
         self.isStreaming = NO;
-        [ZPAirPlayStreamer cleanupRaopPlayLockFile];
+        [self largarTrancoDoRaopPlay];
         return;
     }
 
@@ -1530,14 +1577,7 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
         unlink(kRaopClockPath.fileSystemRepresentation);
 
     // 6) Lockfile
-    if (self.lockFileDescriptor >= 0) { // use >=0, not >0
-        close(self.lockFileDescriptor);
-        self.lockFileDescriptor = -1;
-        [ZPAirPlayStreamer cleanupRaopPlayLockFile];
-        #ifdef DEBUG
-        NSLog(@"[Streaming] Lock file removed successfully.");
-        #endif
-    }
+    [self largarTrancoDoRaopPlay];
 
     // 7) Stop audio capture if needed
     [self stopAudioCaptureIfNeeded];

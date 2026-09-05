@@ -725,13 +725,21 @@ CoreAudioPlaybackState playbackState;
     // Initialize and start the AirPlay manager
     self.airPlayManager = [[ZPAirPlay alloc] init];
     [self.airPlayManager startDiscovery];
+
+    // A descoberta anda sempre a correr e avisa quando a lista muda; é isto que
+    // mantém o popover certo enquanto está aberto, e que dispensa o antigo
+    // «apagar o ficheiro e recomeçar» a cada clique no ícone.
+    __weak typeof(self) fraco = self;
+    [[NSNotificationCenter defaultCenter] addObserverForName:kZPAirPlayDispositivosMudaram
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *nota) {
+        [fraco atualizarPopoverDeAirPlay];
+    }];
     
     // Initialize ZPAudioCapture instance
     self.audioCapture = [[ZPAudioCapture alloc] init];
     self.isRecording = NO;  // Start with recording set to off
-    
-    // Cleanup lock file on app start
-    [ZPAirPlayStreamer cleanupRaopPlayLockFile];
 
     self.isStreaming = NO; // Initialize as not streaming
 }
@@ -781,18 +789,39 @@ CoreAudioPlaybackState playbackState;
 
 // Method to show the AirPlay popover when the AirPlay button is clicked
 - (void)showAirPlayPopover:(NSButton *)sender {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self refreshAirPlayDiscovery];
-    });
-
     self.airPlayPopover.contentViewController = [self createAirPlayPopoverContentController];
 
     // Force layout update
     [self.airPlayPopover.contentViewController.view layoutSubtreeIfNeeded];
-    
+
     [self.airPlayPopover showRelativeToRect:sender.bounds ofView:sender preferredEdge:NSRectEdgeMaxY];
 }
-    
+
+// A lista é reconstruída em cima quando a descoberta muda: um aparelho que se
+// anuncie com o popover aberto aparece na hora. Antes o conteúdo era desenhado
+// à abertura e nunca mais mexia — e, pior, um segundo depois a descoberta
+// apagava o ficheiro que o tinha alimentado, portanto o que estava à vista já
+// não correspondia a nada. Era isso que obrigava a abrir o popover duas e três
+// vezes até a selecção pegar.
+- (void)atualizarPopoverDeAirPlay {
+    if (!self.airPlayPopover.isShown) return;
+
+    NSStackView *pilha = (NSStackView *)self.airPlayPopover.contentViewController.view;
+    if (![pilha isKindOfClass:[NSStackView class]]) return;
+
+    for (NSView *filho in [pilha.arrangedSubviews copy]) {
+        [pilha removeArrangedSubview:filho];
+        [filho removeFromSuperview];
+    }
+
+    // As caixas antigas foram-se com as vistas; a referência tem de ser
+    // reposta pelo -populate…, senão fica a apontar para um botão órfão.
+    self.currentlySelectedCheckbox = nil;
+
+    [self populateAirPlayDevicesInStackView:pilha];
+    [pilha layoutSubtreeIfNeeded];
+}
+
 - (NSViewController *)createAirPlayPopoverContentController {
     NSViewController *popoverContentController = [[NSViewController alloc] init];
     NSStackView *stackView = [[NSStackView alloc] init];
@@ -814,44 +843,18 @@ CoreAudioPlaybackState playbackState;
 }
 
 - (void)populateAirPlayDevicesInStackView:(NSStackView *)stackView {
-    // Construct the path to AirPlay_BonJour.txt
-    NSString *supportPath = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"tocaTintas"];
-    NSString *filePath = [supportPath stringByAppendingPathComponent:@"AirPlay_BonJour.txt"];
-    
-    NSError *error = nil;
-    NSString *fileContents = [NSString stringWithContentsOfFile:filePath encoding:NSUTF8StringEncoding error:&error];
-    
-    // If no devices found or file is empty
-    if (error || fileContents.length == 0) {
-        NSTextField *noDevicesLabel = [[NSTextField alloc] init];
-        
-        // Configure italic font
-        NSFont *systemFont = [NSFont systemFontOfSize:[NSFont systemFontSize]];
-        NSFontDescriptor *fontDescriptor = [systemFont.fontDescriptor fontDescriptorWithSymbolicTraits:NSFontItalicTrait];
-        NSFont *italicFont = [NSFont fontWithDescriptor:fontDescriptor size:10]; // Set size here
-        
-        [noDevicesLabel setFont:italicFont];
-        noDevicesLabel.stringValue = NSLocalizedString(@"Searching for AirPlay devices", @"Message displayed when no AirPlay devices are found");
-        noDevicesLabel.editable = NO;
-        noDevicesLabel.bezeled = NO;
-        noDevicesLabel.drawsBackground = NO;
-        noDevicesLabel.alignment = NSTextAlignmentCenter;
-        noDevicesLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        
-        // Add to the stack view
-        [stackView addArrangedSubview:noDevicesLabel];
+    // A lista vem da memória do ZPAirPlay, não de um ficheiro. Tudo o que aqui
+    // chega já tem endereço e porta, portanto é seleccionável de imediato — e
+    // não há janela nenhuma em que o que está à vista deixe de existir em disco.
+    NSArray<ZPAparelhoAirPlay *> *dispositivos = self.airPlayManager.dispositivos;
+
+    if (dispositivos.count == 0) {
+        [stackView addArrangedSubview:[self etiquetaDeProcuraDeAirPlay]];
         return;
     }
 
-    // Parse the file for device lines
-    NSArray *lines = [fileContents componentsSeparatedByString:@"\n"];
-    BOOL devicesFound = NO;
-
-    for (NSString *line in lines) {
-        if (line.length == 0) continue;
-        devicesFound = YES;
-
-        NSString *deviceName = [self cleanDeviceName:line];
+    for (ZPAparelhoAirPlay *aparelho in dispositivos) {
+        NSString *deviceName = aparelho.nome;
 
         // Horizontal stack for text and checkbox
         NSStackView *deviceStack = [[NSStackView alloc] init];
@@ -890,36 +893,26 @@ CoreAudioPlaybackState playbackState;
         [deviceStack addArrangedSubview:deviceCheckbox];
         [stackView addArrangedSubview:deviceStack];
     }
-
-    // If no devices were found in the file
-    if (!devicesFound) {
-        NSTextField *noDevicesLabel = [[NSTextField alloc] init];
-        
-        // Configure italic font
-        NSFont *systemFont = [NSFont systemFontOfSize:[NSFont systemFontSize]];
-        NSFontDescriptor *fontDescriptor = [systemFont.fontDescriptor fontDescriptorWithSymbolicTraits:NSFontItalicTrait];
-        NSFont *italicFont = [NSFont fontWithDescriptor:fontDescriptor size:10]; // Set size here
-        
-        [noDevicesLabel setFont:italicFont];
-        noDevicesLabel.stringValue = NSLocalizedString(@"Searching for AirPlay devices", @"Message displayed when no AirPlay devices are found");
-        noDevicesLabel.editable = NO;
-        noDevicesLabel.bezeled = NO;
-        noDevicesLabel.drawsBackground = NO;
-        noDevicesLabel.alignment = NSTextAlignmentLeft;
-        noDevicesLabel.translatesAutoresizingMaskIntoConstraints = NO;
-
-        // Add to the stack view
-        [stackView addArrangedSubview:noDevicesLabel];
-    }
 }
 
-// Helper method to clean the device name string
-- (NSString *)cleanDeviceName:(NSString *)line {
-    NSString *deviceName = [line componentsSeparatedByString:@"\t"].firstObject;
-    deviceName = [deviceName stringByReplacingOccurrencesOfString:@".local" withString:@""];
-    deviceName = [deviceName stringByReplacingOccurrencesOfString:@"-" withString:@" "];
-    deviceName = [deviceName stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    return deviceName;
+// A etiqueta em itálico do «ainda não encontrei nada». Estava escrita duas vezes
+// dentro do mesmo método, com um alinhamento diferente em cada cópia.
+- (NSTextField *)etiquetaDeProcuraDeAirPlay {
+    NSTextField *noDevicesLabel = [[NSTextField alloc] init];
+
+    NSFont *systemFont = [NSFont systemFontOfSize:[NSFont systemFontSize]];
+    NSFontDescriptor *fontDescriptor = [systemFont.fontDescriptor fontDescriptorWithSymbolicTraits:NSFontItalicTrait];
+    NSFont *italicFont = [NSFont fontWithDescriptor:fontDescriptor size:10];
+
+    [noDevicesLabel setFont:italicFont];
+    noDevicesLabel.stringValue = NSLocalizedString(@"Searching for AirPlay devices", @"Message displayed when no AirPlay devices are found");
+    noDevicesLabel.editable = NO;
+    noDevicesLabel.bezeled = NO;
+    noDevicesLabel.drawsBackground = NO;
+    noDevicesLabel.alignment = NSTextAlignmentCenter;
+    noDevicesLabel.translatesAutoresizingMaskIntoConstraints = NO;
+
+    return noDevicesLabel;
 }
 
 // Action method for selecting an AirPlay device
@@ -979,25 +972,26 @@ CoreAudioPlaybackState playbackState;
             #ifdef DEBUG
             NSLog(@"[Popover selection] Device name not found for button: %@", button);
             #endif
+            [self desfazerSeleccaoDeAirPlay:button];
             return;
         }
 
-        // Retrieve the IP and port for this device name
-        NSDictionary *deviceInfo = [self deviceInfoForDeviceName:deviceName];
-        NSString *ipAddress = deviceInfo[@"ip"];
-        NSString *port = deviceInfo[@"port"];
+        // O aparelho vem da memória da descoberta, que só lá põe o que já tem
+        // endereço e porta. Vir nil aqui quer dizer uma coisa só: saiu da rede
+        // entre o desenho da lista e o clique.
+        ZPAparelhoAirPlay *aparelho = [self.airPlayManager dispositivoComNome:deviceName];
+        if (aparelho == nil) {
+            NSLog(@"[Popover selection] «%@» já não está na rede; a desfazer a selecção.", deviceName);
+            [self desfazerSeleccaoDeAirPlay:button];
+            return;
+        }
+
+        NSString *ipAddress = aparelho.ip;
+        NSString *port = aparelho.porta;
 
         #ifdef DEBUG
         NSLog(@"[Popover selection] Device info: %@, IP: %@, Port: %@", deviceName, ipAddress, port);
         #endif
-
-        // Validate the IP and port
-        if (ipAddress == nil || port == nil || [ipAddress isEqualToString:@"N/A"] || [port isEqualToString:@"N/A"]) {
-            #ifdef DEBUG
-            NSLog(@"[Popover selection] Invalid IP or port for device: %@", deviceName);
-            #endif
-            return;
-        }
 
         // Initialize and start the AirPlay streamer
         #ifdef DEBUG
@@ -1060,65 +1054,25 @@ CoreAudioPlaybackState playbackState;
     }
 }
 
-- (NSDictionary *)deviceInfoForDeviceName:(NSString *)deviceName {
-    // Construct the path to AirPlay_BonJour.txt
-    NSString *supportPath = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject stringByAppendingPathComponent:@"tocaTintas"];
-    NSString *filePath = [supportPath stringByAppendingPathComponent:@"AirPlay_BonJour.txt"];
+// Desfaz uma selecção que não chegou a pegar. Sem isto ficavam três estados
+// desencontrados — a caixa ligada, o SelectedAirPlayDevice já gravado e nenhum
+// streamer vivo —, e a única saída era desmarcar e voltar a marcar às cegas até
+// calhar. Era metade do ritual dos dois ou três ciclos; a outra metade era a
+// lista estar a descrever um ficheiro que a descoberta já tinha apagado.
+- (void)desfazerSeleccaoDeAirPlay:(NSButton *)button {
+    self.isProgrammaticChange = YES;
+    button.state = NSControlStateValueOff;
+    self.isProgrammaticChange = NO;
 
-    NSError *error = nil;
-    NSString *fileContents = [NSString stringWithContentsOfFile:filePath encoding:NSUTF8StringEncoding error:&error];
-    if (error) {
-        #ifdef DEBUG
-        NSLog(@"Error reading file: %@", error.localizedDescription);
-        #endif
-        return nil;
-    }
-    NSArray *lines = [fileContents componentsSeparatedByString:@"\n"];
-    for (NSString *line in lines) {
-        if (line.length == 0) continue;
-
-        NSArray *components = [line componentsSeparatedByString:@"\t"];
-        if (components.count >= 4) {
-            NSString *hostname = components[0];
-            NSString *ip = components[2];
-            NSString *port = components[3];
-
-            NSString *cleanedDeviceName = [self cleanDeviceName:hostname];
-
-            if ([cleanedDeviceName isEqualToString:deviceName]) {
-                return @{@"deviceName": deviceName, @"ip": ip, @"port": port};
-            }
-        }
-    }
-    return nil;
-}
-
-- (void)refreshAirPlayDiscovery {
-    #ifdef DEBUG
-    NSLog(@"Refreshing AirPlay discovery…");
-    #endif
-
-    // Delete AirPlay_BonJour.txt if it exists
-    NSString *bonjourFilePath = self.airPlayManager.bonjourFilePath;
-    if ([[NSFileManager defaultManager] fileExistsAtPath:bonjourFilePath]) {
-        NSError *error = nil;
-        [[NSFileManager defaultManager] removeItemAtPath:bonjourFilePath error:&error];
-        if (error) {
-            #ifdef DEBUG
-            NSLog(@"Error deleting AirPlay_BonJour.txt: %@", error);
-            #endif
-        } else {
-            #ifdef DEBUG
-            NSLog(@"AirPlay_BonJour.txt deleted successfully.");
-            #endif
-        }
+    if (self.currentlySelectedCheckbox == button) {
+        self.currentlySelectedCheckbox = nil;
     }
 
-    // Clear cached addresses to force Bonjour lookups
-    [self.airPlayManager.capturedAddresses removeAllObjects];
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"SelectedAirPlayDevice"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
 
-    // Restart the AirPlay discovery
-    [self.airPlayManager startDiscovery];
+    // O setter do -selectedDeviceName é quem repõe a cor do ícone do AirPlay.
+    self.selectedDeviceName = nil;
 }
 
 - (BOOL)setMute:(BOOL)mute {
@@ -2009,6 +1963,36 @@ CoreAudioPlaybackState playbackState;
 
     [self updateBs2bForHeadphonesConnected:connected output:saida];
     #endif
+
+    // Fora do #if de propósito: o atraso do histograma não depende da ponte, e
+    // a sondagem de um segundo é a cadência certa — o raop_play escreve os
+    // tempos uma vez por segundo, não há resolução mais fina para aproveitar.
+    [self actualizarAtrasoDoHistograma];
+}
+
+// Quanto tem o histograma de se atrasar para coincidir com o que se está mesmo
+// a ouvir.
+//
+// Com auscultadores na cavilha ouve-se o som local, sem atraso nenhum, e nesse
+// caso o histograma tem de acertar com esse — mesmo que o AirPlay esteja a
+// transmitir ao mesmo tempo, que é caso permitido (as colunas é que não, ver
+// -applyBs2bConfiguration). Sem auscultadores, o que se ouve é o aparelho
+// AirPlay, e aí o histograma atrasa-se o que o ZPAirPlayStreamer medir.
+//
+// Zero de `remoteAudioLag` significa «não sei», e não «estão sincronizados»:
+// por isso a pergunta é feita ao `raopClockIsRunning` primeiro.
+- (void)actualizarAtrasoDoHistograma {
+    double atraso = 0.0;
+
+    ZPAirPlayStreamer *streamer = self.airPlayStreamer;
+    if (streamer && !self.bs2bLastHeadphonesConnected && streamer.raopClockIsRunning) {
+        atraso = streamer.remoteAudioLag;
+    }
+
+    if (!(atraso > 0.0)) atraso = 0.0;                                  // NaN incluído
+    if (atraso > kZPAtrasoMaximoDoHistograma) atraso = kZPAtrasoMaximoDoHistograma;
+
+    atomic_store(&gAtrasoDoHistograma, atraso);
 }
 
 - (void)startBs2bHeadphoneAutoStart
@@ -5338,8 +5322,37 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 enum {
     kCavaBars           = 30,
     kCavaBarsPerChannel = kCavaBars / 2,
-    kCavaFrameBytes     = kCavaBars * 2
+    kCavaFrameBytes     = kCavaBars * 2,
+
+    // Tramas guardadas na linha de atraso. Enfileiram-se ~25 por segundo, e o
+    // atraso está limitado a kZPAtrasoMaximoDoHistograma, portanto isto dá
+    // folga de sobra. São 68 bytes cada, ~17 KB no total.
+    kCavaFilaMax        = 256
 };
+
+// Uma trama do cava com a hora a que foi lida.
+typedef struct {
+    NSTimeInterval instante;
+    uint16_t barras[kCavaBars];
+} ZPTramaCava;
+
+// Quanto tempo o histograma se atrasa a si próprio para coincidir com o que se
+// ouve. O cava lê o BlackHole, ou seja mostra o áudio no instante da captura, à
+// cabeça da cadeia; o que sai do aparelho AirPlay é o mesmo áudio uns segundos
+// depois. Escrito pelo thread principal na sondagem de um segundo, lido pelo
+// thread do FIFO — daí ser atómico.
+static _Atomic(double) gAtrasoDoHistograma = 0.0;
+
+// Tecto do atraso. O corte de deriva do ZPAirPlayStreamer não deixa o áudio em
+// trânsito passar dos seis segundos, e a latência pedida ao raop_play é um;
+// acima disto é mais provável que o relógio esteja a mentir do que o áudio
+// estar mesmo tanto tempo no ar.
+static const double kZPAtrasoMaximoDoHistograma = 8.0;
+
+// Quanto tempo sem nada para desenhar antes de se apagarem as colunas. Em regime
+// chega uma trama a cada 40 ms, portanto há cinco vezes de folga: isto nunca
+// dispara por acaso, só quando a linha de atraso está mesmo a encher.
+static const NSTimeInterval kCavaEsperaAteApagar = 0.2;
 
 // Read data from the FIFO file and update the histogram
 - (void)readFifoDirectly {
@@ -5363,98 +5376,180 @@ enum {
         uint8_t partial[kCavaFrameBytes];      // trama incompleta guardada entre leituras
         size_t partialCount = 0;
         uint16_t frame[kCavaBars];             // última trama completa lida
-        NSTimeInterval lastUpdateTime = 0;
+        NSTimeInterval ultimoEnfileiramento = 0;
+
+        // Linha de atraso. As tramas entram aqui com a hora a que foram lidas e
+        // só saem quando o áudio a que correspondem já se está mesmo a ouvir do
+        // outro lado — ver kZPAtrasoMaximoDoHistograma.
+        ZPTramaCava *fila = calloc(kCavaFilaMax, sizeof(ZPTramaCava));
+        if (!fila) {
+            NSLog(@"[FIFO] Sem memória para a linha de atraso do histograma.");
+            close(fileDescriptor);
+            return;
+        }
+        size_t cauda = 0;        // a próxima a sair
+        size_t ocupadas = 0;
+
+        NSTimeInterval ultimoDesenho = 0;
+        BOOL vazioDesenhado = NO;
+
+        // Tramas de zeros, construídas uma vez: é o que se manda desenhar quando
+        // não há nada para mostrar.
+        NSMutableArray<NSNumber *> *vazioEsquerdo = [NSMutableArray arrayWithCapacity:kCavaBarsPerChannel];
+        NSMutableArray<NSNumber *> *vazioDireito  = [NSMutableArray arrayWithCapacity:kCavaBarsPerChannel];
+        for (NSUInteger i = 0; i < kCavaBarsPerChannel; i++) {
+            [vazioEsquerdo addObject:@0];
+            [vazioDireito addObject:@0];
+        }
 
         while (1) { @autoreleasepool {
+            BOOL leuAlgo = NO;
+            BOOL esperaLonga = NO;
+
             ssize_t size = read(fileDescriptor, chunk, sizeof(chunk));
 
             if (size < 0) {
                 if (errno == EINTR) {
                     continue;
                 }
-                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                if (!(errno == EAGAIN || errno == EWOULDBLOCK)) {
+                    perror("[FIFO] Failed to read from FIFO");
                     #ifdef DEBUG
-                    NSLog(@"[FIFO] No data available yet, continuing to read…");
+                    NSLog(@"[FIFO] Failed to read from FIFO");
                     #endif
-                    // Este intervalo não pode ser igual ao do debounce: com os dois a
-                    // 50 ms entravam em batimento, e de vez em quando a trama chegava
-                    // uns microssegundos cedo de mais, era descartada, e a imagem
-                    // ficava parada 100 ms. A 20 ms acordamos a meio do passo de
-                    // 40 ms, portanto nenhuma actualização se perde por arredondamento.
-                    [NSThread sleepForTimeInterval:0.02];
-                    continue;
+                    break;
                 }
-                perror("[FIFO] Failed to read from FIFO");
+                // Sem dados por agora. Não se salta o resto do ciclo: a fila
+                // pode ter tramas vencidas à espera de serem desenhadas, e com
+                // um `continue` aqui a imagem congelava sempre que o cava
+                // ficasse calado.
                 #ifdef DEBUG
-                NSLog(@"[FIFO] Failed to read from FIFO");
+                NSLog(@"[FIFO] No data available yet, continuing to read…");
                 #endif
-                break;
-            }
-
-            if (size == 0) {
+            } else if (size == 0) {
                 // O cava fechou o FIFO (por exemplo, foi reiniciado). O fluxo
                 // recomeça numa fronteira de trama, portanto deita-se fora o resto.
                 #ifdef DEBUG
                 NSLog(@"[FIFO] No data available, sleeping…");
                 #endif
                 partialCount = 0;
-                [NSThread sleepForTimeInterval:0.1];
-                continue;
-            }
+                esperaLonga = YES;
+            } else {
+                leuAlgo = YES;
+                #ifdef DEBUG
+                NSLog(@"[FIFO] Data read from FIFO: %ld bytes", size);
+                #endif
 
-            #ifdef DEBUG
-            NSLog(@"[FIFO] Data read from FIFO: %ld bytes", size);
-            #endif
+                // Consumir só tramas completas e guardar o resto para a leitura
+                // seguinte: é isto que mantém a correspondência barra/contentor.
+                const uint8_t *cursor = chunk;
+                size_t remaining = (size_t)size;
+                BOOL haveFrame = NO;
 
-            // Consumir só tramas completas e guardar o resto para a leitura
-            // seguinte: é isto que mantém a correspondência barra/contentor.
-            const uint8_t *cursor = chunk;
-            size_t remaining = (size_t)size;
-            BOOL haveFrame = NO;
+                while (remaining > 0) {
+                    size_t take = MIN((size_t)kCavaFrameBytes - partialCount, remaining);
+                    memcpy(partial + partialCount, cursor, take);
+                    partialCount += take;
+                    cursor += take;
+                    remaining -= take;
 
-            while (remaining > 0) {
-                size_t take = MIN((size_t)kCavaFrameBytes - partialCount, remaining);
-                memcpy(partial + partialCount, cursor, take);
-                partialCount += take;
-                cursor += take;
-                remaining -= take;
+                    if (partialCount == kCavaFrameBytes) {
+                        memcpy(frame, partial, kCavaFrameBytes);   // fica a mais recente
+                        partialCount = 0;
+                        haveFrame = YES;
+                    }
+                }
 
-                if (partialCount == kCavaFrameBytes) {
-                    memcpy(frame, partial, kCavaFrameBytes);   // fica a mais recente
-                    partialCount = 0;
-                    haveFrame = YES;
+                // Limitar as tramas guardadas a ~25 por segundo. O limiar (35 ms)
+                // fica entre um e dois períodos de espera (20 ms), portanto o ritmo
+                // engata em «uma em cada duas» sem ficar dependente de
+                // arredondamentos. O travão está no enfileiramento, e não no
+                // desenho, para a fila não crescer ao ritmo a que o cava escreve.
+                NSTimeInterval agora = [NSDate timeIntervalSinceReferenceDate];
+                if (haveFrame && agora - ultimoEnfileiramento >= 0.035) {
+                    ultimoEnfileiramento = agora;
+
+                    if (ocupadas == kCavaFilaMax) {
+                        // Cheia. Só acontece com um atraso absurdo, que o
+                        // -actualizarAtrasoDoHistograma já limita; deita-se fora
+                        // a mais velha, que é a que menos falta faz.
+                        cauda = (cauda + 1) % kCavaFilaMax;
+                        ocupadas--;
+                    }
+
+                    size_t cabeca = (cauda + ocupadas) % kCavaFilaMax;
+                    fila[cabeca].instante = agora;
+                    memcpy(fila[cabeca].barras, frame, kCavaFrameBytes);
+                    ocupadas++;
                 }
             }
 
-            if (!haveFrame) {
-                continue;   // ainda não chegou uma trama inteira
+            // Escoar tudo o que já é devido e desenhar só a última.
+            //
+            // Desenhar todas seria reproduzi-las aceleradas, e isso acontece de
+            // cada vez que o corte de deriva do ZPAirPlayStreamer faz o atraso
+            // cair vários segundos de uma vez: nesse instante a fila inteira
+            // fica vencida. Saltar para a mais recente é o comportamento certo —
+            // o mesmo que o áudio faz, que também salta.
+            const double atraso = atomic_load(&gAtrasoDoHistograma);
+            NSTimeInterval agora = [NSDate timeIntervalSinceReferenceDate];
+            const ZPTramaCava *aDesenhar = NULL;
+
+            while (ocupadas > 0 && (agora - fila[cauda].instante) >= atraso) {
+                aDesenhar = &fila[cauda];
+                cauda = (cauda + 1) % kCavaFilaMax;
+                ocupadas--;
             }
 
-            // Limitar as actualizações a ~25 por segundo. O limiar (35 ms) fica
-            // entre um e dois períodos de espera (20 ms), portanto o ritmo engata
-            // em «uma em cada duas» sem ficar dependente de arredondamentos.
-            NSTimeInterval currentTime = [NSDate timeIntervalSinceReferenceDate];
-            if (currentTime - lastUpdateTime < 0.035) {
-                continue;
-            }
-            lastUpdateTime = currentTime;
+            if (aDesenhar) {
+                NSMutableArray<NSNumber *> *parsedLeftValues = [NSMutableArray arrayWithCapacity:kCavaBarsPerChannel];
+                NSMutableArray<NSNumber *> *parsedRightValues = [NSMutableArray arrayWithCapacity:kCavaBarsPerChannel];
 
-            NSMutableArray<NSNumber *> *parsedLeftValues = [NSMutableArray arrayWithCapacity:kCavaBarsPerChannel];
-            NSMutableArray<NSNumber *> *parsedRightValues = [NSMutableArray arrayWithCapacity:kCavaBarsPerChannel];
+                for (NSUInteger i = 0; i < kCavaBarsPerChannel; i++) {
+                    [parsedLeftValues addObject:@((aDesenhar->barras[i] * 1000) / 65535)];
+                }
+                for (NSUInteger i = kCavaBarsPerChannel; i < kCavaBars; i++) {
+                    [parsedRightValues addObject:@((aDesenhar->barras[i] * 1000) / 65535)];
+                }
 
-            for (NSUInteger i = 0; i < kCavaBarsPerChannel; i++) {
-                [parsedLeftValues addObject:@((frame[i] * 1000) / 65535)];
-            }
-            for (NSUInteger i = kCavaBarsPerChannel; i < kCavaBars; i++) {
-                [parsedRightValues addObject:@((frame[i] * 1000) / 65535)];
+                // As barras são CAShapeLayers: basta actualizar os paths. Forçar aqui um
+                // -setNeedsDisplay:/-displayIfNeeded redesenhava a view inteira 20 vezes
+                // por segundo só para repintar um fundo que nunca muda.
+                [(HistogramView *)self.histogramView updateHistogramWithLeftChannel:parsedLeftValues
+                                                                       rightChannel:parsedRightValues];
+                ultimoDesenho = agora;
+                vazioDesenhado = NO;
+
+            } else if (!vazioDesenhado && ultimoDesenho > 0 &&
+                       agora - ultimoDesenho >= kCavaEsperaAteApagar) {
+                // Não há nada para mostrar há mais de um quinto de segundo. Em
+                // regime chega uma trama a cada 40 ms, portanto isto só acontece
+                // quando o atraso acabou de crescer — ao ligar o AirPlay — e a
+                // fila ainda está a encher.
+                //
+                // Deixar a última trama à vista durante esse tempo era mostrar o
+                // passado a fingir que era o presente. Apagam-se as colunas e
+                // espera-se: uma barra de altura zero não desenha nada, e o
+                // ecrã vazio diz a verdade — ainda não há som que corresponda ao
+                // que se está a ouvir.
+                [(HistogramView *)self.histogramView updateHistogramWithLeftChannel:vazioEsquerdo
+                                                                       rightChannel:vazioDireito];
+                vazioDesenhado = YES;
             }
 
-            // As barras são CAShapeLayers: basta actualizar os paths. Forçar aqui um
-            // -setNeedsDisplay:/-displayIfNeeded redesenhava a view inteira 20 vezes
-            // por segundo só para repintar um fundo que nunca muda.
-            [(HistogramView *)self.histogramView updateHistogramWithLeftChannel:parsedLeftValues
-                                                                   rightChannel:parsedRightValues];
+            if (esperaLonga) {
+                [NSThread sleepForTimeInterval:0.1];
+            } else if (!leuAlgo) {
+                // Este intervalo não pode ser igual ao do debounce: com os dois a
+                // 50 ms entravam em batimento, e de vez em quando a trama chegava
+                // uns microssegundos cedo de mais, era descartada, e a imagem
+                // ficava parada 100 ms. A 20 ms acordamos a meio do passo de
+                // 40 ms, portanto nenhuma actualização se perde por arredondamento.
+                [NSThread sleepForTimeInterval:0.02];
+            }
         }}
+
+        free(fila);
 
         close(fileDescriptor);
     });
@@ -7384,10 +7479,6 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     [self stopBs2bHeadphoneAutoStart];
     [self saveTrackPlayCounts];
     [self.airPlayManager stopDiscovery];
-    // Ensure AirPlay_BonJour.txt is reset on app termination
-    [self.airPlayManager cleanupBonjourFile];
-    // Cleanup lock file on app termination
-    [ZPAirPlayStreamer cleanupRaopPlayLockFile];
 }
 
 #pragma mark - Faixa adiantada em memória

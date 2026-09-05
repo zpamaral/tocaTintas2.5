@@ -66,7 +66,6 @@ SOFTWARE.
 /// medição. É este o número com que se pode atrasar a reprodução local para a
 /// pôr de acordo com a remota.
 @property (nonatomic, readonly) NSTimeInterval remoteAudioLag;
-+ (void)cleanupRaopPlayLockFile;
 
 /// Sends a DMAP "play" command to the currently configured AirPlay device.
 /// The command is issued with a default session identifier of 1, which
