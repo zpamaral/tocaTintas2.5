@@ -314,6 +314,8 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSString *selectedDeviceName; // Store the selected device name
 @property (nonatomic, strong) ZPAirPlayStreamer *airPlayStreamer;
 @property (nonatomic, assign) BOOL isProgrammaticChange;
+// Guarda para não registar o observador da aparência mais do que uma vez.
+@property (nonatomic, assign) BOOL aObservarAparencia;
 
 // Silêncios longos detectados na faixa actual (NSValue com ZPSilenceGap), por ordem
 // crescente de início. Escrita na thread principal, lida pelos temporizadores.
@@ -656,12 +658,6 @@ CoreAudioPlaybackState playbackState;
     return self;
 }
 
-- (BOOL)isDarkMode {
-    NSAppearance *appearance = [NSAppearance currentDrawingAppearance] ?: [NSApp effectiveAppearance];
-    NSString *appearanceName = appearance.name;
-    return [appearanceName containsString:@"Dark"];
-}
-
 - (void)viewDidLoad {
     [super viewDidLoad];
     
@@ -720,6 +716,7 @@ CoreAudioPlaybackState playbackState;
     [self loadAudioFiles];
     [self readFifoDirectly];
     [self setupUI];
+    [self aplicarFundoDoSistema];
     [self createComboBox];
     
     // Add the AirPlay button to the view
@@ -2495,6 +2492,11 @@ CoreAudioPlaybackState playbackState;
 - (void)dealloc {
     // O FSEventStream guarda um ponteiro não retido para self; tem de ser parado aqui.
     [self stopWatchingSongsDirectory];
+
+    if (_aObservarAparencia) {
+        [self.view removeObserver:self forKeyPath:@"effectiveAppearance" context:kZPContextoDaAparencia];
+        _aObservarAparencia = NO;
+    }
 
     [[NSNotificationCenter defaultCenter] removeObserver:self
                                                     name:@"SongsDirectoryPathChanged"
@@ -4689,6 +4691,55 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 
     // Note: DO NOT close playbackState.wpc or reset other fields here
     // This ensures that WavPack playback can initialize correctly
+}
+
+// O fundo do tocador é o do sistema, e mais nada.
+//
+// Medido em 2026-09-05 com a app a correr em modo escuro: a área de conteúdo
+// estava a #000000 — preto absoluto — enquanto uma janela normal do sistema, na
+// mesma aparência e na mesma máquina, dá #1E1E1E. Não se descobriu que código
+// pintava aquilo: nem o storyboard (a vista do tocador está vazia, sem cor), nem
+// o Info.plist (sem chaves de aparência), nem uma linha do projecto. Em vez de
+// continuar à procura, impõe-se aqui a cor certa, que é o que se queria de
+// qualquer maneira.
+//
+// Fica na camada da própria vista: acima do fundo da janela e abaixo de todos os
+// controlos. O histograma não é afectado — desenha o seu próprio fundo no
+// -drawRect: e continua a fazê-lo.
+//
+// Tem de ser reaplicado a cada mudança de aparência. Um CGColor é um valor
+// congelado no instante em que se resolve: não acompanha a passagem de claro
+// para escuro, ao contrário do NSColor de que veio.
+//
+// O gancho para isso é o -viewDidChangeEffectiveAppearance, mas esse é do NSView
+// e não do NSViewController, portanto observa-se a aparência efectiva da vista.
+// Dá no mesmo e apanha também uma aparência imposta só a esta janela.
+static void *kZPContextoDaAparencia = &kZPContextoDaAparencia;
+
+- (void)aplicarFundoDoSistema {
+    self.view.wantsLayer = YES;
+    [self.view.effectiveAppearance performAsCurrentDrawingAppearance:^{
+        self.view.layer.backgroundColor = [NSColor windowBackgroundColor].CGColor;
+    }];
+
+    if (!self.aObservarAparencia) {
+        [self.view addObserver:self
+                    forKeyPath:@"effectiveAppearance"
+                       options:0
+                       context:kZPContextoDaAparencia];
+        self.aObservarAparencia = YES;
+    }
+}
+
+- (void)observeValueForKeyPath:(NSString *)keyPath
+                      ofObject:(id)object
+                        change:(NSDictionary *)change
+                       context:(void *)context {
+    if (context == kZPContextoDaAparencia) {
+        [self aplicarFundoDoSistema];
+        return;
+    }
+    [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
 }
 
 - (void)setupUI {
