@@ -123,12 +123,6 @@ static NSString *const kDMAPPairingGUID = @"00000000-0008-2083-cd93-e7745ad24855
 /// script — os dois apontam ao mesmo aparelho por caminhos diferentes.
 static NSString *const kZPAparelhoQuePrecisaDeAcordar = @"Apple TV (NAD)";
 
-/// Quanto tempo se dá ao aparelho para confirmar o comando de acordar antes de
-/// se abrir a sessão RAOP. Corre numa fila de fundo, portanto não prende a
-/// interface — o que custa é o som demorar mais a começar quando ele estava a
-/// dormir, que é o mal menor.
-static const NSTimeInterval kZPEsperaPelaConfirmacaoDeAcordar = 25.0;
-
 // Runs a small Python helper script that invokes `atvremote` to establish a
 // DMAP session and returns the headers printed by the tool as a dictionary.
 static NSDictionary *runPythonScriptAndParseJSON(NSString *deviceIP) {
@@ -327,6 +321,15 @@ static NSDictionary *runPythonScriptAndParseJSON(NSString *deviceIP) {
 }
 
 // Sends a DMAP command using information returned from `runPythonScriptAndParseJSON`.
+// NÃO "melhorar" esta função.
+//
+// Usa o sharedSession e espera com DISPATCH_TIME_FOREVER de propósito, e assim
+// funcionou durante mais de um ano. Em 2026-09-05 troquei-os por uma sessão
+// efémera com limite de tempo, a pensar que o FOREVER podia pendurar o arranque
+// — não pode: o sharedSession tem limite próprio de 60 s, portanto o handler
+// dispara sempre e a espera nunca foi infinita. O resultado da troca foi o Apple
+// TV adormecido deixar de acordar à primeira selecção.
+//
 static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
     NSString *ip = info[@"ip"];
     NSNumber *session = info[@"session_id"];
@@ -353,24 +356,9 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         [req addValue:active forHTTPHeaderField:@"Active-Remote"];
     }
 
-    // Espera-se pela resposta, e espera-se a sério.
-    //
-    // É este pedido que acorda o aparelho, e a sessão RAOP que se lhe segue tem
-    // de o encontrar já acordado. Um Apple TV a dormir demora vários segundos a
-    // processá-lo: uma espera curta devolve o controlo antes de ele acordar, o
-    // raop_play liga-se a um aparelho ainda adormecido, não sai som, e é preciso
-    // seleccioná-lo uma segunda vez.
-    //
-    // Esteve aqui um DISPATCH_TIME_FOREVER durante muito tempo e funcionava.
-    // Trocá-lo por três segundos foi uma regressão: três segundos chegam para um
-    // aparelho acordado — que foi contra o que se mediu — e não para um a dormir.
-    // Fica um tecto generoso: evita pendurar sem repetir o erro contrário.
-    dispatch_semaphore_t espera = dispatch_semaphore_create(0);
+    dispatch_semaphore_t sema = dispatch_semaphore_create(0);
 
-    NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
-    config.timeoutIntervalForRequest = kZPEsperaPelaConfirmacaoDeAcordar;
-
-    NSURLSessionDataTask *task = [[NSURLSession sessionWithConfiguration:config]
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession]
         dataTaskWithRequest:req
           completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
               if (error) {
@@ -384,19 +372,11 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
                   NSLog(@"[Acordar ATV] Comando '%@' enviado. Código HTTP: %ld", command, (long)http.statusCode);
                   #endif
               }
-              dispatch_semaphore_signal(espera);
+              dispatch_semaphore_signal(sema);
           }];
 
     [task resume];
-
-    if (dispatch_semaphore_wait(espera,
-                                dispatch_time(DISPATCH_TIME_NOW,
-                                              (int64_t)(kZPEsperaPelaConfirmacaoDeAcordar * NSEC_PER_SEC))) != 0) {
-        #ifdef DEBUG
-        NSLog(@"[Acordar ATV] O aparelho não confirmou o comando '%@' em %.0f s; sigo à mesma.",
-              command, kZPEsperaPelaConfirmacaoDeAcordar);
-        #endif
-    }
+    dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
 }
 
 @implementation ZPAirPlayStreamer {
@@ -991,16 +971,20 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         return;
     }
 
-    __weak typeof(self) fraco = self;
+    // Captura forte e sem verificação de cancelamento, tal como esteve durante
+    // todo o tempo em que isto funcionou.
+    //
+    // Cheguei a pôr aqui uma captura fraca e um `if (cancelPendingStart) return`
+    // antes do acordar. Parecia prudente e é a única barreira que este caminho
+    // não tinha: com a bandeira levantada, o comando de acordar deixava de ser
+    // enviado de todo, e o aparelho só acordava à segunda selecção. Não voltar a
+    // acrescentar guardas aqui sem uma razão medida — quem tem de decidir se
+    // ainda vale a pena ligar é o -arrancarTransmissao, que já verifica tudo.
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        __strong typeof(fraco) forte = fraco;
-        if (!forte || forte.cancelPendingStart) return;
-
-        [forte sendWakeUpCallToDeviceWithIP:forte.ipAddress];
+        [self sendWakeUpCallToDeviceWithIP:self.ipAddress];
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            __strong typeof(fraco) aindaVivo = fraco;
-            if (aindaVivo) [aindaVivo arrancarTransmissao];
+            [self arrancarTransmissao];
         });
     });
 }
