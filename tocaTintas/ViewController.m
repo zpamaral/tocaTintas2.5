@@ -79,6 +79,15 @@ typedef struct {
 // correspondem ao valor actual são abandonadas e os seus resultados descartados.
 static _Atomic(uint64_t) gSilenceAnalysisGeneration = 0;
 
+// Geração dos metadados à vista. O caminho dos formatos que não são FLAC nem
+// WavPack lê o AVAsset com -loadValuesAsynchronouslyForKeys:, cujo handler
+// termina fora da fila principal e num instante imprevisível. Com dois saltos
+// seguidos no ⏭, o handler da faixa A pode terminar depois de a B já estar no
+// ecrã e escrever por cima dela — a capa, as etiquetas e, pior, o ReplayGain,
+// que não é cosmético. Cada pedido leva a geração com que nasceu e desiste se
+// entretanto tiver havido outro.
+static _Atomic(uint64_t) gMetadataGeneration = 0;
+
 // Fila série onde decorre a análise, fora da thread de reprodução
 static dispatch_queue_t ZPSilenceAnalysisQueue(void) {
     static dispatch_queue_t queue;
@@ -5622,20 +5631,18 @@ static const NSTimeInterval kCavaEsperaAteApagar = 0.2;
 // Audio player delegate method - Handle completion of a track
 - (void)audioPlayerDidFinishPlaying:(AVAudioPlayer *)player successfully:(BOOL)flag {
     if (flag) {
-        // Check if the file that finished playing is FLAC
-        if ([[self.currentTrackURL pathExtension].lowercaseString isEqualToString:@"flac"]) {
-            // Clear metadata only when the FLAC track finishes
-            dispatch_block_t clearMetadataBlock = ^{
-                [self.artistLabel setStringValue:@""];
-                [self.albumLabel setStringValue:@""];
-                [self.titleLabel setStringValue:@""];
-                [self.coverArtView setImage:nil];
-                [self.trackNumberLabel setStringValue:@""];
-            };
-
-            // Dispatch the clear metadata block to the main queue
-            dispatch_async(dispatch_get_main_queue(), clearMetadataBlock);
-        }
+        // Não se apaga aqui a informação da faixa que acabou.
+        //
+        // Apagava-se, e era isto que punha o painel todo preto nas transições:
+        // os campos ficavam vazios até a faixa seguinte os reescrever, e num
+        // FLAC essa espera é longa porque a capa vem da miniatura, que é
+        // assíncrona. Entre duas faixas do mesmo álbum o artista, o álbum e a
+        // capa nem sequer mudam — desapareciam e voltavam iguais.
+        //
+        // Não fica informação velha a sobrar: quem escreve estes campos é o
+        // caminho dos metadados da faixa seguinte, e esse escreve-os todos,
+        // incluindo pôr a capa a nil quando a faixa não traz nenhuma. O que se
+        // ganha é a informação manter-se estável à vista até haver melhor.
 
         // Move to the next track or repeat the current one
         if (self.isRepeatModeActive) {
@@ -6277,18 +6284,11 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     NSLog(@"Playing FLAC file using AVAudioPlayer.");
     #endif
 
-    // Define a block to clear the previous metadata before starting playback
-    dispatch_block_t clearMetadataBlock = ^{
-        [self.artistLabel setStringValue:@""];
-        [self.albumLabel setStringValue:@""];
-        [self.titleLabel setStringValue:@""];
-        [self.coverArtView setImage:nil];
-        [self.trackNumberLabel setStringValue:@""];
-    };
+    // Aqui também não se apaga nada — ver a nota em
+    // -audioPlayerDidFinishPlaying:. Este era o segundo apagão da mesma
+    // transição: um ao acabar a faixa, outro ao começar a seguinte.
 
-    // Dispatch the clear metadata block to the main queue
-    dispatch_async(dispatch_get_main_queue(), clearMetadataBlock);
-    
+
     // Invalidate the previous progress update timer
     if (self.progressUpdateTimer) {
         [self.progressUpdateTimer invalidate];
@@ -7104,6 +7104,10 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
 - (void)extractAndDisplayMetadataFromURL:(NSURL *)url {
     NSString *extension = url.pathExtension.lowercaseString;
 
+    // Este pedido passa a ser o mais recente; qualquer um anterior que ainda
+    // venha a terminar fica com a geração desactualizada e cala-se.
+    const uint64_t geracao = atomic_fetch_add(&gMetadataGeneration, 1) + 1;
+
     // Define a block to extract and display metadata for FLAC files
     dispatch_block_t flacMetadataBlock = ^{
         [self extractAndDisplayFlacMetadataWithLibFLAC:url];
@@ -7121,6 +7125,17 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
         // Load base properties before reading asset.metadata/commonMetadata
         [asset loadValuesAsynchronouslyForKeys:@[@"metadata", @"commonMetadata"] completionHandler:^{
             dispatch_async(dispatch_get_main_queue(), ^{
+                // O guarda fica aqui, à cabeça, e não só à volta da escrita das
+                // etiquetas: deste bloco sai também o ReplayGain da faixa, e
+                // aplicar o ganho da faixa anterior ouve-se.
+                if (atomic_load(&gMetadataGeneration) != geracao) {
+                    #ifdef DEBUG
+                    NSLog(@"[Metadados] Chegaram tarde os de %@ (geração %llu, actual %llu); ignorados.",
+                          url.lastPathComponent, geracao, atomic_load(&gMetadataGeneration));
+                    #endif
+                    return;
+                }
+
                 NSError *error = nil;
                 AVKeyValueStatus metadataStatus = [asset statusOfValueForKey:@"metadata" error:&error];
                 if (metadataStatus != AVKeyValueStatusLoaded || error) {
