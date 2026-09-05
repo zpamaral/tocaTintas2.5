@@ -1005,10 +1005,30 @@ static NSString * const kRaopClockPath = @"/var/tmp/raop_clock";
 // remota. Sem ele só havia a latência nominal, que ignora tudo o que está em
 // trânsito.
 //
-// Nota sobre o contador: o raop_play não o incrementa quando reenvia blocos
-// depois de uma pausa, ao contrário do head_ts. Numa retoma dessas o Δ sai
-// sobrestimado até o fluxo assentar. Não se corrige aqui porque a linha não traz
-// com que o fazer; nota-se no registo por o Δ dar um salto e voltar.
+// Nota sobre o contador de blocos. Esteve aqui escrita ao contrário; isto foi
+// verificado na fonte do rust-raop-player em 2026-09-05.
+//
+// O `frame_counter` conta blocos de áudio **novo**. Quando o raop_play retoma
+// depois de uma pausa e reenche o aparelho com pedaços do backlog
+// (`raop_client.rs:353-378`), não o incrementa — e faz bem, que esse áudio não é
+// novo. Logo `blocos * 352` é mesmo o número de tramas únicas que foram para a
+// rede, que é exactamente o que aqui se quer comparar com as capturadas. O
+// contador está certo e é esta a fonte a usar.
+//
+// Tentador seria usar antes o head_ts, que avança em tudo, inclusive nos
+// reenvios. Não serve: o head_ts é re-baseado a partir do relógio NTP a cada
+// arranque de fluxo — nos dois ramos do `flush()` (`raop_client.rs:324-338`),
+// `head_ts = now_ts` sem pausa e `head_ts = now_ts - latência - chunk` com
+// pausa. Uma diferença de head_ts que atravesse uma retoma mede **tempo de
+// parede**, não tramas. Trocar uma coisa pela outra faz o `emTransito` saltar
+// para zero e o Δ colapsar na latência nominal, de vez.
+//
+// O que fica mesmo por cobrir é outra coisa: o «+ latência» assume que o
+// receptor segura exactamente as tramas que lhe pedimos no `-l`. Um aparelho que
+// segure menos faz o Δ sair grande de mais — e um Δ inflado atrasa o histograma
+// a mais, que se ouve como o som chegar antes das barras. É um desvio fixo por
+// aparelho, e distingue-se de um problema de contagem pelo feitio no registo:
+// este é plano, um erro de contagem varia com o que se passou no fluxo.
 
 static const uint64_t kRaopFramesPerChunk = 352;   // MAX_SAMPLES_PER_CHUNK
 static const double   kRaopSampleRate     = 44100.0;
