@@ -123,14 +123,11 @@ static NSString *const kDMAPPairingGUID = @"00000000-0008-2083-cd93-e7745ad24855
 /// script — os dois apontam ao mesmo aparelho por caminhos diferentes.
 static NSString *const kZPAparelhoQuePrecisaDeAcordar = @"Apple TV (NAD)";
 
-/// Quanto se espera, depois de mandar o comando de acordar, antes de abrir a
-/// sessão RAOP.
-///
-/// Não basta esperar pela resposta ao comando: o aparelho responde logo e só
-/// fica pronto uns segundos depois. Sem esta pausa, a primeira selecção depois
-/// de ele adormecer não pegava — era preciso seleccioná-lo uma segunda vez,
-/// que funcionava só porque entretanto tinha passado tempo.
-static const NSTimeInterval kZPEsperaDepoisDeAcordar = 4.0;
+/// Quanto tempo se dá ao aparelho para confirmar o comando de acordar antes de
+/// se abrir a sessão RAOP. Corre numa fila de fundo, portanto não prende a
+/// interface — o que custa é o som demorar mais a começar quando ele estava a
+/// dormir, que é o mal menor.
+static const NSTimeInterval kZPEsperaPelaConfirmacaoDeAcordar = 25.0;
 
 // Runs a small Python helper script that invokes `atvremote` to establish a
 // DMAP session and returns the headers printed by the tool as a dictionary.
@@ -263,12 +260,11 @@ static NSDictionary *runPythonScriptAndParseJSON(NSString *deviceIP) {
     }
 
     // O interpretador deixou de estar escrito a martelo. Se o /usr/local/bin
-    // desaparecer numa arrumação do Homebrew, o -launch do NSTask levanta uma
+    // desaparecer, o -launch do NSTask levanta uma
     // NSException que ninguém apanha e a aplicação vai abaixo — a acordar um
     // aparelho, que é a coisa mais dispensável que aqui se faz.
     NSString *python = nil;
     for (NSString *candidato in @[@"/usr/local/bin/python3",
-                                  @"/opt/homebrew/bin/python3",
                                   @"/usr/bin/python3"]) {
         if ([[NSFileManager defaultManager] isExecutableFileAtPath:candidato]) {
             python = candidato;
@@ -277,7 +273,7 @@ static NSDictionary *runPythonScriptAndParseJSON(NSString *deviceIP) {
     }
     if (!python) {
         #ifdef DEBUG
-        NSLog(@"[Acordar ATV] Não encontrei um python3; o aparelho terá de acordar sozinho.");
+        NSLog(@"[Acordar ATV] Não encontrei um python3; o aparelho terá que acordar sozinho.");
         #endif
         [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
         return nil;
@@ -357,17 +353,22 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         [req addValue:active forHTTPHeaderField:@"Active-Remote"];
     }
 
-    // Espera-se pela resposta. É este pedido que acorda mesmo o aparelho, e a
-    // ligação RAOP que se lhe segue tem de o encontrar já acordado — mandar e
-    // seguir não serve de nada.
+    // Espera-se pela resposta, e espera-se a sério.
     //
-    // Mas com limite. O que aqui esteve esperava com DISPATCH_TIME_FOREVER: um
-    // aparelho que aceitasse a ligação e não respondesse segurava o arranque
-    // todo o tempo que lhe apetecesse.
+    // É este pedido que acorda o aparelho, e a sessão RAOP que se lhe segue tem
+    // de o encontrar já acordado. Um Apple TV a dormir demora vários segundos a
+    // processá-lo: uma espera curta devolve o controlo antes de ele acordar, o
+    // raop_play liga-se a um aparelho ainda adormecido, não sai som, e é preciso
+    // seleccioná-lo uma segunda vez.
+    //
+    // Esteve aqui um DISPATCH_TIME_FOREVER durante muito tempo e funcionava.
+    // Trocá-lo por três segundos foi uma regressão: três segundos chegam para um
+    // aparelho acordado — que foi contra o que se mediu — e não para um a dormir.
+    // Fica um tecto generoso: evita pendurar sem repetir o erro contrário.
     dispatch_semaphore_t espera = dispatch_semaphore_create(0);
 
     NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
-    config.timeoutIntervalForRequest = 10.0;
+    config.timeoutIntervalForRequest = kZPEsperaPelaConfirmacaoDeAcordar;
 
     NSURLSessionDataTask *task = [[NSURLSession sessionWithConfiguration:config]
         dataTaskWithRequest:req
@@ -388,12 +389,12 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
 
     [task resume];
 
-    // Três segundos chegam de sobra para um Apple TV na rede local responder, e
-    // são pouco o bastante para isto não ser um bloqueio quando ele não responde.
     if (dispatch_semaphore_wait(espera,
-                                dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC))) != 0) {
+                                dispatch_time(DISPATCH_TIME_NOW,
+                                              (int64_t)(kZPEsperaPelaConfirmacaoDeAcordar * NSEC_PER_SEC))) != 0) {
         #ifdef DEBUG
-        NSLog(@"[Acordar ATV] O aparelho não respondeu ao comando '%@' em 3 s; sigo à mesma.", command);
+        NSLog(@"[Acordar ATV] O aparelho não confirmou o comando '%@' em %.0f s; sigo à mesma.",
+              command, kZPEsperaPelaConfirmacaoDeAcordar);
         #endif
     }
 }
@@ -996,13 +997,6 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         if (!forte || forte.cancelPendingStart) return;
 
         [forte sendWakeUpCallToDeviceWithIP:forte.ipAddress];
-
-        // Dar-lhe tempo de acordar mesmo. Já estamos numa fila de fundo, e a
-        // interface não fica presa — o utilizador vê o ícone vermelho e ouve o
-        // som uns segundos depois, que é o que aconteceria de qualquer maneira.
-        if (forte.cancelPendingStart) return;
-        [NSThread sleepForTimeInterval:kZPEsperaDepoisDeAcordar];
-        if (forte.cancelPendingStart) return;
 
         dispatch_async(dispatch_get_main_queue(), ^{
             __strong typeof(fraco) aindaVivo = fraco;
