@@ -123,6 +123,15 @@ static NSString *const kDMAPPairingGUID = @"00000000-0008-2083-cd93-e7745ad24855
 /// script — os dois apontam ao mesmo aparelho por caminhos diferentes.
 static NSString *const kZPAparelhoQuePrecisaDeAcordar = @"Apple TV (NAD)";
 
+/// Quanto se espera, depois de mandar o comando de acordar, antes de abrir a
+/// sessão RAOP.
+///
+/// Não basta esperar pela resposta ao comando: o aparelho responde logo e só
+/// fica pronto uns segundos depois. Sem esta pausa, a primeira selecção depois
+/// de ele adormecer não pegava — era preciso seleccioná-lo uma segunda vez,
+/// que funcionava só porque entretanto tinha passado tempo.
+static const NSTimeInterval kZPEsperaDepoisDeAcordar = 4.0;
+
 // Runs a small Python helper script that invokes `atvremote` to establish a
 // DMAP session and returns the headers printed by the tool as a dictionary.
 static NSDictionary *runPythonScriptAndParseJSON(NSString *deviceIP) {
@@ -267,7 +276,9 @@ static NSDictionary *runPythonScriptAndParseJSON(NSString *deviceIP) {
         }
     }
     if (!python) {
+        #ifdef DEBUG
         NSLog(@"[Acordar ATV] Não encontrei um python3; o aparelho terá de acordar sozinho.");
+        #endif
         [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
         return nil;
     }
@@ -283,7 +294,9 @@ static NSDictionary *runPythonScriptAndParseJSON(NSString *deviceIP) {
     @try {
         [task launch];
     } @catch (NSException *excepcao) {
+        #ifdef DEBUG
         NSLog(@"[Acordar ATV] Não consegui lançar o %@: %@", python, excepcao.reason);
+        #endif
         [[NSFileManager defaultManager] removeItemAtPath:tempPath error:nil];
         return nil;
     }
@@ -379,7 +392,9 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
     // são pouco o bastante para isto não ser um bloqueio quando ele não responde.
     if (dispatch_semaphore_wait(espera,
                                 dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC))) != 0) {
+        #ifdef DEBUG
         NSLog(@"[Acordar ATV] O aparelho não respondeu ao comando '%@' em 3 s; sigo à mesma.", command);
+        #endif
     }
 }
 
@@ -551,8 +566,10 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
 
     int fd = open(caminho.fileSystemRepresentation, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
     if (fd < 0) {
+        #ifdef DEBUG
         NSLog(@"[Streaming] Não consegui abrir o ficheiro de tranco (%s); sigo sem ele.",
               strerror(errno));
+        #endif
         return YES;
     }
 
@@ -560,10 +577,14 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         int erro = errno;
         close(fd);
         if (erro == EWOULDBLOCK) {
+            #ifdef DEBUG
             NSLog(@"[Streaming] O tranco do raop_play está tomado; não abro outra instância.");
+            #endif
             return NO;
         }
+        #ifdef DEBUG
         NSLog(@"[Streaming] O flock falhou (%s); sigo sem tranco.", strerror(erro));
+        #endif
         return YES;
     }
 
@@ -622,14 +643,18 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
             }
         }
     } @catch (NSException *excepcao) {
+        #ifdef DEBUG
         NSLog(@"[Streaming] Não consegui procurar raop_play órfãos: %@", excepcao.reason);
+        #endif
         return 0;
     }
 
     if (orfaos.count == 0) return 0;
 
+    #ifdef DEBUG
     NSLog(@"[Streaming] %lu raop_play de sessões anteriores ainda vivo(s); a terminá-lo(s) "
            "antes de abrir sessão nova.", (unsigned long)orfaos.count);
+    #endif
 
     for (NSNumber *pid in orfaos) kill(pid.intValue, SIGTERM);
 
@@ -689,8 +714,10 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         return;
     }
 
+    #ifdef DEBUG
     NSLog(@"[checkRaopPlayHealth] O raop_play desta transmissão já não está vivo; "
            "a relançar para «%@».", selectedDevice);
+    #endif
     [self restartStreamingAfterFailure];
 }
 
@@ -969,6 +996,13 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         if (!forte || forte.cancelPendingStart) return;
 
         [forte sendWakeUpCallToDeviceWithIP:forte.ipAddress];
+
+        // Dar-lhe tempo de acordar mesmo. Já estamos numa fila de fundo, e a
+        // interface não fica presa — o utilizador vê o ícone vermelho e ouve o
+        // som uns segundos depois, que é o que aconteceria de qualquer maneira.
+        if (forte.cancelPendingStart) return;
+        [NSThread sleepForTimeInterval:kZPEsperaDepoisDeAcordar];
+        if (forte.cancelPendingStart) return;
 
         dispatch_async(dispatch_get_main_queue(), ^{
             __strong typeof(fraco) aindaVivo = fraco;

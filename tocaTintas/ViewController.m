@@ -314,8 +314,6 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSString *selectedDeviceName; // Store the selected device name
 @property (nonatomic, strong) ZPAirPlayStreamer *airPlayStreamer;
 @property (nonatomic, assign) BOOL isProgrammaticChange;
-// Guarda para não registar o observador da aparência mais do que uma vez.
-@property (nonatomic, assign) BOOL aObservarAparencia;
 
 // Silêncios longos detectados na faixa actual (NSValue com ZPSilenceGap), por ordem
 // crescente de início. Escrita na thread principal, lida pelos temporizadores.
@@ -660,7 +658,7 @@ CoreAudioPlaybackState playbackState;
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    
+
     // Ignore SIGPIPE signals to prevent termination
     signal(SIGPIPE, SIG_IGN);
     
@@ -716,7 +714,6 @@ CoreAudioPlaybackState playbackState;
     [self loadAudioFiles];
     [self readFifoDirectly];
     [self setupUI];
-    [self aplicarFundoDoSistema];
     [self createComboBox];
     
     // Add the AirPlay button to the view
@@ -749,7 +746,6 @@ CoreAudioPlaybackState playbackState;
     
     // Initialize ZPAudioCapture instance
     self.audioCapture = [[ZPAudioCapture alloc] init];
-    self.isRecording = NO;  // Start with recording set to off
 
     self.isStreaming = NO; // Initialize as not streaming
 }
@@ -999,7 +995,9 @@ CoreAudioPlaybackState playbackState;
         // entre o desenho da lista e o clique.
         ZPAparelhoAirPlay *aparelho = [self.airPlayManager dispositivoComNome:deviceName];
         if (aparelho == nil) {
+            #ifdef DEBUG
             NSLog(@"[Popover selection] «%@» já não está na rede; a desfazer a selecção.", deviceName);
+            #endif
             [self desfazerSeleccaoDeAirPlay:button];
             return;
         }
@@ -1099,12 +1097,16 @@ CoreAudioPlaybackState playbackState;
 // remediar todo o santo dia uma coisa que só acontece à primeira.
 - (void)reabrirSessaoDeAirPlay {
     if (!self.airPlayStreamer) {
+        #ifdef DEBUG
         NSLog(@"[AirPlay] ⌘+clique sem transmissão a decorrer; não há sessão para reabrir.");
+        #endif
         NSBeep();
         return;
     }
 
+    #ifdef DEBUG
     NSLog(@"[AirPlay] ⌘+clique: a reabrir a sessão para repor a sincronização.");
+    #endif
 
     // Um piscar do ícone. A única outra confirmação seria o som ir-se por um
     // segundo, e isso, sem contexto, lê-se como avaria e não como resposta.
@@ -2056,9 +2058,71 @@ CoreAudioPlaybackState playbackState;
     atomic_store(&gAtrasoDoHistograma, atraso);
 }
 
+// Mata pontes bs2b deixadas por execuções anteriores.
+//
+// O Xcode pára a app com SIGKILL: o -applicationWillTerminate nunca corre e o
+// -stopBs2bIfRunning nunca chega a matar a ponte. Cada ciclo de correr-e-parar
+// deixa uma viva, e como cada uma toca para o dispositivo que lhe foi dado no
+// arranque, ficam várias a tocar em paralelo — foi assim que ligar os
+// auscultadores deixou de calar as colunas: havia duas órfãs a tocar para elas.
+//
+// O guarda que já existia no -startBs2bWithOutputDevice: só conhece a bs2bTask
+// desta instância, portanto não as via.
+//
+// Só mata o executável que vem dentro deste pacote, e o camilladsp só quando a
+// sua configuração é uma das nossas (/tmp/bs2b_camilla_*) — o binário é do
+// utilizador e pode estar a servir outra coisa.
+- (void)matarPontesOrfas {
+    NSString *ponte = [[NSBundle mainBundle] pathForResource:@"bs2b_bridge" ofType:nil];
+    if (!ponte) return;
+
+    NSMutableArray<NSNumber *> *orfaos = [NSMutableArray array];
+    for (NSString *padrao in @[ponte, @"camilladsp .*/tmp/bs2b_camilla_"]) {
+        NSTask *pgrep = [[NSTask alloc] init];
+        pgrep.launchPath = @"/usr/bin/pgrep";
+        pgrep.arguments = @[@"-f", padrao];
+        NSPipe *tubo = [NSPipe pipe];
+        pgrep.standardOutput = tubo;
+        pgrep.standardError = [NSFileHandle fileHandleWithNullDevice];
+        @try {
+            [pgrep launch];
+            NSData *saida = [tubo.fileHandleForReading readDataToEndOfFile];
+            [pgrep waitUntilExit];
+            NSString *texto = [[NSString alloc] initWithData:saida encoding:NSUTF8StringEncoding];
+            for (NSString *linha in [texto componentsSeparatedByString:@"\n"]) {
+                pid_t pid = (pid_t)linha.integerValue;
+                if (pid > 0 && pid != getpid()) [orfaos addObject:@(pid)];
+            }
+        } @catch (NSException *e) {
+            #ifdef DEBUG
+            NSLog(@"[bs2b] Não consegui procurar pontes órfãs: %@", e.reason);
+            #endif
+        }
+    }
+
+    if (orfaos.count == 0) return;
+
+    #ifdef DEBUG
+    NSLog(@"[bs2b] %lu processo(s) de execuções anteriores ainda vivo(s); a terminá-lo(s).",
+          (unsigned long)orfaos.count);
+    #endif
+
+    for (NSNumber *pid in orfaos) kill(pid.intValue, SIGTERM);
+    for (int i = 0; i < 10; i++) {
+        BOOL algum = NO;
+        for (NSNumber *pid in orfaos) if (kill(pid.intValue, 0) == 0) { algum = YES; break; }
+        if (!algum) break;
+        [NSThread sleepForTimeInterval:0.05];
+    }
+    for (NSNumber *pid in orfaos) if (kill(pid.intValue, 0) == 0) kill(pid.intValue, SIGKILL);
+}
+
 - (void)startBs2bHeadphoneAutoStart
 {
     #if ENABLE_BS2B_BRIDGE
+    // Restos de execuções anteriores primeiro; ver -matarPontesOrfas.
+    [self matarPontesOrfas];
+
     if (self.bs2bHeadphonePollTimer) {
         return; // já está activo
     }
@@ -2492,11 +2556,6 @@ CoreAudioPlaybackState playbackState;
 - (void)dealloc {
     // O FSEventStream guarda um ponteiro não retido para self; tem de ser parado aqui.
     [self stopWatchingSongsDirectory];
-
-    if (_aObservarAparencia) {
-        [self.view removeObserver:self forKeyPath:@"effectiveAppearance" context:kZPContextoDaAparencia];
-        _aObservarAparencia = NO;
-    }
 
     [[NSNotificationCenter defaultCenter] removeObserver:self
                                                     name:@"SongsDirectoryPathChanged"
@@ -4693,58 +4752,10 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     // This ensures that WavPack playback can initialize correctly
 }
 
-// O fundo do tocador é o do sistema, e mais nada.
-//
-// Medido em 2026-09-05 com a app a correr em modo escuro: a área de conteúdo
-// estava a #000000 — preto absoluto — enquanto uma janela normal do sistema, na
-// mesma aparência e na mesma máquina, dá #1E1E1E. Não se descobriu que código
-// pintava aquilo: nem o storyboard (a vista do tocador está vazia, sem cor), nem
-// o Info.plist (sem chaves de aparência), nem uma linha do projecto. Em vez de
-// continuar à procura, impõe-se aqui a cor certa, que é o que se queria de
-// qualquer maneira.
-//
-// Fica na camada da própria vista: acima do fundo da janela e abaixo de todos os
-// controlos. O histograma não é afectado — desenha o seu próprio fundo no
-// -drawRect: e continua a fazê-lo.
-//
-// Tem de ser reaplicado a cada mudança de aparência. Um CGColor é um valor
-// congelado no instante em que se resolve: não acompanha a passagem de claro
-// para escuro, ao contrário do NSColor de que veio.
-//
-// O gancho para isso é o -viewDidChangeEffectiveAppearance, mas esse é do NSView
-// e não do NSViewController, portanto observa-se a aparência efectiva da vista.
-// Dá no mesmo e apanha também uma aparência imposta só a esta janela.
-static void *kZPContextoDaAparencia = &kZPContextoDaAparencia;
-
-- (void)aplicarFundoDoSistema {
-    self.view.wantsLayer = YES;
-    [self.view.effectiveAppearance performAsCurrentDrawingAppearance:^{
-        self.view.layer.backgroundColor = [NSColor windowBackgroundColor].CGColor;
-    }];
-
-    if (!self.aObservarAparencia) {
-        [self.view addObserver:self
-                    forKeyPath:@"effectiveAppearance"
-                       options:0
-                       context:kZPContextoDaAparencia];
-        self.aObservarAparencia = YES;
-    }
-}
-
-- (void)observeValueForKeyPath:(NSString *)keyPath
-                      ofObject:(id)object
-                        change:(NSDictionary *)change
-                       context:(void *)context {
-    if (context == kZPContextoDaAparencia) {
-        [self aplicarFundoDoSistema];
-        return;
-    }
-    [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
-}
-
 - (void)setupUI {
     // Static dimensions for the window: 750x250
     CGFloat windowWidth = 750;
+
 
     // CD cover art position
     self.coverArtView = [[NSImageView alloc] initWithFrame:NSMakeRect(20, 120, 120, 120)];
@@ -5469,6 +5480,8 @@ static const double kZPAtrasoMaximoDoHistograma = 8.0;
 // dispara por acaso, só quando a linha de atraso está mesmo a encher.
 static const NSTimeInterval kCavaEsperaAteApagar = 0.2;
 
+// Interruptor de diagnóstico do fundo preto. A 0 a app comporta-se
+// normalmente; a 1 o -viewDidLoad não faz nada e a janela abre vazia.
 // Read data from the FIFO file and update the histogram
 - (void)readFifoDirectly {
     NSString *fifoPath = @"/var/tmp/cava_fifo";
@@ -5498,7 +5511,9 @@ static const NSTimeInterval kCavaEsperaAteApagar = 0.2;
         // outro lado — ver kZPAtrasoMaximoDoHistograma.
         ZPTramaCava *fila = calloc(kCavaFilaMax, sizeof(ZPTramaCava));
         if (!fila) {
+            #ifdef DEBUG
             NSLog(@"[FIFO] Sem memória para a linha de atraso do histograma.");
+            #endif
             close(fileDescriptor);
             return;
         }

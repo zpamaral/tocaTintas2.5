@@ -313,7 +313,9 @@ static NSString * _Nullable ZPPrimeiroIPv4(NSArray<NSData *> *enderecos) {
 
 - (void)netServiceBrowser:(NSNetServiceBrowser *)browser
              didNotSearch:(NSDictionary<NSString *, NSNumber *> *)erro {
+    #ifdef DEBUG
     NSLog(@"[AirPlay] A busca não arrancou: %@. Não vai haver aparelhos na lista.", erro);
+    #endif
     self.browser = nil;
 }
 
@@ -375,8 +377,10 @@ static NSString * _Nullable ZPPrimeiroIPv4(NSArray<NSData *> *enderecos) {
     NSInteger gastas = self.tentativas[nomeDoServico].integerValue + 1;
 
     if (gastas >= kZPMaximoTentativas) {
+        #ifdef DEBUG
         NSLog(@"[AirPlay] Desisti de resolver «%@» ao fim de %ld tentativas. "
                "Volta à lista se se anunciar outra vez.", nomeDoServico, (long)gastas);
+        #endif
         [self esquecerServicoChamado:nomeDoServico];
         return;
     }

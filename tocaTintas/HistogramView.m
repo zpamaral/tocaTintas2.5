@@ -121,8 +121,19 @@ SOFTWARE.
         [[NSColor colorWithCalibratedWhite:0.8 alpha:1.0] setFill];  // Light Mode background (custom gray)
     }
     
-    // Fill the background with the selected color
-    NSRectFill(dirtyRect);
+    // Preencher os BOUNDS, não o dirtyRect.
+    //
+    // O dirtyRect não é o rectângulo da vista: é a região que a AppKit quer
+    // redesenhada, e pode ser maior do que ela. Numa janela apoiada em camadas o
+    // macOS 26 passa aqui a região da janela inteira, e o NSRectFill pinta o que
+    // lhe derem — pelo que esta vista de 240x120 pintava de preto os 750x250
+    // todos, por baixo de tudo o resto. Em macOS antigos os rectângulos vinham
+    // justos e o erro nunca se via.
+    //
+    // Diagnosticado em 2026-09-05 por bissecção do -viewDidLoad e reproduzido
+    // fora da app em vinte linhas. O aspecto do histograma não muda: continua
+    // preto no escuro e cinzento claro no claro.
+    NSRectFill(self.bounds);
 }
 
 - (void)updateHistogramWithLeftChannel:(NSArray<NSNumber *> *)leftChannel rightChannel:(NSArray<NSNumber *> *)rightChannel {
