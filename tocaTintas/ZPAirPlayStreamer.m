@@ -111,6 +111,18 @@ SOFTWARE.
 // the credentials printed by `atvremote --scan` for the target Apple TV.
 static NSString *const kDMAPPairingGUID = @"00000000-0008-2083-cd93-e7745ad24855";
 
+/// O único aparelho que precisa de ser acordado, e o único para que o ajudante
+/// serve.
+///
+/// O `DEVICE_ID` escrito dentro do script Python é deste Apple TV e de mais
+/// nenhum, portanto mandar acordar qualquer outro é gastar oito segundos para
+/// falhar. E é mesmo só este que precisa: o HomePod toca à primeira sem nunca
+/// ter passado por aqui.
+///
+/// Se um dia mudares o nome ao Apple TV, muda-o aqui **e** no `DEVICE_ID` do
+/// script — os dois apontam ao mesmo aparelho por caminhos diferentes.
+static NSString *const kZPAparelhoQuePrecisaDeAcordar = @"Apple TV (NAD)";
+
 // Runs a small Python helper script that invokes `atvremote` to establish a
 // DMAP session and returns the headers printed by the tool as a dictionary.
 static NSDictionary *runPythonScriptAndParseJSON(NSString *deviceIP) {
@@ -332,10 +344,15 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         [req addValue:active forHTTPHeaderField:@"Active-Remote"];
     }
 
-    // Sem semáforo: manda-se e segue-se. O que aqui estava esperava pela
-    // resposta com DISPATCH_TIME_FOREVER, e como isto corria antes de a
-    // transmissão sequer arrancar, um aparelho que aceitasse a ligação e não
-    // respondesse segurava o arranque todo o tempo que quisesse.
+    // Espera-se pela resposta. É este pedido que acorda mesmo o aparelho, e a
+    // ligação RAOP que se lhe segue tem de o encontrar já acordado — mandar e
+    // seguir não serve de nada.
+    //
+    // Mas com limite. O que aqui esteve esperava com DISPATCH_TIME_FOREVER: um
+    // aparelho que aceitasse a ligação e não respondesse segurava o arranque
+    // todo o tempo que lhe apetecesse.
+    dispatch_semaphore_t espera = dispatch_semaphore_create(0);
+
     NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
     config.timeoutIntervalForRequest = 10.0;
 
@@ -353,9 +370,17 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
                   NSLog(@"[Acordar ATV] Comando '%@' enviado. Código HTTP: %ld", command, (long)http.statusCode);
                   #endif
               }
+              dispatch_semaphore_signal(espera);
           }];
 
     [task resume];
+
+    // Três segundos chegam de sobra para um Apple TV na rede local responder, e
+    // são pouco o bastante para isto não ser um bloqueio quando ele não responde.
+    if (dispatch_semaphore_wait(espera,
+                                dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC))) != 0) {
+        NSLog(@"[Acordar ATV] O aparelho não respondeu ao comando '%@' em 3 s; sigo à mesma.", command);
+    }
 }
 
 @implementation ZPAirPlayStreamer {
@@ -916,24 +941,40 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         return;
     }
 
-    // O acordar corre ao lado do arranque, e não à frente dele.
+    // O acordar corre à frente da ligação — mas só para o aparelho que precisa.
     //
-    // Antes a transmissão ficava à espera: o ajudante em Python tem oito
-    // segundos de tolerância, e o pedido HTTP que se lhe seguia esperava sem
-    // limite nenhum, portanto entre carregar na caixa e o raop_play sequer
-    // arrancar podia ir mais de um minuto. Pior: o ajudante está feito para um
-    // Apple TV em concreto, com o identificador escrito no próprio script, de
-    // modo que para qualquer outro aparelho esse tempo todo era gasto só para
-    // falhar. E é dispensável na maioria dos casos — o raop_play acorda o
-    // aparelho sozinho quando abre a sessão RTSP.
+    // Sequencial para o Apple TV, de propósito. Ele dorme, e uma sessão RAOP
+    // negociada com ele a meio de acordar fica desalinhada para o resto dessa
+    // sessão: é o que se ouve como o histograma afastado do som, e que só se
+    // corrige abrindo sessão nova — ⌘+clique no ícone, ou trocar de aparelho e
+    // voltar. Esperar aqui os segundos do acordar evita isso. Chegou a correr em
+    // paralelo, para o arranque ser mais rápido, e o que isso comprou em
+    // arranque pagou-se em sessões tortas.
+    //
+    // Para todos os outros não se espera nem se tenta sequer: o ajudante tem o
+    // identificador do Apple TV escrito no script, portanto para o HomePod eram
+    // oito segundos gastos só para falhar. E o HomePod não precisa — sempre
+    // tocou à primeira sem nunca ter passado por aqui.
+    if (![selectedDevice isEqualToString:kZPAparelhoQuePrecisaDeAcordar]) {
+        #ifdef DEBUG
+        NSLog(@"[Streaming] «%@» não precisa de ser acordado; a ligar já.", selectedDevice);
+        #endif
+        [self arrancarTransmissao];
+        return;
+    }
+
     __weak typeof(self) fraco = self;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         __strong typeof(fraco) forte = fraco;
         if (!forte || forte.cancelPendingStart) return;
-        [forte sendWakeUpCallToDeviceWithIP:forte.ipAddress];
-    });
 
-    [self arrancarTransmissao];
+        [forte sendWakeUpCallToDeviceWithIP:forte.ipAddress];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(fraco) aindaVivo = fraco;
+            if (aindaVivo) [aindaVivo arrancarTransmissao];
+        });
+    });
 }
 
 // Make sure that the fifo file for raop_play exists

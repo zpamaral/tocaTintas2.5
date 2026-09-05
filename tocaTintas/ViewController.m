@@ -708,6 +708,10 @@ CoreAudioPlaybackState playbackState;
     [self.airPlayButton setTarget:self];
     [self.airPlayButton setAction:@selector(showAirPlayPopover:)];
 
+    // Um gesto escondido que ninguém adivinha é um gesto que não existe.
+    self.airPlayButton.toolTip = NSLocalizedString(@"AirPlay. ⌘+clique reabre a sessão.",
+                                                   @"Tooltip do botão de AirPlay");
+
     // Other initial setup code…
     [self requestNotificationPermission];
     [self loadTrackPlayCounts];
@@ -798,6 +802,14 @@ CoreAudioPlaybackState playbackState;
 
 // Method to show the AirPlay popover when the AirPlay button is clicked
 - (void)showAirPlayPopover:(NSButton *)sender {
+    // ⌘ + clique reabre a sessão RAOP em vez de abrir a lista.
+    NSEventModifierFlags modificadores =
+        NSApp.currentEvent.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
+    if (modificadores & NSEventModifierFlagCommand) {
+        [self reabrirSessaoDeAirPlay];
+        return;
+    }
+
     self.airPlayPopover.contentViewController = [self createAirPlayPopoverContentController];
 
     // Force layout update
@@ -1068,6 +1080,49 @@ CoreAudioPlaybackState playbackState;
 // streamer vivo —, e a única saída era desmarcar e voltar a marcar às cegas até
 // calhar. Era metade do ritual dos dois ou três ciclos; a outra metade era a
 // lista estar a descrever um ficheiro que a descoberta já tinha apagado.
+// Reabre a sessão RAOP para o aparelho que já está seleccionado.
+//
+// Para que serve: por vezes o histograma sai desalinhado do som — no Apple TV 3,
+// nunca observado no HomePod. Reabrir a sessão corrige, e depois de corrigido
+// **fica** corrigido durante o resto da sessão de escuta.
+//
+// É esse «fica» que diz o que isto não é. Se fosse o relógio do receptor a
+// afastar-se aos poucos, o desalinhamento voltaria ao fim de outra hora; não
+// volta. Portanto não é acumulação, é uma sessão que **nasceu** torta. A
+// suspeita é o aparelho não estar completamente acordado quando o raop_play
+// negoceia com ele — o Apple TV 3 dorme e leva o seu tempo, o HomePod não —, e
+// nesse caso o alinhamento fica errado para toda essa sessão.
+//
+// O que se sabe com certeza é que não é cá dentro: a contabilidade de quadros do
+// ZPAirPlayStreamer é escrituração exacta dos mesmos quadros nas duas pontas,
+// verificada linha a linha. O que não se sabe é o que o aparelho faz, porque o
+// protocolo não no-lo diz.
+//
+// Daí ser um gesto e não um automatismo: uma reabertura periódica estaria a
+// remediar todo o santo dia uma coisa que só acontece à primeira.
+- (void)reabrirSessaoDeAirPlay {
+    if (!self.airPlayStreamer) {
+        NSLog(@"[AirPlay] ⌘+clique sem transmissão a decorrer; não há sessão para reabrir.");
+        NSBeep();
+        return;
+    }
+
+    NSLog(@"[AirPlay] ⌘+clique: a reabrir a sessão para repor a sincronização.");
+
+    // Um piscar do ícone. A única outra confirmação seria o som ir-se por um
+    // segundo, e isso, sem contexto, lê-se como avaria e não como resposta.
+    NSColor *corAnterior = self.airPlayButton.contentTintColor;
+    self.airPlayButton.contentTintColor = [NSColor systemBlueColor];
+    __weak typeof(self) fraco = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        fraco.airPlayButton.contentTintColor = corAnterior;
+    });
+
+    [self.airPlayStreamer stopStreaming];
+    [self.airPlayStreamer startStreaming];
+}
+
 - (void)desfazerSeleccaoDeAirPlay:(NSButton *)button {
     self.isProgrammaticChange = YES;
     button.state = NSControlStateValueOff;
