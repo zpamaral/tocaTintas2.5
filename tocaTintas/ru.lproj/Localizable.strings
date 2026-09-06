@@ -78,3 +78,4 @@
 "prefs_eq_brand" = "Марка:";
 "prefs_eq_model" = "Модель:";
 "prefs_eq_mine" = "Мои файлы";
+"airplay_button_tooltip" = "AirPlay. ⌘+клик открывает сеанс заново.";

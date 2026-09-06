@@ -70,3 +70,4 @@
 "prefs_eq_brand" = "Brand:";
 "prefs_eq_model" = "Model:";
 "prefs_eq_mine" = "My own files";
+"airplay_button_tooltip" = "AirPlay. ⌘-click reopens the session.";

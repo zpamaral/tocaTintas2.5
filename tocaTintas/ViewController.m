@@ -703,8 +703,8 @@ CoreAudioPlaybackState playbackState;
     [self.airPlayButton setAction:@selector(showAirPlayPopover:)];
 
     // Um gesto escondido que ninguém adivinha é um gesto que não existe.
-    self.airPlayButton.toolTip = NSLocalizedString(@"AirPlay. ⌘+clique reabre a sessão.",
-                                                   @"Tooltip do botão de AirPlay");
+    self.airPlayButton.toolTip = NSLocalizedString(@"airplay_button_tooltip",
+                                                   @"Dica do botão de AirPlay: explica o ⌘+clique");
 
     // Other initial setup code…
     [self requestNotificationPermission];
