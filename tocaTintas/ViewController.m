@@ -5472,7 +5472,7 @@ static _Atomic(double) gAtrasoDoHistograma = 0.0;
 // Tecto do atraso. O corte de deriva do ZPAirPlayStreamer não deixa o áudio em
 // trânsito passar dos seis segundos, e a latência pedida ao raop_play é um;
 // acima disto é mais provável que o relógio esteja a mentir do que o áudio
-// estar mesmo tanto tempo no ar.
+// estar mesmo tanto tempo em trânsito.
 static const double kZPAtrasoMaximoDoHistograma = 8.0;
 
 // Quanto tempo sem nada para desenhar antes de se apagarem as colunas. Em regime
@@ -5480,8 +5480,6 @@ static const double kZPAtrasoMaximoDoHistograma = 8.0;
 // dispara por acaso, só quando a linha de atraso está mesmo a encher.
 static const NSTimeInterval kCavaEsperaAteApagar = 0.2;
 
-// Interruptor de diagnóstico do fundo preto. A 0 a app comporta-se
-// normalmente; a 1 o -viewDidLoad não faz nada e a janela abre vazia.
 // Read data from the FIFO file and update the histogram
 - (void)readFifoDirectly {
     NSString *fifoPath = @"/var/tmp/cava_fifo";
