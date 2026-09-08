@@ -135,6 +135,28 @@ typedef struct {
     size_t pos;
 } MemoryBuffer;
 
+// Os quatro números do ReplayGain de uma faixa, tal como saem das etiquetas, e
+// nada mais: sem política aplicada, que essa é do ZPResolveReplayGain e pode
+// mudar nas preferências a meio de uma faixa.
+//
+// São dois sinalizadores e não um, porque são duas perguntas diferentes.
+//
+// O `pronto` diz que a leitura das etiquetas se chegou a fazer. O `lido` diz que
+// dela saiu alguma coisa. Uma faixa sem ReplayGain nenhum sai daqui com
+// `pronto` e sem `lido`, e é uma resposta boa: sem etiquetas o que se quer é
+// mesmo 0 dB — ganho unitário, nada de normalização —, e não «fica o da faixa
+// anterior», que era o que acontecia. Com um sinalizador só não se distinguia
+// isso de «a leitura ainda vem a caminho», e cada faixa sem etiquetas pagava uma
+// ida ao disco à conta da dúvida. Ver «ReplayGain adiantado», mais abaixo.
+typedef struct {
+    float trackGain;
+    float trackPeak;
+    float albumGain;
+    float albumPeak;
+    BOOL  lido;
+    BOOL  pronto;
+} ZPReplayGainLido;
+
 static int read_bytes(void *id, void *data, int bcount)
 {
     if (!id || !data || bcount <= 0) return 0;
@@ -229,6 +251,7 @@ static WavpackStreamReader memoryReader = {
 - (void)discardPrefetchedTrack;
 - (NSData *)prefetchedDataForTrack:(NSURL *)trackURL;
 - (NSData *)takePrefetchedDataForTrack:(NSURL *)trackURL;
+- (void)primeReplayGainForTrack:(NSURL *)trackURL;
 
 @property (nonatomic, strong) NSImageView *coverArtView;
 @property (nonatomic, strong) NSTextField *artistLabel;
@@ -263,6 +286,10 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSData *prefetchedData;
 @property (nonatomic, strong) NSURL *prefetchedTrackURL;
 @property (nonatomic, assign) uint64_t prefetchGeneration;
+// O ganho da faixa adiantada, lido na mesma ida ao disco que os bytes. É o que
+// permite o ganho estar aplicado antes do -play em vez de chegar a meio da
+// música — ver «ReplayGain adiantado».
+@property (nonatomic, assign) ZPReplayGainLido prefetchedGain;
 
 // Properties to cache the directory modification date and audio files
 @property (nonatomic, strong) NSDate *directoryModificationDate;
@@ -3116,6 +3143,13 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
 - (void)handleOpusPlayback:(NSURL *)trackURL {
     [self startBs2bIfNeeded];
 
+    // O ganho ANTES de tocar, e não depois. O tap multiplica as amostras à
+    // cabeça da cadeia, portanto tudo o que passe por lá antes de isto correr
+    // sai com o ganho da faixa anterior — ver «ReplayGain adiantado». Vai à
+    // frente do -takePrefetchedDataForTrack:, que esvazia a ranhura de onde este
+    // ganho vem.
+    [self primeReplayGainForTrack:trackURL];
+
     // Step 1: Clean up previous playback if necessary
     [self terminateOpusPlayback];
 
@@ -3416,11 +3450,17 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
 }
 
 - (void)extractAndDisplayFlacMetadataWithLibFLAC:(NSURL *)fileURL {
-    // Always default to 1.0 before reading metadata
-    self.replayGainValue = 0.0f;
-    self.replayGainPeak  = 0.0f;
-    self.replayGainAlbumValue = 0.0f;
-    self.replayGainAlbumPeak  = 0.0f;
+    // Aqui estavam os quatro campos a serem postos a zero. Parecia a defesa
+    // certa e era meio problema: punha-os a zero mas NÃO empurrava esse zero
+    // para o streamer, portanto o streamer ficava com o ganho da faixa anterior
+    // até chegar um push novo — e numa faixa sem etiquetas de ReplayGain nenhuma
+    // esse push não chegava nunca, e a faixa inteira tocava com o ganho da
+    // outra. Quem repõe agora é o -primeReplayGainForTrack:, antes do -play, e
+    // esse empurra sempre o que repõe.
+    //
+    // Esta leitura continua a servir a interface — etiquetas, capa, notificação
+    // — e volta a empurrar o ganho que encontrar. Chega tarde, e não faz mal
+    // nenhum: é o mesmo valor que já lá está.
 
     // Initialize the FLAC decoder
     FLAC__StreamDecoder *decoder = FLAC__stream_decoder_new();
@@ -6351,6 +6391,13 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     // Clear any previous Now Playing notifications
     [[UNUserNotificationCenter currentNotificationCenter] removePendingNotificationRequestsWithIdentifiers:@[@"NowPlaying"]];
 
+    // O ganho ANTES de tocar, e não depois. O tap multiplica as amostras à
+    // cabeça da cadeia, portanto tudo o que passe por lá antes de isto correr
+    // sai com o ganho da faixa anterior — ver «ReplayGain adiantado». Vai à
+    // frente do -takePrefetchedDataForTrack:, que esvazia a ranhura de onde este
+    // ganho vem.
+    [self primeReplayGainForTrack:trackURL];
+
     #ifdef DEBUG
     NSLog(@"Playing WAVPack file using AudioQueue and libwavpack.");
     #endif
@@ -6402,6 +6449,13 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     #ifdef DEBUG
     NSLog(@"Playing FLAC file using AVAudioPlayer.");
     #endif
+
+    // O ganho ANTES de tocar, e não depois. O tap multiplica as amostras à
+    // cabeça da cadeia, portanto tudo o que passe por lá antes de isto correr
+    // sai com o ganho da faixa anterior — ver «ReplayGain adiantado». Vai à
+    // frente do -takePrefetchedDataForTrack:, que esvazia a ranhura de onde este
+    // ganho vem.
+    [self primeReplayGainForTrack:trackURL];
 
     // Aqui também não se apaga nada — ver a nota em
     // -audioPlayerDidFinishPlaying:. Este era o segundo apagão da mesma
@@ -6466,6 +6520,13 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
 - (void)handleStandardAudioPlayback:(NSURL *)trackURL {
     NSError *error = nil;
 
+    // O ganho ANTES de tocar, e não depois. O tap multiplica as amostras à
+    // cabeça da cadeia, portanto tudo o que passe por lá antes de isto correr
+    // sai com o ganho da faixa anterior — ver «ReplayGain adiantado». Vai à
+    // frente do -takePrefetchedDataForTrack:, que esvazia a ranhura de onde este
+    // ganho vem.
+    [self primeReplayGainForTrack:trackURL];
+
     NSData *dataToUse = [self takePrefetchedDataForTrack:trackURL];
 
     if (dataToUse) {
@@ -6491,10 +6552,14 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     #endif
     [self startProgressBarUpdates];  // Update progress bar
     [self extractAndDisplayMetadataFromURL:trackURL];  // Extract and display metadata
-    self.replayGainValue = 0.0f;
-    self.replayGainPeak  = 0.0f;
-    self.replayGainAlbumValue = 0.0f;
-    self.replayGainAlbumPeak  = 0.0f;
+
+    // Aqui estavam quatro zeros. Punham os campos a zero DEPOIS de a extracção
+    // os ter lido, deixando o streamer com o ganho certo e o ViewController com
+    // zero — e o primeiro push que viesse por outra via (mudar a política de
+    // normalização nas preferências, ver -setupBs2bHeadphoneMonitoring) mandava
+    // 0 dB e a normalização desta faixa desaparecia sem aviso. Quem repõe os
+    // valores de raiz em cada faixa é agora o -primeReplayGainForTrack:, lá em
+    // cima, e esse empurra o que repõe.
 }
 
 // Start updating the progress bar every second
@@ -7636,11 +7701,176 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
 // corrente; quem mexe na ranhura faz o número avançar.
 
 // Deita fora o que estiver adiantado e invalida a leitura que esteja a caminho.
+#pragma mark - ReplayGain adiantado
+
+// Porque é que isto vive ao lado do adiantamento das faixas, e não junto ao
+// resto da leitura de etiquetas.
+//
+// O ganho é aplicado no tap do ZPAirPlayStreamer, à cabeça da cadeia: multiplica
+// as amostras no instante em que são capturadas do BlackHole. Logo tem de estar
+// no sítio ANTES de a primeira amostra da faixa nova lá passar — isto é, antes
+// do -play. Chegar um décimo de segundo depois é ouvir o princípio da faixa com
+// o ganho da anterior. Era o que acontecia: no FLAC a leitura das etiquetas só
+// era pedida depois do -play, e ainda por cima reabria o ficheiro pelo caminho,
+// com o -set_metadata_respond_all a arrastar a capa toda do disco atrás dela.
+//
+// A infra-estrutura para não pagar nada por isto já cá estava: o adiantamento lê
+// a faixa seguinte enquanto a actual toca. Faltava-lhe adiantar isto também. Um
+// ganho lido no -prefetchTrackAtURL:, na fila de utilidade e com uma faixa
+// inteira de antecedência, custa zero na transição; a leitura síncrona aqui
+// abaixo é o recurso para quem carrega numa faixa à sorte, que nunca chegou a
+// ser adiantada.
+//
+// Só se lêem as etiquetas, e não os metadados todos: nada de capas. É a
+// diferença entre uns milissegundos e um disco externo a servir megabytes.
+
+static const ZPReplayGainLido kZPReplayGainVazio = { 0.0f, 0.0f, 0.0f, 0.0f, NO, NO };
+
+// Um comentário Vorbis, no formato «CHAVE=VALOR». Serve o FLAC e o Opus, que
+// usam as mesmas etiquetas. O valor do ganho vem como «-5.66 dB»; o -floatValue
+// pára no espaço e é indiferente à localização, ao contrário do strtof, que
+// segue o LC_NUMERIC e leria «-5,66» de outra maneira.
+static void ZPAplicarComentarioVorbis(const char *bytes, size_t comprimento, ZPReplayGainLido *rg) {
+    if (!bytes || comprimento == 0) return;
+
+    // A entrada pode não vir terminada; copia-se com limite.
+    char entrada[256];
+    size_t n = MIN(comprimento, sizeof(entrada) - 1);
+    memcpy(entrada, bytes, n);
+    entrada[n] = '\0';
+
+    const char *igual = strchr(entrada, '=');
+    if (!igual) return;
+
+    NSString *valor = [NSString stringWithUTF8String:igual + 1];
+    if (!valor) return;
+
+    if (strncasecmp(entrada, "REPLAYGAIN_TRACK_GAIN=", 22) == 0) {
+        rg->trackGain = valor.floatValue;
+        rg->lido = YES;
+    } else if (strncasecmp(entrada, "REPLAYGAIN_TRACK_PEAK=", 22) == 0) {
+        rg->trackPeak = valor.floatValue;
+        rg->lido = YES;
+    } else if (strncasecmp(entrada, "REPLAYGAIN_ALBUM_GAIN=", 22) == 0) {
+        rg->albumGain = valor.floatValue;
+        rg->lido = YES;
+    } else if (strncasecmp(entrada, "REPLAYGAIN_ALBUM_PEAK=", 22) == 0) {
+        rg->albumPeak = valor.floatValue;
+        rg->lido = YES;
+    }
+}
+
+// FLAC pela interface simples do libFLAC: lê os cabeçalhos dos blocos e salta
+// por cima do que não interessa, portanto não toca na capa nem na tabela de
+// procura. É outra coisa que o -set_metadata_respond_all do
+// -extractAndDisplayFlacMetadataWithLibFLAC: — que continua a servir a interface
+// — não pode ser.
+static ZPReplayGainLido ZPLerReplayGainFlac(NSURL *url) {
+    ZPReplayGainLido rg = kZPReplayGainVazio;
+
+    FLAC__StreamMetadata *etiquetas = NULL;
+    if (!FLAC__metadata_get_tags(url.path.fileSystemRepresentation, &etiquetas) || !etiquetas) {
+        return rg;
+    }
+
+    const FLAC__StreamMetadata_VorbisComment *vc = &etiquetas->data.vorbis_comment;
+    for (FLAC__uint32 i = 0; i < vc->num_comments; i++) {
+        ZPAplicarComentarioVorbis((const char *)vc->comments[i].entry,
+                                  (size_t)vc->comments[i].length, &rg);
+    }
+
+    FLAC__metadata_object_delete(etiquetas);
+    return rg;
+}
+
+static ZPReplayGainLido ZPLerReplayGainOpus(NSURL *url, NSData *dados) {
+    ZPReplayGainLido rg = kZPReplayGainVazio;
+
+    int erro = 0;
+    OggOpusFile *ficheiro = dados
+        ? op_open_memory(dados.bytes, dados.length, &erro)
+        : op_open_file(url.path.fileSystemRepresentation, &erro);
+    if (erro != 0 || !ficheiro) return rg;
+
+    const OpusTags *etiquetas = op_tags(ficheiro, -1);
+    if (etiquetas) {
+        for (int i = 0; i < etiquetas->comments; i++) {
+            ZPAplicarComentarioVorbis(etiquetas->user_comments[i],
+                                      (size_t)etiquetas->comment_lengths[i], &rg);
+        }
+    }
+
+    op_free(ficheiro);
+    return rg;
+}
+
+static ZPReplayGainLido ZPLerReplayGainWavPack(NSURL *url, NSData *dados) {
+    ZPReplayGainLido rg = kZPReplayGainVazio;
+
+    char erro[80];
+    MemoryBuffer buffer = { .data = NULL, .size = 0, .pos = 0 };
+    WavpackContext *wpc = NULL;
+
+    if (dados) {
+        buffer.data = dados.bytes;
+        buffer.size = dados.length;
+        wpc = WavpackOpenFileInputEx(&memoryReader, &buffer, NULL, erro, OPEN_TAGS, 0);
+    } else {
+        wpc = WavpackOpenFileInput(url.path.fileSystemRepresentation, erro, OPEN_TAGS, 0);
+    }
+    if (!wpc) return rg;
+
+    struct { const char *chave; float *destino; } campos[] = {
+        { "replaygain_track_gain", &rg.trackGain },
+        { "replaygain_track_peak", &rg.trackPeak },
+        { "replaygain_album_gain", &rg.albumGain },
+        { "replaygain_album_peak", &rg.albumPeak },
+    };
+
+    for (size_t i = 0; i < sizeof(campos) / sizeof(campos[0]); i++) {
+        char valor[64];
+        int comprimento = WavpackGetTagItem(wpc, campos[i].chave, valor, sizeof(valor));
+        if (comprimento <= 0) continue;
+        NSString *texto = [NSString stringWithUTF8String:valor];
+        if (!texto) continue;
+        *(campos[i].destino) = texto.floatValue;
+        rg.lido = YES;
+    }
+
+    WavpackCloseFile(wpc);
+    return rg;
+}
+
+// Os bytes vêm da ranhura do adiantamento quando lá estiverem: poupa a segunda
+// ida ao disco. O FLAC fica de fora porque a interface simples do libFLAC só
+// aceita caminhos — e é a que não lê a capa, que é o que aqui interessa.
+//
+// Os formatos que o AVFoundation trata (MP3, AAC, ALAC) não estão aqui: o
+// ReplayGain deles sai de uma leitura assíncrona do AVAsset que o
+// -extractAndDisplayMetadataFromURL: já faz, e duplicar aqui as duas dúzias de
+// casos especiais dessa leitura era pior do que o problema. Nesses o ganho
+// continua a chegar depois do arranque, como até aqui.
+static ZPReplayGainLido ZPLerReplayGain(NSURL *url, NSData *dados) {
+    NSString *extensao = url.pathExtension.lowercaseString;
+
+    ZPReplayGainLido rg = kZPReplayGainVazio;
+    if ([extensao isEqualToString:@"flac"])      rg = ZPLerReplayGainFlac(url);
+    else if ([extensao isEqualToString:@"opus"]) rg = ZPLerReplayGainOpus(url, dados);
+    else if ([extensao isEqualToString:@"wv"])   rg = ZPLerReplayGainWavPack(url, dados);
+
+    // Correu, e é isso que `pronto` quer dizer — mesmo para os formatos que aqui
+    // não se lêem e mesmo para uma faixa sem etiquetas nenhumas. Quem receber
+    // isto não tem de voltar ao disco à espera de melhor resposta.
+    rg.pronto = YES;
+    return rg;
+}
+
 - (void)discardPrefetchedTrack {
     @synchronized (self) {
         self.prefetchGeneration++;
         self.prefetchedTrackURL = nil;
         self.prefetchedData = nil;
+        self.prefetchedGain = kZPReplayGainVazio;
     }
 }
 
@@ -7662,6 +7892,7 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
         geracao = self.prefetchGeneration;
         self.prefetchedTrackURL = trackURL;
         self.prefetchedData = nil;  // os bytes que lá estavam são de outra faixa
+        self.prefetchedGain = kZPReplayGainVazio;   // e o ganho também
     }
 
     // QOS_CLASS_UTILITY, e não a prioridade «background» que aqui estava: o
@@ -7671,11 +7902,23 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     // que não disputa a thread principal, mas sem o estrangulamento do disco.
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         NSData *data = [NSData dataWithContentsOfURL:trackURL options:NSDataReadingMappedIfSafe error:nil];
+
+        // E as etiquetas de ReplayGain, aqui e não no arranque da faixa. É este
+        // o ponto do exercício: quando a transição chegar, o ganho já está
+        // escolhido e o -primeReplayGainForTrack: não vai ao disco. Aqui há uma
+        // faixa inteira de folga, e esta fila não disputa o thread principal.
+        //
+        // O `data` vai à frente de propósito, para o leitor de etiquetas do
+        // WavPack e do Opus se servir dos bytes que acabaram de ser lidos em vez
+        // de abrir o ficheiro outra vez.
+        ZPReplayGainLido ganho = ZPLerReplayGain(trackURL, data);
+
         @synchronized (self) {
             if (self.prefetchGeneration != geracao) {
                 return;  // a ranhura mudou de faixa enquanto se lia
             }
             self.prefetchedData = data;
+            self.prefetchedGain = ganho;
         }
     });
 }
@@ -7704,8 +7947,60 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
         self.prefetchGeneration++;
         self.prefetchedTrackURL = nil;
         self.prefetchedData = nil;
+        self.prefetchedGain = kZPReplayGainVazio;
         return data;
     }
+}
+
+// O ganho da faixa adiantada, se for esta a faixa e se a leitura já tiver
+// chegado. Não esvazia a ranhura: quem a esvazia é o -takePrefetchedDataForTrack:
+// que vem logo a seguir, e o -primeReplayGainForTrack: corre antes dele.
+- (BOOL)prefetchedGainForTrack:(NSURL *)trackURL into:(ZPReplayGainLido *)saida {
+    @synchronized (self) {
+        if (!trackURL || ![self.prefetchedTrackURL isEqual:trackURL]) return NO;
+        ZPReplayGainLido ganho = self.prefetchedGain;
+        if (!ganho.pronto) return NO;   // a leitura ainda vem a caminho
+        if (saida) *saida = ganho;
+        return YES;
+    }
+}
+
+// Põe o ganho desta faixa no streamer ANTES de ela começar a tocar.
+//
+// Tem de ser chamado à cabeça de cada -handle…Playback:, antes do
+// -takePrefetchedDataForTrack: (que esvazia a ranhura) e antes de o leitor
+// arrancar. Chegar depois do -play é o defeito que isto existe para corrigir.
+//
+// Repara que se empurra sempre, mesmo quando não se leu nada: uma faixa sem
+// etiquetas de ReplayGain quer 0 dB — ganho unitário —, e não o ganho da faixa
+// anterior. Era esse o outro meio do problema: os campos eram postos a zero mas
+// nunca empurrados, portanto o streamer ficava com o valor antigo até chegar um
+// push novo, que numa faixa sem etiquetas não chegava nunca.
+- (void)primeReplayGainForTrack:(NSURL *)trackURL {
+    if (!trackURL) return;
+
+    ZPReplayGainLido ganho;
+    if ([self prefetchedGainForTrack:trackURL into:&ganho]) {
+        #ifdef DEBUG
+        NSLog(@"[ReplayGain] %@: ganho vindo do adiantamento, sem ir ao disco (%@).",
+              trackURL.lastPathComponent, ganho.lido ? @"com etiquetas" : @"sem etiquetas");
+        #endif
+    } else {
+        // Faixa que não foi adiantada — um clique numa qualquer da lista. Só as
+        // etiquetas, que é uma leitura pequena; a capa e o resto continuam a vir
+        // depois, pelo caminho do costume.
+        ganho = ZPLerReplayGain(trackURL, [self prefetchedDataForTrack:trackURL]);
+        #ifdef DEBUG
+        NSLog(@"[ReplayGain] %@: etiquetas lidas no arranque (faixa não adiantada).",
+              trackURL.lastPathComponent);
+        #endif
+    }
+
+    self.replayGainValue      = ganho.trackGain;
+    self.replayGainPeak       = ganho.trackPeak;
+    self.replayGainAlbumValue = ganho.albumGain;
+    self.replayGainAlbumPeak  = ganho.albumPeak;
+    [self pushReplayGainToStreamer];
 }
 
 // Qual é a faixa que vem a seguir à actual, na fila que estiver em vigor. É a

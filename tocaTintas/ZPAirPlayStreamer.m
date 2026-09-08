@@ -726,9 +726,29 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
     self.inputPipe = nil;
     self.raopTask = nil;
 
+    // Parar a captura, e não só o envio. Sem isto o engine ficava a correr e o
+    // tap a produzir para um tampão que já não tinha consumidor nenhum — o
+    // thread consumidor morre no `while (self.isStreaming)` ou na excepção do
+    // tubo fechado. Para o Apple TV isso são o segundo de pausa daqui de baixo
+    // mais os oito segundos do acordar, mais do que suficiente para encher os
+    // dez segundos do tampão. O -arrancarTransmissao limpa-o, portanto o mal já
+    // não passa daqui; mas capturar para o vazio durante nove segundos é gastar
+    // um thread de áudio e uma conversão de formato por nada.
+    //
+    // No thread principal de propósito. Isto tanto pode ser chamado do
+    // terminationHandler do NSTask como da fila do temporizador de saúde, e o
+    // resto do ciclo de vida do engine — o -stopStreaming, o observador de
+    // reconfiguração — vive todo no principal. Como o relançamento aqui abaixo
+    // também vai para o principal, e um segundo depois, a paragem fica garantida
+    // à frente dele: sem essa ordem, o -startOrUpdateAudioCapture podia ver o
+    // engine ainda a correr, sair pela porta do «já está» e deixar o tap velho.
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [weakSelf stopAudioCaptureIfNeeded];
+    });
+
     // Pequena pausa para não entrar em ciclo apertado se o alvo estiver
     // mesmo inacessível (cada tentativa também passa pelo wake-up)
-    __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         [weakSelf startStreaming];
@@ -1486,6 +1506,24 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
     // ele, e o nosso das tramas entregues tem de recomeçar ao mesmo tempo, senão
     // a diferença entre os dois — que é o áudio em trânsito — vem do fluxo
     // anterior.
+    //
+    // O tampão vai junto, e é aqui que está o essencial: repor os contadores
+    // deixando lá áudio do fluxo anterior é a maneira mais certa de estragar a
+    // conta do atraso. Esse áudio foi capturado ANTES do reset, portanto não
+    // conta em `capturadas` — mas vai para a rede e conta em `blocos`. A partir
+    // daí `enviadas` é maior do que `uteis` de forma permanente, o `emTransito`
+    // fica preso no zero da guarda, e o Δ colapsa na latência nominal e nunca
+    // mais sai de lá: um segundo redondo, plano, para o resto da sessão. Era
+    // isto que punha o histograma à frente do som no Apple TV, e só no Apple TV
+    // — é ele que dorme, é ele que falha a primeira ligação, é ele que passa
+    // pelo -restartStreamingAfterFailure que enchia o tampão.
+    //
+    // E era também isto que fazia o ⌘+clique não servir de nada: o
+    // -reabrirSessaoDeAirPlay reaproveita o mesmo streamer, portanto sem esta
+    // limpeza a reabertura reproduzia o defeito em vez de o corrigir. Trocar de
+    // aparelho corrigia por acidente, porque cada selecção cria um streamer
+    // novo — e um tampão novo com ele.
+    TPCircularBufferClear(&_circularBuffer);
     atomic_store(&_bytesCapturados, 0);
     atomic_store(&_bytesCortadosTotal, 0);
     atomic_store(&_bytesEntreguesAoRaop, 0);
@@ -1763,6 +1801,14 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
                          block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf || !buffer || buffer.frameLength == 0) return;
+
+        // Rede de segurança: sem transmissão não há para onde isto ir, e o que
+        // aqui entrasse ficava no tampão à espera do fluxo seguinte — que é
+        // precisamente o áudio velho que desalinhava a conta do atraso. O
+        // -stopAudioCaptureIfNeeded já tira o tap; isto cobre o intervalo entre
+        // baixar a bandeira e o tap sair mesmo, e qualquer caminho que se
+        // esqueça de o tirar.
+        if (!strongSelf.isStreaming) return;
 
         AVAudioPCMBuffer *floatBuffer = strongSelf.floatBuffer;
         AVAudioPCMBuffer *convertedBuffer = strongSelf.int16Buffer;

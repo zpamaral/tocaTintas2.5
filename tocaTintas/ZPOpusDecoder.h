@@ -31,7 +31,6 @@ SOFTWARE.
 
 
 // Forward declaration to avoid circular dependency
-@class ZPAirPlayStreamer;
 
 @interface ZPOpusDecoder : NSObject  // Ensure it inherits from NSObject
 
@@ -40,8 +39,26 @@ SOFTWARE.
 @property (nonatomic, strong) NSString *title;
 @property (nonatomic, strong) NSString *track;   // Add track property
 @property (nonatomic, strong) NSImage *albumArt;
-@property (atomic, strong) ZPAirPlayStreamer *airPlayStreamer;
+/// O ReplayGain lido das etiquetas, sem política aplicada.
+///
+/// Aqui esteve um `airPlayStreamer` próprio, criado com `[[ZPAirPlayStreamer
+/// alloc] init]` e alimentado com o ganho desta faixa. Não servia para nada, por
+/// duas razões de uma vez: não era o streamer que estava a transmitir — esse é o
+/// do ViewController —, e como a classe não tem `-init`, só
+/// `-initWithIPAddress:port:replayGainValue:`, o objecto saía meio construído,
+/// sem tampão nem engine. O resultado é que uma faixa Opus tocava do princípio
+/// ao fim com o ganho que a faixa anterior tinha deixado.
+///
+/// Agora quem empurra é o ViewController, pelo -primeReplayGainForTrack:, e
+/// antes de a faixa começar. Isto fica só como leitura, para quem a quiser.
+///
+/// Um pico a zero significa «desconhecido», e os valores de álbum a zero contam
+/// como ausentes — é a convenção do ZPResolveReplayGain, que é quem resolve o
+/// par a aplicar a partir destes quatro.
 @property (atomic, assign) float replayGainValue;
+@property (atomic, assign) float replayGainPeak;
+@property (atomic, assign) float replayGainAlbumValue;
+@property (atomic, assign) float replayGainAlbumPeak;
 
 // Method to initialize decoder with an Opus file
 - (instancetype)initWithFilePath:(NSString *)filePath;

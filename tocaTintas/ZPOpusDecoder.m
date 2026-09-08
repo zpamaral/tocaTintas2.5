@@ -32,7 +32,6 @@ SOFTWARE.
 #import <Cocoa/Cocoa.h>
 #import "ZPOpusDecoder.h"
 #import "PreferencesWindowController.h"   // política de normalização e ZPResolveReplayGain
-#import "ZPAirPlayStreamer.h"
 #import <Foundation/Foundation.h> // For base64 decoding
 
 @implementation ZPOpusDecoder {
@@ -47,15 +46,6 @@ SOFTWARE.
     self = [super init];
     if (self) {
         filePath = [path copy];
-
-        // Initialize airPlayStreamer. Resolved problem with running the track gain updater.
-        self.airPlayStreamer = [[ZPAirPlayStreamer alloc] init];
-        if (!self.airPlayStreamer) {
-            #ifdef DEBUG
-            NSLog(@"[ReplayGain] Opus failed to initialize AirPlayStreamer.");
-            #endif
-            return nil;
-        }
 
         __block int error = 0;  // Use __block to allow modification inside the block
 
@@ -82,14 +72,6 @@ SOFTWARE.
     self = [super init];
     if (self) {
         memoryData = [data copy];
-
-        self.airPlayStreamer = [[ZPAirPlayStreamer alloc] init];
-        if (!self.airPlayStreamer) {
-            #ifdef DEBUG
-            NSLog(@"[ReplayGain] Opus failed to initialize AirPlayStreamer.");
-            #endif
-            return nil;
-        }
 
         __block int error = 0;
         __weak typeof(self) weakSelf = self;
@@ -207,24 +189,20 @@ SOFTWARE.
     // Execute the block synchronously
     dispatch_sync(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), decodeBlock);
 
-    // Update properties on the main thread
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (self.airPlayStreamer) {
-            // Store ReplayGain in the property
-            self.replayGainValue = replayGainValue;
-
-            #ifdef DEBUG
-            NSLog(@"[ReplayGain] Updating AirPlayStreamer with replay gain: %.2f", self.replayGainValue);
-            #endif
-            float ganho = 0.0f, pico = 0.0f;
-            ZPResolveReplayGain(replayGainValue, replayGainPeak,
-                                replayGainAlbum, replayGainAlbumPeak,
-                                &ganho, &pico);
-            [self.airPlayStreamer updateReplayGainValue:ganho trackPeak:pico];
-        } else {
-            NSLog(@"[ReplayGain] Opus error airPlayStreamer is nil when updating replay gain.");
-        }
-    });
+    // O ganho fica guardado, e mais nada: quem o entrega ao streamer é o
+    // ViewController, no -primeReplayGainForTrack:, e fá-lo antes de a faixa
+    // arrancar. Daqui saía um push para um ZPAirPlayStreamer criado por esta
+    // classe — que não era o que transmitia, e ainda por cima estava meio
+    // construído por vir de um `-init` que a classe não tem. Uma faixa Opus
+    // tocava inteira com o ganho da anterior por causa disto.
+    self.replayGainValue      = replayGainValue;
+    self.replayGainPeak       = replayGainPeak;
+    self.replayGainAlbumValue = replayGainAlbum;
+    self.replayGainAlbumPeak  = replayGainAlbumPeak;
+    #ifdef DEBUG
+    NSLog(@"[ReplayGain] Opus: ganho lido %.2f dB (pico %.4f), álbum %.2f/%.4f.",
+          replayGainValue, replayGainPeak, replayGainAlbum, replayGainAlbumPeak);
+    #endif
 
     return success;
 }
