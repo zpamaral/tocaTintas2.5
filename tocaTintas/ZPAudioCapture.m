@@ -472,10 +472,15 @@ static NSData *ZPWavHeader(double sampleRate, NSUInteger channels, unsigned long
         }
     }];
 
-    [inputNode installTapOnBus:0
-                    bufferSize:4096
-                        format:inputFormat
-                         block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
+    // A versão sem «error:» ficou obsoleta no macOS 27, e a nova é melhor do que
+    // uma simples troca de nome: a antiga falhava com excepção, esta diz o que
+    // correu mal e deixa-nos registá-lo.
+    NSError *erroDoTap = nil;
+    BOOL tapInstalado = [inputNode installTapOnBus:0
+                                        bufferSize:4096
+                                            format:inputFormat
+                                             error:&erroDoTap
+                                             block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf || !strongSelf.isRecording || buffer.frameLength == 0) {
             return;
@@ -519,6 +524,12 @@ static NSData *ZPWavHeader(double sampleRate, NSUInteger channels, unsigned long
             strongSelf.recordDataBytes += floatData.length;
         });
     }];
+
+    if (!tapInstalado) {
+        #ifdef DEBUG
+        NSLog(@"[Audio Capture] Não foi possível instalar o tap: %@", erroDoTap.localizedDescription);
+        #endif
+    }
 }
 
 - (void)dealloc {

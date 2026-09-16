@@ -679,7 +679,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -739,7 +739,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -758,7 +758,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 3.1.0;
+				CURRENT_PROJECT_VERSION = 3.2.0;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = FJ238DJ67E;
 				ENABLE_APP_SANDBOX = NO;
@@ -780,8 +780,8 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 3.1.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 3.2.0;
 				OTHER_CFLAGS = "-Wno-documentation";
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -806,7 +806,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 3.1.0;
+				CURRENT_PROJECT_VERSION = 3.2.0;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = FJ238DJ67E;
 				ENABLE_APP_SANDBOX = NO;
@@ -832,8 +832,8 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 3.1.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 3.2.0;
 				OTHER_CFLAGS = "-Wno-documentation";
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -853,7 +853,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ZPQLverwv/ZPQLverwv.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3.1.0;
+				CURRENT_PROJECT_VERSION = 3.2.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -874,8 +874,8 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 3.1.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 3.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPQLverwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -888,7 +888,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ZPQLverwv/ZPQLverwv.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3.1.0;
+				CURRENT_PROJECT_VERSION = 3.2.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -908,8 +908,8 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 3.1.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 3.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPQLverwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -922,7 +922,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ZPQLiconwv/ZPQLiconwv.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3.1.0;
+				CURRENT_PROJECT_VERSION = 3.2.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -943,8 +943,8 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 3.1.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 3.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPQLiconwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -962,7 +962,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ZPQLiconwv/ZPQLiconwv.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3.1.0;
+				CURRENT_PROJECT_VERSION = 3.2.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -982,8 +982,8 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 3.1.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 3.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPQLiconwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -1002,7 +1002,7 @@
 				CODE_SIGN_ENTITLEMENTS = ZPSpotLightwv/ZPSpotLightwv.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3.1.0;
+				CURRENT_PROJECT_VERSION = 3.2.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -1023,8 +1023,8 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 3.1.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 3.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPSpotLightwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1038,7 +1038,7 @@
 				CODE_SIGN_ENTITLEMENTS = ZPSpotLightwv/ZPSpotLightwv.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3.1.0;
+				CURRENT_PROJECT_VERSION = 3.2.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -1058,8 +1058,8 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
-				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 3.1.0;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MARKETING_VERSION = 3.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPSpotLightwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

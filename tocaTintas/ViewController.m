@@ -36,6 +36,7 @@ SOFTWARE.
 #import <TPCircularBuffer/TPCircularBuffer.h>
 
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/QuartzCore.h>   // cantos arredondados no vidro da lista
 #import <CoreServices/CoreServices.h>   // FSEvents, para vigiar a pasta de músicas
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "ViewController.h"   // Objective-C header
@@ -2985,14 +2986,7 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
     NSOpenPanel *openPanel = [NSOpenPanel openPanel];
     
     // Set allowed content types using UTType
-    if (@available(macOS 11.0, *)) {
-        openPanel.allowedContentTypes = @[[UTType typeWithFilenameExtension:@"m3u"]];
-    } else {
-        // Fallback: Earlier macOS versions do not support UTType, but this case would not happen because macOS 12 supports only allowedContentTypes
-        #ifdef DEBUG
-        NSLog(@"macOS version not supported. Requires macOS 11.0 or later.");
-        #endif
-    }
+    openPanel.allowedContentTypes = @[[UTType typeWithFilenameExtension:@"m3u"]];
 
     // Present the open panel to the user
     [openPanel beginWithCompletionHandler:^(NSModalResponse result) {
@@ -5377,6 +5371,119 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     }
     // Update the combo box items
     [self createComboBox];
+
+    // A janela da lista costuma já existir quando esta notificação sai, e
+    // apanhá-la aqui poupa o fotograma em que ela apareceria com o aspecto
+    // antigo. Quando ainda não existe, fica para o ciclo de eventos a seguir:
+    // o modo de seguimento do rato é dos modos comuns, portanto o bloco pega
+    // mesmo com a lista aberta e o AppKit a correr o seu ciclo lá dentro.
+    if (![self vidrarListaDoComboBox]) {
+        __weak typeof(self) fraco = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [fraco vidrarListaDoComboBox];
+        });
+    }
+}
+
+#pragma mark - Vidro na lista do combo box
+
+// O popover do AirPlay ficou de vidro sozinho porque um NSPopover adopta o
+// material do sistema. A lista do combo box não é um popover: é uma janela que
+// o AppKit desenha por sua conta, e para a qual não há API de material nenhuma.
+// O que se segue vai buscá-la pela forma — uma janela sem barra de título, da
+// largura do campo, com uma tabela dentro de uma scroll view — e veste-lhe o
+// conteúdo de vidro. Não há aqui um único selector privado: se um macOS futuro
+// mudar a estrutura interna, não se encontra nada, a lista fica com o aspecto
+// de sempre e não se parte coisa nenhuma.
+
+static NSString * const kZPIdentificadorDoVidroDaLista = @"ZPVidroDaListaDoComboBox";
+static const CGFloat kZPRaioDaListaDoComboBox = 10;
+
+// Quanto a largura da janela pode afastar-se da do campo antes de deixarmos de
+// a reconhecer. A lista nasce com a largura do combo box; a folga é para o caso
+// de o AppKit lhe somar uns pontos para a barra de deslocamento.
+static const CGFloat kZPFolgaDeLarguraDaLista = 40;
+
+static NSScrollView *ZPScrollViewComTabela(NSView *vista) {
+    if ([vista isKindOfClass:[NSScrollView class]]
+        && [((NSScrollView *)vista).documentView isKindOfClass:[NSTableView class]]) {
+        return (NSScrollView *)vista;
+    }
+    for (NSView *filho in vista.subviews) {
+        NSScrollView *achada = ZPScrollViewComTabela(filho);
+        if (achada) return achada;
+    }
+    return nil;
+}
+
+- (NSWindow *)janelaDaListaDoComboBox {
+    if (!self.songComboBox) return nil;
+    CGFloat larguraDoCampo = NSWidth(self.songComboBox.frame);
+
+    for (NSWindow *janela in [NSApp windows]) {
+        if (janela == self.view.window) continue;
+        if (janela.styleMask & NSWindowStyleMaskTitled) continue;
+        if (fabs(NSWidth(janela.frame) - larguraDoCampo) > kZPFolgaDeLarguraDaLista) continue;
+        if (!janela.contentView) continue;
+        if (!ZPScrollViewComTabela(janela.contentView)) continue;
+        return janela;
+    }
+    return nil;
+}
+
+// Devolve NÃO quando ainda não há janela para vestir, para quem chama saber que
+// vale a pena voltar a tentar.
+- (BOOL)vidrarListaDoComboBox {
+    NSWindow *janela = [self janelaDaListaDoComboBox];
+    if (!janela) return NO;
+
+    NSView *conteudo = janela.contentView;
+
+    // A janela é reaproveitada de abertura para abertura: se já lá está o
+    // vidro, não há nada a fazer.
+    if ([conteudo.identifier isEqualToString:kZPIdentificadorDoVidroDaLista]) return YES;
+
+    // Sem isto o vidro fica atrás de um rectângulo opaco e não se vê nada.
+    janela.opaque = NO;
+    janela.backgroundColor = [NSColor clearColor];
+
+    NSScrollView *scroll = ZPScrollViewComTabela(conteudo);
+    scroll.drawsBackground = NO;
+    scroll.backgroundColor = [NSColor clearColor];
+    scroll.borderType = NSNoBorder;
+    scroll.contentView.drawsBackground = NO;
+    ((NSTableView *)scroll.documentView).backgroundColor = [NSColor clearColor];
+
+    // O conteúdo antigo passa a viver dentro do vidro e o vidro passa a ser o
+    // conteúdo da janela: assim não sobra nada por baixo que possa pintar por
+    // cima do material. Os cantos são arredondados no conteúdo também, senão as
+    // linhas da tabela passavam por fora da curva do vidro.
+    NSGlassEffectView *vidro = [self vistaDeVidroComRaio:kZPRaioDaListaDoComboBox];
+    vidro.identifier = kZPIdentificadorDoVidroDaLista;
+    janela.contentView = vidro;
+
+    conteudo.frame = vidro.bounds;
+    conteudo.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    conteudo.wantsLayer = YES;
+    conteudo.layer.cornerRadius = kZPRaioDaListaDoComboBox;
+    conteudo.layer.masksToBounds = YES;
+    conteudo.layer.cornerCurve = kCACornerCurveContinuous;
+
+    vidro.contentView = conteudo;
+    return YES;
+}
+
+- (NSGlassEffectView *)vistaDeVidroComRaio:(CGFloat)raio {
+    NSGlassEffectView *vidro = [[NSGlassEffectView alloc] init];
+    vidro.cornerRadius = raio;
+    vidro.style = NSGlassEffectViewStyleRegular;
+
+    // Vidro que serve de fundo a controlos com que se mexe responde ao toque;
+    // é o que a Apple pede para os casos como este, em que o que está lá dentro
+    // é uma lista para clicar. Só existe do macOS 27 para cima.
+    vidro.effectIsInteractive = YES;
+
+    return vidro;
 }
 
 - (void)comboBoxSelectionChanged:(NSComboBox *)comboBox {

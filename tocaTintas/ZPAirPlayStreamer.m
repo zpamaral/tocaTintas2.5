@@ -1795,10 +1795,15 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
 
     __weak typeof(self) weakSelf = self;
 
-    [inputNode installTapOnBus:0
-                    bufferSize:4096
-                        format:inputFormat
-                         block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
+    // A versão sem «error:» ficou obsoleta no macOS 27, e a nova é melhor do que
+    // uma simples troca de nome: a antiga falhava com excepção, esta diz o que
+    // correu mal e deixa-nos registá-lo.
+    NSError *erroDoTap = nil;
+    BOOL tapInstalado = [inputNode installTapOnBus:0
+                                        bufferSize:4096
+                                            format:inputFormat
+                                             error:&erroDoTap
+                                             block:^(AVAudioPCMBuffer *buffer, AVAudioTime *when) {
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf || !buffer || buffer.frameLength == 0) return;
 
@@ -1876,6 +1881,12 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
             atomic_fetch_add(&strongSelf->_bytesCapturados, (uint64_t)byteCount);
         }
     }];
+
+    if (!tapInstalado) {
+        #ifdef DEBUG
+        NSLog(@"[Streaming] Não foi possível instalar o tap: %@", erroDoTap.localizedDescription);
+        #endif
+    }
 }
 
 #pragma mark - Compensação do volume do sistema
