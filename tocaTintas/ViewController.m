@@ -863,23 +863,32 @@ CoreAudioPlaybackState playbackState;
     [pilha layoutSubtreeIfNeeded];
 }
 
+// Largura mínima e máxima do popover. O máximo é o que impede um «Apple TV da
+// sala de estar do Bruno» de esticar a lista por meio ecrã: a partir daqui o
+// nome corta-se com reticências e o nome inteiro fica na dica.
+static const CGFloat kZPLarguraMinimaDoPopoverDeAirPlay = 200;
+static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
+
 - (NSViewController *)createAirPlayPopoverContentController {
     NSViewController *popoverContentController = [[NSViewController alloc] init];
     NSStackView *stackView = [[NSStackView alloc] init];
     stackView.orientation = NSUserInterfaceLayoutOrientationVertical;
-    stackView.spacing = 0;
-    stackView.edgeInsets = NSEdgeInsetsMake(10, 10, 10, 10); // Add padding around edges
-    stackView.alignment = NSLayoutAttributeLeading;
+    stackView.spacing = 6;
+    stackView.edgeInsets = NSEdgeInsetsMake(12, 14, 12, 14);
 
-    // Populate stack view with device names from the file
+    // «Width», e não «Leading»: assim todas as linhas ficam com a largura da
+    // mais larga e as caixas alinham numa coluna à direita. Com o alinhamento
+    // à esquerda cada linha media-se por si, e as caixas ficavam em escada —
+    // quando chegavam a caber, que era o outro problema.
+    stackView.alignment = NSLayoutAttributeWidth;
+
     [self populateAirPlayDevicesInStackView:stackView];
-    
-    // Set the stack view as the content of the view controller
+
     popoverContentController.view = stackView;
-    
-    // Apply width and height constraints to match contentSize
-    [stackView.widthAnchor constraintGreaterThanOrEqualToConstant:140].active = YES;  // Minimum width with padding
-    [stackView.heightAnchor constraintGreaterThanOrEqualToConstant:25].active = YES; // Minimum height with padding
+
+    [stackView.widthAnchor constraintGreaterThanOrEqualToConstant:kZPLarguraMinimaDoPopoverDeAirPlay].active = YES;
+    [stackView.widthAnchor constraintLessThanOrEqualToConstant:kZPLarguraMaximaDoPopoverDeAirPlay].active = YES;
+    [stackView.heightAnchor constraintGreaterThanOrEqualToConstant:25].active = YES;
     return popoverContentController;
 }
 
@@ -895,45 +904,73 @@ CoreAudioPlaybackState playbackState;
     }
 
     for (ZPAparelhoAirPlay *aparelho in dispositivos) {
-        NSString *deviceName = aparelho.nome;
-
-        // Horizontal stack for text and checkbox
-        NSStackView *deviceStack = [[NSStackView alloc] init];
-        deviceStack.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        deviceStack.distribution = NSStackViewDistributionFillProportionally;
-        deviceStack.spacing = 0; // No spacing between elements
-        deviceStack.edgeInsets = NSEdgeInsetsMake(0, 0, 0, 0); // No padding
-
-        // Device name label
-        NSTextField *deviceLabel = [[NSTextField alloc] init];
-        deviceLabel.stringValue = deviceName;
-        deviceLabel.editable = NO;
-        deviceLabel.bezeled = NO;
-        deviceLabel.drawsBackground = NO;
-        deviceLabel.alignment = NSTextAlignmentLeft;
-        deviceLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        [deviceLabel setFont:[NSFont systemFontOfSize:13]];
-        [deviceStack addArrangedSubview:deviceLabel];
-
-        // Flexible space to push checkbox to the right
-        NSView *flexibleSpace = [[NSView alloc] init];
-        [deviceStack addArrangedSubview:flexibleSpace];
-
-        // Checkbox
-        NSButton *deviceCheckbox = [NSButton checkboxWithTitle:@"" target:self action:@selector(selectAirPlayDevice:)];
-        deviceCheckbox.identifier = deviceName;
-
-        // Set checkbox state
-        if ([deviceName isEqualToString:self.selectedDeviceName]) {
-            deviceCheckbox.state = NSControlStateValueOn;
-            self.currentlySelectedCheckbox = deviceCheckbox;
-        } else {
-            deviceCheckbox.state = NSControlStateValueOff;
-        }
-
-        [deviceStack addArrangedSubview:deviceCheckbox];
-        [stackView addArrangedSubview:deviceStack];
+        [stackView addArrangedSubview:[self linhaDeAparelhoAirPlay:aparelho.nome]];
     }
+}
+
+// Uma linha da lista: o nome à esquerda, a caixa à direita, e uma folga fixa
+// entre os dois. A distribuição era «FillProportionally», que reparte a largura
+// pelo tamanho natural de cada vista — com um nome comprido a caixa ficava com
+// uma fatia de poucos pontos e desaparecia da vista. Com «Fill» mais as
+// prioridades abaixo, quem cede é sempre o texto, e a caixa mantém o tamanho.
+- (NSStackView *)linhaDeAparelhoAirPlay:(NSString *)deviceName {
+    NSStackView *deviceStack = [[NSStackView alloc] init];
+    deviceStack.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    deviceStack.distribution = NSStackViewDistributionFill;
+    deviceStack.alignment = NSLayoutAttributeCenterY;
+    deviceStack.spacing = 12;
+    deviceStack.edgeInsets = NSEdgeInsetsMake(0, 0, 0, 0);
+
+    // A linha cede à largura da pilha de fora antes de o texto ceder à largura
+    // da linha: é esta ordem que põe as caixas todas na mesma coluna.
+    [deviceStack setHuggingPriority:NSLayoutPriorityDefaultLow - 2
+                     forOrientation:NSLayoutConstraintOrientationHorizontal];
+
+    NSTextField *deviceLabel = [[NSTextField alloc] init];
+    deviceLabel.stringValue = deviceName;
+    deviceLabel.editable = NO;
+    deviceLabel.selectable = NO;
+    deviceLabel.bezeled = NO;
+    deviceLabel.drawsBackground = NO;
+    deviceLabel.alignment = NSTextAlignmentLeft;
+    deviceLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    deviceLabel.font = [NSFont systemFontOfSize:13];
+    deviceLabel.textColor = [NSColor labelColor];
+
+    // Uma só linha, cortada com reticências no fim; o nome por inteiro fica na
+    // dica, para o caso de dois aparelhos partilharem o princípio do nome.
+    deviceLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    deviceLabel.usesSingleLineMode = YES;
+    deviceLabel.maximumNumberOfLines = 1;
+    deviceLabel.toolTip = deviceName;
+
+    // O texto estica para a linha toda e é o primeiro a encolher; a caixa não
+    // faz nem uma coisa nem outra.
+    [deviceLabel setContentHuggingPriority:NSLayoutPriorityDefaultLow - 1
+                            forOrientation:NSLayoutConstraintOrientationHorizontal];
+    [deviceLabel setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 1
+                                          forOrientation:NSLayoutConstraintOrientationHorizontal];
+    [deviceLabel.widthAnchor constraintGreaterThanOrEqualToConstant:80].active = YES;
+
+    [deviceStack addArrangedSubview:deviceLabel];
+
+    NSButton *deviceCheckbox = [NSButton checkboxWithTitle:@"" target:self action:@selector(selectAirPlayDevice:)];
+    deviceCheckbox.identifier = deviceName;
+    deviceCheckbox.translatesAutoresizingMaskIntoConstraints = NO;
+    [deviceCheckbox setContentHuggingPriority:NSLayoutPriorityRequired
+                               forOrientation:NSLayoutConstraintOrientationHorizontal];
+    [deviceCheckbox setContentCompressionResistancePriority:NSLayoutPriorityRequired
+                                            forOrientation:NSLayoutConstraintOrientationHorizontal];
+
+    if ([deviceName isEqualToString:self.selectedDeviceName]) {
+        deviceCheckbox.state = NSControlStateValueOn;
+        self.currentlySelectedCheckbox = deviceCheckbox;
+    } else {
+        deviceCheckbox.state = NSControlStateValueOff;
+    }
+
+    [deviceStack addArrangedSubview:deviceCheckbox];
+    return deviceStack;
 }
 
 // A etiqueta em itálico do «ainda não encontrei nada». Estava escrita duas vezes
@@ -941,16 +978,21 @@ CoreAudioPlaybackState playbackState;
 - (NSTextField *)etiquetaDeProcuraDeAirPlay {
     NSTextField *noDevicesLabel = [[NSTextField alloc] init];
 
-    NSFont *systemFont = [NSFont systemFontOfSize:[NSFont systemFontSize]];
+    // O itálico era pedido ao descritor do corpo de sistema mas construído a 10
+    // pontos, o que deixava o «à procura» miudinho ao lado dos nomes a 13.
+    NSFont *systemFont = [NSFont systemFontOfSize:12];
     NSFontDescriptor *fontDescriptor = [systemFont.fontDescriptor fontDescriptorWithSymbolicTraits:NSFontItalicTrait];
-    NSFont *italicFont = [NSFont fontWithDescriptor:fontDescriptor size:10];
+    NSFont *italicFont = [NSFont fontWithDescriptor:fontDescriptor size:12];
 
     [noDevicesLabel setFont:italicFont];
     noDevicesLabel.stringValue = NSLocalizedString(@"Searching for AirPlay devices", @"Message displayed when no AirPlay devices are found");
+    noDevicesLabel.textColor = [NSColor secondaryLabelColor];
     noDevicesLabel.editable = NO;
+    noDevicesLabel.selectable = NO;
     noDevicesLabel.bezeled = NO;
     noDevicesLabel.drawsBackground = NO;
     noDevicesLabel.alignment = NSTextAlignmentCenter;
+    noDevicesLabel.lineBreakMode = NSLineBreakByWordWrapping;
     noDevicesLabel.translatesAutoresizingMaskIntoConstraints = NO;
 
     return noDevicesLabel;
