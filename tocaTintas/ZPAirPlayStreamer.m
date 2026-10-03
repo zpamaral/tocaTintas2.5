@@ -130,6 +130,18 @@ static NSString *const kDMAPPairingGUID = @"00000000-0008-2083-cd93-e7745ad24855
 /// trocares de Apple TV, mudam os dois.
 static NSString *const kZPAparelhoQuePrecisaDeAcordar = @"A0EDCDE18416";
 
+/// Receptores ligados a um amplificador, por identificador RAOP: o Apple TV
+/// antigo, que sai por Toslink para o NAD. Recebem sempre `-v 100`. Se o
+/// Apple TV 4K passar a ir para um amplificador, junta-se aqui o dele
+/// (4ABBA9434DAC).
+static BOOL ZPTemAmplificador(NSString *identificador) {
+    static NSString *const comAmplificador[] = { @"A0EDCDE18416" };
+    for (size_t i = 0; i < sizeof(comAmplificador) / sizeof(comAmplificador[0]); ++i) {
+        if ([comAmplificador[i] caseInsensitiveCompare:identificador ?: @""] == NSOrderedSame) return YES;
+    }
+    return NO;
+}
+
 /// Código de saída do raop_play quando o receptor exige um emparelhamento que
 /// não foi feito, ou recusa as credenciais (EXIT_PAIRING_REQUIRED em main.rs).
 static const int kZPRaopPlayExigeEmparelhamento = 3;
@@ -1462,13 +1474,25 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
     // O «-f» é o que faz o raop_play escrever os tempos no FIFO. Sem ele não há
     // relógio nenhum para ler — ver «Relógio do raop_play».
     self.raopTask.launchPath = raopPlayPath;
-    self.raopTask.arguments = @[
+    NSMutableArray<NSString *> *argumentos = [@[
         @"-a", self.ipAddress,
         @"-p", self.port,
         @"-l", [NSString stringWithFormat:@"%ld", (long)self.latency],
         @"-f", kRaopClockPath,
-        @"-"
-    ];
+    ] mutableCopy];
+
+    // Aparelhos que só entregam o sinal a um amplificador: o volume AirPlay
+    // deles fica sempre no máximo (0 dB), e quem regula é o amplificador. Sem
+    // isto o receptor herda o volume da última sessão de outro emissor — uma
+    // sessão do iPhone com o volume em baixo deixava o NAD a ter de compensar,
+    // e com o Apple TV a correr sem ecrã não havia como ver porquê. No HomePod
+    // não: lá o volume AirPlay é o volume da coluna.
+    if (ZPTemAmplificador(self.identificador)) {
+        [argumentos addObjectsFromArray:@[@"-v", @"100"]];
+    }
+
+    [argumentos addObject:@"-"];
+    self.raopTask.arguments = argumentos;
     self.raopTask.standardInput = self.inputPipe;
 
     // Aparelhos que exigem emparelhamento (o Apple TV 4K) recusam o modo
