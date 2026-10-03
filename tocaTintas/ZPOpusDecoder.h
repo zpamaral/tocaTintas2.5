@@ -45,7 +45,7 @@ SOFTWARE.
 /// alloc] init]` e alimentado com o ganho desta faixa. Não servia para nada, por
 /// duas razões de uma vez: não era o streamer que estava a transmitir — esse é o
 /// do ViewController —, e como a classe não tem `-init`, só
-/// `-initWithIPAddress:port:replayGainValue:`, o objecto saía meio construído,
+/// `-initWithIPAddress:port:identificador:replayGainValue:`, o objecto saía meio construído,
 /// sem tampão nem engine. O resultado é que uma faixa Opus tocava do princípio
 /// ao fim com o ganho que a faixa anterior tinha deixado.
 ///

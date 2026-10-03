@@ -54,12 +54,12 @@ static const NSTimeInterval kZPEsperaEntreTentativas = 0.5;
 
 /// O mDNS anuncia os RAOP como «A0EDCDE18416@Apple TV (NAD)»: doze dígitos
 /// hexadecimais com o endereço MAC, um arroba, e só depois o nome que o dono deu
-/// ao aparelho. Tira-se o prefixo — mas só quando ele tem mesmo esse feitio, que
-/// há receptores de terceiros cujo nome não o traz e outros que têm arrobas a
-/// sério no meio.
-static NSString *ZPNomeLegivel(NSString *nomeDoServico) {
-    if (nomeDoServico.length <= 13) return nomeDoServico;
-    if ([nomeDoServico characterAtIndex:12] != '@') return nomeDoServico;
+/// ao aparelho. O prefixo só conta quando tem mesmo esse feitio, que há
+/// receptores de terceiros cujo nome não o traz e outros que têm arrobas a
+/// sério no meio; nesses casos devolve nil.
+static NSString * _Nullable ZPPrefixoRAOP(NSString *nomeDoServico) {
+    if (nomeDoServico.length <= 13) return nil;
+    if ([nomeDoServico characterAtIndex:12] != '@') return nil;
 
     static NSCharacterSet *naoHexadecimais = nil;
     static dispatch_once_t umaVez;
@@ -70,8 +70,15 @@ static NSString *ZPNomeLegivel(NSString *nomeDoServico) {
 
     NSString *prefixo = [nomeDoServico substringToIndex:12];
     if ([prefixo rangeOfCharacterFromSet:naoHexadecimais].location != NSNotFound) {
-        return nomeDoServico;
+        return nil;
     }
+    return prefixo;
+}
+
+/// O nome sem o prefixo, que é o que se mostra e o que fica gravado como
+/// selecção.
+static NSString *ZPNomeLegivel(NSString *nomeDoServico) {
+    if (ZPPrefixoRAOP(nomeDoServico) == nil) return nomeDoServico;
 
     NSString *resto = [nomeDoServico substringFromIndex:13];
     return resto.length > 0 ? resto : nomeDoServico;
@@ -103,6 +110,7 @@ static NSString * _Nullable ZPPrimeiroIPv4(NSArray<NSData *> *enderecos) {
 
 @interface ZPAparelhoAirPlay ()
 - (instancetype)initComNome:(NSString *)nome
+              identificador:(NSString *)identificador
                          ip:(NSString *)ip
                       porta:(NSString *)porta
                   anfitriao:(NSString *)anfitriao;
@@ -111,12 +119,14 @@ static NSString * _Nullable ZPPrimeiroIPv4(NSArray<NSData *> *enderecos) {
 @implementation ZPAparelhoAirPlay
 
 - (instancetype)initComNome:(NSString *)nome
+              identificador:(NSString *)identificador
                          ip:(NSString *)ip
                       porta:(NSString *)porta
                   anfitriao:(NSString *)anfitriao {
     self = [super init];
     if (self) {
         _nome = [nome copy];
+        _identificador = [identificador copy];
         _ip = [ip copy];
         _porta = [porta copy];
         _anfitriao = [anfitriao copy];
@@ -125,8 +135,9 @@ static NSString * _Nullable ZPPrimeiroIPv4(NSArray<NSData *> *enderecos) {
 }
 
 - (NSString *)description {
-    return [NSString stringWithFormat:@"<%@ %@ — %@:%@ (%@)>",
-            NSStringFromClass(self.class), self.nome, self.ip, self.porta, self.anfitriao];
+    return [NSString stringWithFormat:@"<%@ %@ [%@] — %@:%@ (%@)>",
+            NSStringFromClass(self.class), self.nome, self.identificador,
+            self.ip, self.porta, self.anfitriao];
 }
 
 - (BOOL)isEqual:(id)outro {
@@ -346,6 +357,7 @@ static NSString * _Nullable ZPPrimeiroIPv4(NSArray<NSData *> *enderecos) {
     NSString *nome = ZPNomeLegivel(servico.name);
     ZPAparelhoAirPlay *aparelho =
         [[ZPAparelhoAirPlay alloc] initComNome:nome
+                                 identificador:ZPPrefixoRAOP(servico.name) ?: @""
                                             ip:ip
                                          porta:[NSString stringWithFormat:@"%ld", (long)servico.port]
                                      anfitriao:servico.hostName ?: @""];

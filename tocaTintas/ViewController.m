@@ -1083,7 +1083,7 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
         #ifdef DEBUG
         NSLog(@"[Popover selection] Initializing AirPlay streamer with IP: %@, Port: %@", ipAddress, port);
         #endif
-        self.airPlayStreamer = [[ZPAirPlayStreamer alloc] initWithIPAddress:ipAddress port:port replayGainValue:self.replayGainValue];
+        self.airPlayStreamer = [[ZPAirPlayStreamer alloc] initWithIPAddress:ipAddress port:port identificador:aparelho.identificador replayGainValue:self.replayGainValue];
         [self.airPlayStreamer startStreaming];
         #ifdef DEBUG
         NSLog(@"[Popover selection] AirPlay streaming started.");

@@ -44,6 +44,12 @@ extern NSNotificationName const kZPAirPlayDispositivosMudaram;
 /// antepõe («Apple TV (NAD)», não «A0EDCDE18416@Apple TV (NAD)»).
 @property (nonatomic, readonly) NSString *nome;
 
+/// Os doze dígitos hexadecimais que o mDNS antepõe ao nome («A0EDCDE18416»),
+/// tal como vêm. Saem do MAC do aparelho e, ao contrário do nome, não mudam:
+/// nem quando o dono o renomeia, nem quando o Bonjour lhe acrescenta um «(2)»
+/// por julgar que há conflito. Vazio para os receptores que não o trazem.
+@property (nonatomic, readonly) NSString *identificador;
+
 /// Endereço IPv4 em texto, tal como o raop_play o quer na linha de comando.
 @property (nonatomic, readonly) NSString *ip;
 

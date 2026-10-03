@@ -45,6 +45,7 @@ SOFTWARE.
 @property (nonatomic, strong) NSString *ipAddress;
 @property (nonatomic, assign) NSInteger latency;
 @property (nonatomic, strong) NSString *port;
+@property (nonatomic, strong) NSString *identificador;
 @property (nonatomic, strong) NSTask *raopTask;
 @property (nonatomic, strong) NSPipe *inputPipe;
 @property (nonatomic, strong) AVAudioEngine *audioEngine;
@@ -119,9 +120,13 @@ static NSString *const kDMAPPairingGUID = @"00000000-0008-2083-cd93-e7745ad24855
 /// falhar. E é mesmo só este que precisa: o HomePod toca à primeira sem nunca
 /// ter passado por aqui.
 ///
-/// Se um dia mudares o nome ao Apple TV, muda-o aqui **e** no `DEVICE_ID` do
-/// script — os dois apontam ao mesmo aparelho por caminhos diferentes.
-static NSString *const kZPAparelhoQuePrecisaDeAcordar = @"Apple TV (NAD)";
+/// É o prefixo RAOP do anúncio mDNS («A0EDCDE18416@…»), que sai do MAC, e não o
+/// nome: em Outubro de 2026 o Bonjour renomeou-o sozinho para «Apple TV (NAD)
+/// (2)», a comparação pelo nome deixou de bater, e ele passou a ser ligado sem
+/// acordar — sessão aberta, nenhum som. O `DEVICE_ID` do script é o
+/// identificador DMAP do mesmo aparelho; também não depende do nome. Se um dia
+/// trocares de Apple TV, mudam os dois.
+static NSString *const kZPAparelhoQuePrecisaDeAcordar = @"A0EDCDE18416";
 
 // Runs a small Python helper script that invokes `atvremote` to establish a
 // DMAP session and returns the headers printed by the tool as a dictionary.
@@ -415,10 +420,11 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
 
 #pragma mark - Initialization
 
-- (instancetype)initWithIPAddress:(NSString *)ipAddress port:(NSString *)port replayGainValue:(float)replayGainValue {
+- (instancetype)initWithIPAddress:(NSString *)ipAddress port:(NSString *)port identificador:(NSString *)identificador replayGainValue:(float)replayGainValue {
     self = [super init];
     if (self) {
         _ipAddress = ipAddress;
+        _identificador = [identificador copy];
         //_latency = 132300; // 3 s of latency
         _latency = 44100; // Default latency
         // Descritores por atribuir. Zero é um descritor válido — a entrada
@@ -983,7 +989,7 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
     // identificador do Apple TV escrito no script, portanto para o HomePod eram
     // oito segundos gastos só para falhar. E o HomePod não precisa — sempre
     // tocou à primeira sem nunca ter passado por aqui.
-    if (![selectedDevice isEqualToString:kZPAparelhoQuePrecisaDeAcordar]) {
+    if ([kZPAparelhoQuePrecisaDeAcordar caseInsensitiveCompare:self.identificador ?: @""] != NSOrderedSame) {
         #ifdef DEBUG
         NSLog(@"[Streaming] «%@» não precisa de ser acordado; a ligar já.", selectedDevice);
         #endif

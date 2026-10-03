@@ -40,7 +40,9 @@ SOFTWARE.
 @property (nonatomic, assign) BOOL cancelPendingStart; // Guard for async start
 @property (nonatomic, assign) int raopClockFD;
 
-- (instancetype)initWithIPAddress:(NSString *)ipAddress port:(NSString *)port replayGainValue:(float)replayGainValue;
+/// `identificador` é o prefixo RAOP do aparelho (ver `ZPAparelhoAirPlay`); é
+/// por ele, e não pelo nome, que se decide se o aparelho precisa de ser acordado.
+- (instancetype)initWithIPAddress:(NSString *)ipAddress port:(NSString *)port identificador:(NSString *)identificador replayGainValue:(float)replayGainValue;
 
 - (void)updateReplayGainValue:(float)dB; // To update the gain for each streamed song
 
