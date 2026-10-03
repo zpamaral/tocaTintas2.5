@@ -27,6 +27,7 @@ SOFTWARE.
 //
 
 #import "PreferencesWindowController.h"
+#import "ZPAirPlay.h"
 
 NSString * const kBS2BProfileDefaultsKey        = @"bs2bProfile";
 NSString * const kBS2BProfileChangedNotification = @"BS2BProfileChanged";
@@ -176,6 +177,21 @@ NSString *ZPCurrentBS2BProfile(void) {
 @property (strong, nonatomic) NSButton *compensarVolume;
 @property (strong, nonatomic) NSPopUpButton *eqMarcaPopUp;
 @property (strong, nonatomic) NSPopUpButton *eqModeloPopUp;
+
+// Separador do emparelhamento. Tem a sua própria descoberta de aparelhos: é
+// barata, e evita que as preferências dependam da janela principal.
+@property (strong, nonatomic) NSTabView *separadores;
+@property (strong, nonatomic) ZPAirPlay *descobertaEmparelhamento;
+@property (strong, nonatomic) NSPopUpButton *emparelharPopUp;
+@property (strong, nonatomic) NSTextField *emparelharEstado;
+@property (strong, nonatomic) NSButton *emparelharBotao;
+@property (strong, nonatomic) NSButton *esquecerBotao;
+@property (strong, nonatomic) NSTextField *codigoCampo;
+@property (strong, nonatomic) NSButton *confirmarBotao;
+@property (strong, nonatomic, nullable) NSTask *emparelhamento;
+@property (strong, nonatomic, nullable) NSPipe *emparelhamentoEntrada;
+@property (strong, nonatomic, nullable) NSPipe *emparelhamentoSaida;
+@property (copy, nonatomic, nullable) NSString *emparelhamentoIdentificador;
 @end
 
 @implementation PreferencesWindowController
@@ -236,7 +252,18 @@ NSString *ZPCurrentBS2BProfile(void) {
     itemAirPlay.view = [self criarVistaAirPlay];
     [separadores addTabViewItem:itemAirPlay];
 
+    NSTabViewItem *itemEmparelhar = [[NSTabViewItem alloc] initWithIdentifier:@"emparelhar"];
+    itemEmparelhar.label = NSLocalizedString(@"prefs_tab_pairing", @"Título do separador do emparelhamento AirPlay");
+    itemEmparelhar.view = [self criarVistaEmparelhamento];
+    [separadores addTabViewItem:itemEmparelhar];
+
     [janela.contentView addSubview:separadores];
+    self.separadores = separadores;
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(janelaVaiFechar:)
+                                                 name:NSWindowWillCloseNotification
+                                               object:janela];
 
     [self reloadDirectoryPath];
 }
@@ -594,6 +621,275 @@ NSString *ZPCurrentBS2BProfile(void) {
     [[NSUserDefaults standardUserDefaults] setObject:perfil forKey:kBS2BProfileDefaultsKey];
     [[NSUserDefaults standardUserDefaults] synchronize];
     [[NSNotificationCenter defaultCenter] postNotificationName:kBS2BProfileChangedNotification object:nil];
+}
+
+#pragma mark - Emparelhamento AirPlay
+
+// O Apple TV 4K só aceita som de quem tiver feito com ele um emparelhamento
+// completo: mostra um código de quatro dígitos no ecrã, que se escreve aqui.
+// Quem o faz é o próprio raop_play (`-P`): pede o código na entrada padrão e
+// escreve as credenciais na saída padrão. Ficam no Keychain, e o streamer
+// passa-as ao raop_play sempre que se escolhe esse aparelho.
+- (NSView *)criarVistaEmparelhamento {
+    const CGFloat A = 390, margem = 20, largura = 440;
+    NSView *vista = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 480, A)];
+    CGFloat topo = A - margem;
+
+    NSTextField *t = [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 200, largura, 200)
+                                texto:NSLocalizedString(@"prefs_pair_explanation", @"O que é o emparelhamento AirPlay")
+                              pequena:NO];
+    topo = NSMinY(t.frame) - 18;
+
+    [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 17, 300, 17)
+               texto:NSLocalizedString(@"prefs_pair_device_label", @"Etiqueta do menu de aparelhos a emparelhar")
+             pequena:NO];
+    topo -= 17 + 6;
+
+    self.emparelharPopUp = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(margem, topo - 26, 330, 26) pullsDown:NO];
+    self.emparelharPopUp.target = self;
+    self.emparelharPopUp.action = @selector(aparelhoEmparelhamentoMudou:);
+    [vista addSubview:self.emparelharPopUp];
+    topo -= 26 + 8;
+
+    self.emparelharEstado = [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 17, largura, 17)
+                                       texto:@"" pequena:YES];
+    topo -= 17 + 10;
+
+    self.emparelharBotao = [[NSButton alloc] initWithFrame:NSMakeRect(margem - 6, topo - 32, 160, 32)];
+    self.emparelharBotao.bezelStyle = NSBezelStyleRounded;
+    self.emparelharBotao.title = NSLocalizedString(@"prefs_pair_start", @"Botão para começar o emparelhamento");
+    self.emparelharBotao.target = self;
+    self.emparelharBotao.action = @selector(comecarEmparelhamento:);
+    [vista addSubview:self.emparelharBotao];
+
+    self.esquecerBotao = [[NSButton alloc] initWithFrame:NSMakeRect(margem + 160, topo - 32, 200, 32)];
+    self.esquecerBotao.bezelStyle = NSBezelStyleRounded;
+    self.esquecerBotao.title = NSLocalizedString(@"prefs_pair_forget", @"Botão para esquecer o emparelhamento");
+    self.esquecerBotao.target = self;
+    self.esquecerBotao.action = @selector(esquecerEmparelhamento:);
+    [vista addSubview:self.esquecerBotao];
+    topo -= 32 + 12;
+
+    [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 17, 220, 17)
+               texto:NSLocalizedString(@"prefs_pair_code_label", @"Etiqueta do campo do código")
+             pequena:NO];
+
+    self.codigoCampo = [[NSTextField alloc] initWithFrame:NSMakeRect(margem + 225, topo - 21, 70, 22)];
+    self.codigoCampo.placeholderString = @"0000";
+    self.codigoCampo.alignment = NSTextAlignmentCenter;
+    self.codigoCampo.font = [NSFont monospacedDigitSystemFontOfSize:[NSFont systemFontSize] weight:NSFontWeightRegular];
+    self.codigoCampo.target = self;
+    self.codigoCampo.action = @selector(confirmarCodigo:);
+    [vista addSubview:self.codigoCampo];
+
+    self.confirmarBotao = [[NSButton alloc] initWithFrame:NSMakeRect(margem + 300, topo - 26, 120, 32)];
+    self.confirmarBotao.bezelStyle = NSBezelStyleRounded;
+    self.confirmarBotao.title = NSLocalizedString(@"prefs_pair_confirm", @"Botão para confirmar o código");
+    self.confirmarBotao.target = self;
+    self.confirmarBotao.action = @selector(confirmarCodigo:);
+    [vista addSubview:self.confirmarBotao];
+    topo -= 26 + 16;
+
+    [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 120, largura, 120)
+               texto:NSLocalizedString(@"prefs_pair_note", @"Nota sobre o emparelhamento")
+             pequena:YES];
+
+    self.descobertaEmparelhamento = [[ZPAirPlay alloc] init];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(aparelhosEmparelhamentoMudaram:)
+                                                 name:kZPAirPlayDispositivosMudaram
+                                               object:self.descobertaEmparelhamento];
+    [self.descobertaEmparelhamento startDiscovery];
+
+    // Um aparelho que acabou de recusar uma transmissão por falta de
+    // emparelhamento passa a contar como «exige», e tem de aparecer já.
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(aparelhosEmparelhamentoMudaram:)
+                                                 name:kZPAirPlayExigeEmparelhamento
+                                               object:nil];
+
+    [self recarregarAparelhosEmparelhamento];
+    return vista;
+}
+
+- (void)aparelhosEmparelhamentoMudaram:(NSNotification *)nota {
+    [self recarregarAparelhosEmparelhamento];
+}
+
+/// Só entram na lista os aparelhos que exigem emparelhamento; os outros tocam
+/// sem ele e não há nada a fazer aqui por eles.
+- (void)recarregarAparelhosEmparelhamento {
+    NSString *escolhido = self.emparelharPopUp.selectedItem.representedObject;
+    [self.emparelharPopUp removeAllItems];
+
+    for (ZPAparelhoAirPlay *aparelho in self.descobertaEmparelhamento.dispositivos) {
+        if (!aparelho.precisaDeEmparelhar || aparelho.identificador.length == 0) continue;
+        [self.emparelharPopUp addItemWithTitle:aparelho.nome];
+        self.emparelharPopUp.lastItem.representedObject = aparelho.identificador;
+    }
+
+    if (self.emparelharPopUp.numberOfItems == 0) {
+        [self.emparelharPopUp addItemWithTitle:NSLocalizedString(@"prefs_pair_none", @"Nenhum aparelho exige emparelhamento")];
+        self.emparelharPopUp.lastItem.representedObject = nil;
+    } else if (escolhido) {
+        for (NSMenuItem *item in self.emparelharPopUp.itemArray) {
+            if ([item.representedObject isEqualToString:escolhido]) {
+                [self.emparelharPopUp selectItem:item];
+                break;
+            }
+        }
+    }
+    [self actualizarEstadoEmparelhamento];
+}
+
+- (void)aparelhoEmparelhamentoMudou:(id)sender {
+    [self actualizarEstadoEmparelhamento];
+}
+
+- (nullable ZPAparelhoAirPlay *)aparelhoEmparelhamentoEscolhido {
+    NSString *identificador = self.emparelharPopUp.selectedItem.representedObject;
+    if (!identificador) return nil;
+    for (ZPAparelhoAirPlay *aparelho in self.descobertaEmparelhamento.dispositivos) {
+        if ([aparelho.identificador isEqualToString:identificador]) return aparelho;
+    }
+    return nil;
+}
+
+/// Põe botões, campo e etiqueta de acordo com o aparelho escolhido e com haver
+/// ou não um emparelhamento a meio. `mensagem`, se vier, substitui o estado.
+- (void)actualizarEstadoEmparelhamento {
+    [self actualizarEstadoEmparelhamentoComMensagem:nil];
+}
+
+- (void)actualizarEstadoEmparelhamentoComMensagem:(nullable NSString *)mensagem {
+    ZPAparelhoAirPlay *aparelho = [self aparelhoEmparelhamentoEscolhido];
+    BOOL aMeio = (self.emparelhamento != nil);
+    BOOL emparelhado = aparelho && ZPCredenciaisAirPlay(aparelho.identificador).length > 0;
+
+    self.emparelharPopUp.enabled = !aMeio;
+    self.emparelharBotao.enabled = aparelho && !aMeio;
+    self.esquecerBotao.enabled = emparelhado && !aMeio;
+    self.codigoCampo.enabled = aMeio;
+    self.confirmarBotao.enabled = aMeio;
+
+    if (mensagem) {
+        self.emparelharEstado.stringValue = mensagem;
+    } else if (!aparelho) {
+        self.emparelharEstado.stringValue = @"";
+    } else if (aMeio) {
+        self.emparelharEstado.stringValue = NSLocalizedString(@"prefs_pair_state_waiting", @"À espera do código mostrado no ecrã");
+    } else {
+        self.emparelharEstado.stringValue = emparelhado
+            ? NSLocalizedString(@"prefs_pair_state_paired", @"O aparelho está emparelhado")
+            : NSLocalizedString(@"prefs_pair_state_unpaired", @"O aparelho ainda não está emparelhado");
+    }
+}
+
+- (void)comecarEmparelhamento:(id)sender {
+    ZPAparelhoAirPlay *aparelho = [self aparelhoEmparelhamentoEscolhido];
+    NSString *raopPlay = [[NSBundle mainBundle] pathForResource:@"raop_play" ofType:nil];
+    if (!aparelho || !raopPlay || self.emparelhamento) return;
+
+    NSTask *tarefa = [[NSTask alloc] init];
+    tarefa.launchPath = raopPlay;
+    tarefa.arguments = @[@"-P", @"-p", aparelho.porta, aparelho.ip];
+    NSPipe *entrada = [NSPipe pipe];
+    NSPipe *saida = [NSPipe pipe];
+    tarefa.standardInput = entrada;
+    tarefa.standardOutput = saida;
+    tarefa.standardError = [NSFileHandle fileHandleWithNullDevice];
+
+    __weak typeof(self) fraco = self;
+    tarefa.terminationHandler = ^(NSTask *t) {
+        // A saída é pequena (uma linha), cabe toda no tubo; lê-se no fim.
+        NSData *dados = [saida.fileHandleForReading readDataToEndOfFile];
+        int estado = t.terminationStatus;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [fraco emparelhamentoTerminou:estado saida:dados];
+        });
+    };
+
+    @try {
+        [tarefa launch];
+    } @catch (NSException *e) {
+        NSLog(@"[Emparelhamento] Não consegui lançar o raop_play: %@", e.reason);
+        [self actualizarEstadoEmparelhamentoComMensagem:NSLocalizedString(@"prefs_pair_state_failed", @"O emparelhamento falhou")];
+        return;
+    }
+
+    self.emparelhamento = tarefa;
+    self.emparelhamentoEntrada = entrada;
+    self.emparelhamentoSaida = saida;
+    self.emparelhamentoIdentificador = aparelho.identificador;
+    self.codigoCampo.stringValue = @"";
+    [self actualizarEstadoEmparelhamento];
+    [self.window makeFirstResponder:self.codigoCampo];
+}
+
+- (void)confirmarCodigo:(id)sender {
+    if (!self.emparelhamento) return;
+
+    NSString *codigo = [self.codigoCampo.stringValue stringByTrimmingCharactersInSet:
+                        [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (codigo.length == 0) return;
+
+    NSData *linha = [[codigo stringByAppendingString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding];
+    @try {
+        [self.emparelhamentoEntrada.fileHandleForWriting writeData:linha];
+        [self.emparelhamentoEntrada.fileHandleForWriting closeFile];
+    } @catch (NSException *e) {
+        // O raop_play já tinha saído (o aparelho cortou a ligação, por exemplo);
+        // o terminationHandler trata do resto.
+    }
+    self.codigoCampo.enabled = NO;
+    self.confirmarBotao.enabled = NO;
+}
+
+- (void)emparelhamentoTerminou:(int)estado saida:(NSData *)dados {
+    NSString *identificador = self.emparelhamentoIdentificador;
+    self.emparelhamento = nil;
+    self.emparelhamentoEntrada = nil;
+    self.emparelhamentoSaida = nil;
+    self.emparelhamentoIdentificador = nil;
+
+    NSString *credenciais = [[[NSString alloc] initWithData:dados encoding:NSUTF8StringEncoding]
+                             stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+    if (estado == 0 && credenciais.length > 0 && identificador &&
+        ZPGuardarCredenciaisAirPlay(identificador, credenciais)) {
+        [self actualizarEstadoEmparelhamento];
+        // Se este era o aparelho que estava a recusar, a janela principal
+        // retoma a transmissão sem ser preciso desmarcar e voltar a marcar.
+        [[NSNotificationCenter defaultCenter] postNotificationName:kZPAirPlayEmparelhamentoConcluido
+                                                            object:nil
+                                                          userInfo:@{@"identificador": identificador}];
+        return;
+    }
+
+    [self actualizarEstadoEmparelhamentoComMensagem:NSLocalizedString(@"prefs_pair_state_failed", @"O emparelhamento falhou")];
+}
+
+/// Fechar a janela a meio de um emparelhamento cancela-o: o raop_play ficava
+/// de outro modo pendurado à espera de um código que já ninguém pode escrever.
+- (void)janelaVaiFechar:(NSNotification *)nota {
+    if (self.emparelhamento.isRunning) {
+        [self.emparelhamento terminate];
+    }
+}
+
+- (void)esquecerEmparelhamento:(id)sender {
+    ZPAparelhoAirPlay *aparelho = [self aparelhoEmparelhamentoEscolhido];
+    if (!aparelho) return;
+    ZPApagarCredenciaisAirPlay(aparelho.identificador);
+    [self actualizarEstadoEmparelhamento];
+}
+
+- (void)mostrarSeparador:(NSString *)identificador {
+    [self showWindow:nil];   // carrega a janela, e com ela os separadores
+    NSInteger indice = [self.separadores indexOfTabViewItemWithIdentifier:identificador];
+    if (indice != NSNotFound) {
+        [self.separadores selectTabViewItemAtIndex:indice];
+    }
 }
 
 // Method to reload the directory path from user defaults

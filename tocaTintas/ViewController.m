@@ -771,6 +771,24 @@ CoreAudioPlaybackState playbackState;
                                                   usingBlock:^(NSNotification *nota) {
         [fraco atualizarPopoverDeAirPlay];
     }];
+
+    // Um aparelho que exige emparelhamento recusou a transmissão, e o streamer
+    // desistiu em vez de insistir. Sem este aviso ficava-se sem som e sem saber
+    // porquê.
+    [[NSNotificationCenter defaultCenter] addObserverForName:kZPAirPlayExigeEmparelhamento
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *nota) {
+        [fraco avisarQueExigeEmparelhamento:nota.userInfo[@"nome"]];
+    }];
+
+    // E, emparelhado o aparelho que tinha recusado, retomar sozinho.
+    [[NSNotificationCenter defaultCenter] addObserverForName:kZPAirPlayEmparelhamentoConcluido
+                                                      object:nil
+                                                       queue:[NSOperationQueue mainQueue]
+                                                  usingBlock:^(NSNotification *nota) {
+        [fraco retomarDepoisDeEmparelhar:nota.userInfo[@"identificador"]];
+    }];
     
     // Initialize ZPAudioCapture instance
     self.audioCapture = [[ZPAudioCapture alloc] init];
@@ -2580,6 +2598,47 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
         #endif
         responder = [responder nextResponder];
     }
+}
+
+- (void)avisarQueExigeEmparelhamento:(NSString *)nome {
+    NSAlert *alerta = [[NSAlert alloc] init];
+    alerta.messageText = [NSString stringWithFormat:
+        NSLocalizedString(@"airplay_pairing_required_title", @"«X» exige emparelhamento"), nome ?: @""];
+    alerta.informativeText = NSLocalizedString(@"airplay_pairing_required_text", @"Como emparelhar");
+    [alerta addButtonWithTitle:NSLocalizedString(@"airplay_pairing_required_open", @"Abrir as preferências do emparelhamento")];
+    [alerta addButtonWithTitle:NSLocalizedString(@"airplay_pairing_required_later", @"Agora não")];
+
+    __weak typeof(self) fraco = self;
+    void (^resposta)(NSModalResponse) = ^(NSModalResponse r) {
+        if (r != NSAlertFirstButtonReturn) return;
+        [fraco openPreferences:nil];
+        [fraco.preferencesWindowController mostrarSeparador:@"emparelhar"];
+    };
+
+    NSWindow *janela = self.view.window;
+    if (janela) {
+        [alerta beginSheetModalForWindow:janela completionHandler:resposta];
+    } else {
+        resposta([alerta runModal]);
+    }
+}
+
+/// Depois de um emparelhamento: se o aparelho emparelhado é o que está
+/// seleccionado, reabre-se a sessão, como no ⌘+clique. O streamer ficou parado
+/// mas vivo quando o aparelho recusou, e a selecção também ficou, portanto
+/// basta voltar a arrancá-lo.
+- (void)retomarDepoisDeEmparelhar:(NSString *)identificador {
+    if (!self.airPlayStreamer || identificador.length == 0 || !self.selectedDeviceName) return;
+
+    ZPAparelhoAirPlay *aparelho = [self.airPlayManager dispositivoComNome:self.selectedDeviceName];
+    if (![aparelho.identificador isEqualToString:identificador]) return;
+
+    #ifdef DEBUG
+    NSLog(@"[AirPlay] «%@» acabou de ser emparelhado; a retomar a transmissão.", self.selectedDeviceName);
+    #endif
+    [self.airPlayStreamer stopStreaming];
+    [self.airPlayStreamer startStreaming];
+    [self applyBs2bConfiguration];
 }
 
 - (IBAction)openPreferences:(id)sender {

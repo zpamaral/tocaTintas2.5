@@ -29,6 +29,7 @@ SOFTWARE.
 #import "ZPAirPlayStreamer.h"
 #import "ZPAudioCapture.h"                      // ZPBindEngineInputToLoopback, ZPLoopbackAudioDevice
 #import "PreferencesWindowController.h"          // chaves das preferências
+#import "ZPAirPlay.h"                            // ZPCredenciaisAirPlay
 #import <TPCircularBuffer/TPCircularBuffer.h>
 #import <AVFoundation/AVFoundation.h>
 #import <sys/stat.h>
@@ -100,6 +101,7 @@ SOFTWARE.
 // (morte do raop_play ou perda do tap). Sem isto, startStreaming aborta
 // em "Already streaming" porque isStreaming nunca volta a NO.
 - (void)restartStreamingAfterFailure;
+- (void)pararPorFaltaDeEmparelhamento;
 
 // Relógio do raop_play
 - (void)startRaopClockReader;
@@ -127,6 +129,10 @@ static NSString *const kDMAPPairingGUID = @"00000000-0008-2083-cd93-e7745ad24855
 /// identificador DMAP do mesmo aparelho; também não depende do nome. Se um dia
 /// trocares de Apple TV, mudam os dois.
 static NSString *const kZPAparelhoQuePrecisaDeAcordar = @"A0EDCDE18416";
+
+/// Código de saída do raop_play quando o receptor exige um emparelhamento que
+/// não foi feito, ou recusa as credenciais (EXIT_PAIRING_REQUIRED em main.rs).
+static const int kZPRaopPlayExigeEmparelhamento = 3;
 
 // Runs a small Python helper script that invokes `atvremote` to establish a
 // DMAP session and returns the headers printed by the tool as a dictionary.
@@ -706,6 +712,35 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
            "a relançar para «%@».", selectedDevice);
     #endif
     [self restartStreamingAfterFailure];
+}
+
+/// Como o -restartStreamingAfterFailure, mas sem relançar: arruma o estado,
+/// pára a captura, lembra que o aparelho exige emparelhamento e avisa quem
+/// estiver a ouvir, para a interface o poder dizer.
+- (void)pararPorFaltaDeEmparelhamento {
+    NSLog(@"[Streaming] O aparelho [%@] exige emparelhamento; não relanço. "
+          "Emparelhar em Preferências → Emparelhamento.", self.identificador);
+
+    self.isStreaming = NO;
+    [self stopRaopClockReader];
+    int fd = self.raopClockFD;
+    self.raopClockFD = -1;
+    if (fd >= 0) {
+        while (close(fd) == -1 && errno == EINTR) { /* retry */ }
+    }
+    self.inputPipe = nil;
+    self.raopTask = nil;
+
+    NSString *identificador = self.identificador ?: @"";
+    NSString *nome = [[NSUserDefaults standardUserDefaults] objectForKey:@"SelectedAirPlayDevice"] ?: @"";
+    __weak typeof(self) weakSelf = self;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [weakSelf stopAudioCaptureIfNeeded];
+        ZPMarcarExigeEmparelhamento(identificador);
+        [[NSNotificationCenter defaultCenter] postNotificationName:kZPAirPlayExigeEmparelhamento
+                                                            object:nil
+                                                          userInfo:@{@"identificador": identificador, @"nome": nome}];
+    });
 }
 
 - (void)restartStreamingAfterFailure {
@@ -1436,6 +1471,17 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
     ];
     self.raopTask.standardInput = self.inputPipe;
 
+    // Aparelhos que exigem emparelhamento (o Apple TV 4K) recusam o modo
+    // transitório do raop_play; com credenciais de um emparelhamento feito nas
+    // preferências, o raop_play faz pair-verify com elas. Vão pelo ambiente e
+    // não pela linha de comando, onde qualquer utilizador as veria com `ps`.
+    NSString *credenciais = ZPCredenciaisAirPlay(self.identificador ?: @"");
+    if (credenciais.length > 0) {
+        NSMutableDictionary *ambiente = [[[NSProcessInfo processInfo] environment] mutableCopy];
+        ambiente[@"RAOP_CREDENTIALS"] = credenciais;
+        self.raopTask.environment = ambiente;
+    }
+
     // Configure task termination handler
     __weak typeof(self) weakSelf = self;
     self.raopTask.terminationHandler = ^(NSTask *task) {
@@ -1449,6 +1495,15 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
         // O raop_play morreu, portanto o tranco que o guardava deixa de fazer
         // sentido. Largar é fechar o descritor, nunca apagar o ficheiro.
         [strongSelf largarTrancoDoRaopPlay];
+
+        // O receptor exige um emparelhamento que não temos (ou recusou as
+        // credenciais). Relançar daria um ciclo sem fim de tentativas recusadas
+        // — e, no Apple TV 4K, um código a piscar no ecrã a cada uma.
+        if (task.terminationReason == NSTaskTerminationReasonExit &&
+            task.terminationStatus == kZPRaopPlayExigeEmparelhamento) {
+            [strongSelf pararPorFaltaDeEmparelhamento];
+            return;
+        }
 
         NSString *selectedDevice = [[NSUserDefaults standardUserDefaults] objectForKey:@"SelectedAirPlayDevice"];
         if (selectedDevice) {

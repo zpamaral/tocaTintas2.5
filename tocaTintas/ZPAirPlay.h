@@ -50,6 +50,14 @@ extern NSNotificationName const kZPAirPlayDispositivosMudaram;
 /// por julgar que há conflito. Vazio para os receptores que não o trazem.
 @property (nonatomic, readonly) NSString *identificador;
 
+/// O aparelho exige um emparelhamento completo, com o código que mostra no
+/// ecrã, antes de aceitar som — é o Apple TV 4K. Sabe-se por uma de duas vias:
+/// o bit 0x200 («OneTimePairingRequired») dos flags `sf` do anúncio RAOP, ou
+/// o próprio aparelho ter recusado uma transmissão por falta de emparelhamento
+/// (ver `ZPMarcarExigeEmparelhamento`) — que é como se apanha um que o exija
+/// sem o anunciar assim. O HomePod e o Apple TV 3 não o exigem.
+@property (nonatomic, readonly) BOOL precisaDeEmparelhar;
+
 /// Endereço IPv4 em texto, tal como o raop_play o quer na linha de comando.
 @property (nonatomic, readonly) NSString *ip;
 
@@ -97,5 +105,31 @@ extern NSNotificationName const kZPAirPlayDispositivosMudaram;
 - (nullable ZPAparelhoAirPlay *)dispositivoComNome:(NSString *)nome;
 
 @end
+
+#pragma mark - Credenciais do emparelhamento
+
+/// Publicada no thread principal quando um aparelho recusa uma transmissão por
+/// exigir emparelhamento. O userInfo traz @"identificador" e @"nome".
+extern NSNotificationName const kZPAirPlayExigeEmparelhamento;
+
+/// Publicada no thread principal quando um emparelhamento acaba bem e as
+/// credenciais ficam guardadas. O userInfo traz @"identificador".
+extern NSNotificationName const kZPAirPlayEmparelhamentoConcluido;
+
+/// Lembra que este aparelho exige emparelhamento, mesmo que não o anuncie.
+/// Fica guardado nos NSUserDefaults, por isso sobrevive ao fecho da app.
+void ZPMarcarExigeEmparelhamento(NSString *identificador);
+
+/// As credenciais de um emparelhamento AirPlay 2 completo, tal como o
+/// `raop_play -P` as escreve, guardadas no Keychain por identificador RAOP. A
+/// parte «ltsk» é uma chave privada, por isso não vão para os NSUserDefaults.
+/// Nil se o aparelho nunca foi emparelhado.
+NSString * _Nullable ZPCredenciaisAirPlay(NSString *identificador);
+
+/// Guarda (ou substitui) as credenciais deste aparelho. NO se o Keychain recusar.
+BOOL ZPGuardarCredenciaisAirPlay(NSString *identificador, NSString *credenciais);
+
+/// Esquece o emparelhamento deste aparelho.
+void ZPApagarCredenciaisAirPlay(NSString *identificador);
 
 NS_ASSUME_NONNULL_END

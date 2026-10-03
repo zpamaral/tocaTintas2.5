@@ -28,6 +28,7 @@ SOFTWARE.
 
 #import "ZPAirPlay.h"
 
+#import <Security/Security.h>
 #import <arpa/inet.h>
 #import <netinet/in.h>
 #import <sys/socket.h>
@@ -84,6 +85,18 @@ static NSString *ZPNomeLegivel(NSString *nomeDoServico) {
     return resto.length > 0 ? resto : nomeDoServico;
 }
 
+/// Os flags `sf` do anúncio RAOP vêm em texto hexadecimal («0x18644»). O bit
+/// 0x200 é o «OneTimePairingRequired»: o aparelho só aceita som depois de um
+/// emparelhamento com o código do ecrã. Sem TXT, ou sem `sf`, conta como não.
+static BOOL ZPExigeEmparelhamento(NSData * _Nullable txt) {
+    if (txt.length == 0) return NO;
+    NSData *valor = [NSNetService dictionaryFromTXTRecordData:txt][@"sf"];
+    if (valor.length == 0) return NO;
+    NSString *texto = [[NSString alloc] initWithData:valor encoding:NSUTF8StringEncoding];
+    unsigned long long flags = strtoull(texto.UTF8String ?: "0", NULL, 0);
+    return (flags & 0x200) != 0;
+}
+
 /// O NSNetService entrega os endereços já resolvidos como `sockaddr` em bruto,
 /// um por interface. O raop_play só come IPv4 na linha de comando, portanto o
 /// que interessa é o primeiro AF_INET — e obtê-lo não custa processo nenhum,
@@ -108,12 +121,21 @@ static NSString * _Nullable ZPPrimeiroIPv4(NSArray<NSData *> *enderecos) {
 
 #pragma mark - ZPAparelhoAirPlay
 
-@interface ZPAparelhoAirPlay ()
+/// Identificadores dos aparelhos que recusaram uma transmissão por falta de
+/// emparelhamento. Ver `ZPMarcarExigeEmparelhamento`.
+static NSString * const kZPExigemEmparelhamentoDefaultsKey = @"AirPlayExigemEmparelhamento";
+
+@interface ZPAparelhoAirPlay () {
+    /// O anúncio mDNS traz o bit 0x200. O resto de `precisaDeEmparelhar` vem
+    /// dos NSUserDefaults, lido na hora, para uma recusa de agora contar já.
+    BOOL _anunciaEmparelhamento;
+}
 - (instancetype)initComNome:(NSString *)nome
               identificador:(NSString *)identificador
                          ip:(NSString *)ip
                       porta:(NSString *)porta
-                  anfitriao:(NSString *)anfitriao;
+                  anfitriao:(NSString *)anfitriao
+        precisaDeEmparelhar:(BOOL)precisaDeEmparelhar;
 @end
 
 @implementation ZPAparelhoAirPlay
@@ -122,7 +144,8 @@ static NSString * _Nullable ZPPrimeiroIPv4(NSArray<NSData *> *enderecos) {
               identificador:(NSString *)identificador
                          ip:(NSString *)ip
                       porta:(NSString *)porta
-                  anfitriao:(NSString *)anfitriao {
+                  anfitriao:(NSString *)anfitriao
+        precisaDeEmparelhar:(BOOL)precisaDeEmparelhar {
     self = [super init];
     if (self) {
         _nome = [nome copy];
@@ -130,8 +153,15 @@ static NSString * _Nullable ZPPrimeiroIPv4(NSArray<NSData *> *enderecos) {
         _ip = [ip copy];
         _porta = [porta copy];
         _anfitriao = [anfitriao copy];
+        _anunciaEmparelhamento = precisaDeEmparelhar;
     }
     return self;
+}
+
+- (BOOL)precisaDeEmparelhar {
+    if (_anunciaEmparelhamento) return YES;
+    NSArray *marcados = [[NSUserDefaults standardUserDefaults] stringArrayForKey:kZPExigemEmparelhamentoDefaultsKey];
+    return self.identificador.length > 0 && [marcados containsObject:self.identificador];
 }
 
 - (NSString *)description {
@@ -360,7 +390,8 @@ static NSString * _Nullable ZPPrimeiroIPv4(NSArray<NSData *> *enderecos) {
                                  identificador:ZPPrefixoRAOP(servico.name) ?: @""
                                             ip:ip
                                          porta:[NSString stringWithFormat:@"%ld", (long)servico.port]
-                                     anfitriao:servico.hostName ?: @""];
+                                     anfitriao:servico.hostName ?: @""
+                           precisaDeEmparelhar:ZPExigeEmparelhamento(servico.TXTRecordData)];
 
     BOOL mudou = ![aparelho isEqual:self.porNome[nome]];
     self.porNome[nome] = aparelho;
@@ -370,7 +401,7 @@ static NSString * _Nullable ZPPrimeiroIPv4(NSArray<NSData *> *enderecos) {
     [self esquecerServicoChamado:servico.name];
 
     #ifdef DEBUG
-    NSLog(@"[AirPlay] %@", aparelho);
+    NSLog(@"[AirPlay] %@%@", aparelho, aparelho.precisaDeEmparelhar ? @" (exige emparelhamento)" : @"");
     #endif
 
     if (mudou) [self notificarMudanca];
@@ -427,3 +458,66 @@ static NSString * _Nullable ZPPrimeiroIPv4(NSArray<NSData *> *enderecos) {
 }
 
 @end
+
+#pragma mark - Credenciais do emparelhamento
+
+static NSString * const kZPServicoKeychain = @"tocaTintas AirPlay";
+
+NSNotificationName const kZPAirPlayExigeEmparelhamento = @"ZPAirPlayExigeEmparelhamento";
+NSNotificationName const kZPAirPlayEmparelhamentoConcluido = @"ZPAirPlayEmparelhamentoConcluido";
+
+void ZPMarcarExigeEmparelhamento(NSString *identificador) {
+    if (identificador.length == 0) return;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSArray *marcados = [defaults stringArrayForKey:kZPExigemEmparelhamentoDefaultsKey] ?: @[];
+    if ([marcados containsObject:identificador]) return;
+    [defaults setObject:[marcados arrayByAddingObject:identificador] forKey:kZPExigemEmparelhamentoDefaultsKey];
+}
+
+static NSDictionary *ZPConsultaKeychain(NSString *identificador) {
+    return @{
+        (__bridge id)kSecClass:       (__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecAttrService: kZPServicoKeychain,
+        (__bridge id)kSecAttrAccount: identificador,
+    };
+}
+
+NSString *ZPCredenciaisAirPlay(NSString *identificador) {
+    if (identificador.length == 0) return nil;
+
+    NSMutableDictionary *consulta = [ZPConsultaKeychain(identificador) mutableCopy];
+    consulta[(__bridge id)kSecReturnData] = @YES;
+    consulta[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
+
+    CFTypeRef resultado = NULL;
+    if (SecItemCopyMatching((__bridge CFDictionaryRef)consulta, &resultado) != errSecSuccess) {
+        return nil;
+    }
+    NSData *dados = CFBridgingRelease(resultado);
+    return [[NSString alloc] initWithData:dados encoding:NSUTF8StringEncoding];
+}
+
+BOOL ZPGuardarCredenciaisAirPlay(NSString *identificador, NSString *credenciais) {
+    if (identificador.length == 0 || credenciais.length == 0) return NO;
+
+    ZPApagarCredenciaisAirPlay(identificador);
+
+    NSMutableDictionary *item = [ZPConsultaKeychain(identificador) mutableCopy];
+    item[(__bridge id)kSecValueData] = [credenciais dataUsingEncoding:NSUTF8StringEncoding];
+    item[(__bridge id)kSecAttrLabel] = [NSString stringWithFormat:@"tocaTintas AirPlay (%@)", identificador];
+    // Só este Mac, e só com a sessão aberta: não há razão para estas chaves
+    // viajarem pelo iCloud.
+    item[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleWhenUnlockedThisDeviceOnly;
+
+    OSStatus estado = SecItemAdd((__bridge CFDictionaryRef)item, NULL);
+    if (estado != errSecSuccess) {
+        NSLog(@"[AirPlay] O Keychain recusou guardar as credenciais de %@ (%d).", identificador, (int)estado);
+        return NO;
+    }
+    return YES;
+}
+
+void ZPApagarCredenciaisAirPlay(NSString *identificador) {
+    if (identificador.length == 0) return;
+    SecItemDelete((__bridge CFDictionaryRef)ZPConsultaKeychain(identificador));
+}

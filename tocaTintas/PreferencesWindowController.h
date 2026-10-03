@@ -83,5 +83,9 @@ NSString *ZPCurrentBS2BEq(void);
 - (IBAction)chooseDirectory:(id)sender; // Action for opening the directory chooser
 - (void)reloadDirectoryPath; // Method to reload the directory path from user defaults
 
+/// Mostra a janela já no separador com este identificador («musica», «dsp»,
+/// «eq», «airplay», «emparelhar»).
+- (void)mostrarSeparador:(NSString *)identificador;
+
 @end
 
