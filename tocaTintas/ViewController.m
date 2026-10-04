@@ -253,6 +253,11 @@ static WavpackStreamReader memoryReader = {
 - (NSData *)prefetchedDataForTrack:(NSURL *)trackURL;
 - (NSData *)takePrefetchedDataForTrack:(NSURL *)trackURL;
 - (void)primeReplayGainForTrack:(NSURL *)trackURL;
+// Monkey's Audio: o callback da AudioQueue chama o -playApe: para repetir a faixa.
+- (void)playApe:(NSURL *)trackURL;
+- (void)handleApePlayback:(NSURL *)trackURL;
+- (void)extractAndDisplayMetadataForApe:(NSURL *)trackURL;
+- (void)closeApeDecoder;
 
 @property (nonatomic, strong) NSImageView *coverArtView;
 @property (nonatomic, strong) NSTextField *artistLabel;
@@ -464,6 +469,130 @@ static void ZPPintaBotaoDeTransporte(NSButton *botao, NSColor *cor) {
     botao.needsDisplay = YES;
 }
 
+#pragma mark - Monkey's Audio (APE)
+
+// Monkey's Audio pela libMAC do SDK oficial (13.27), ligada estaticamente. Usa-se
+// a interface C do MACDll.h, mas sem incluir o cabeçalho: é C++ (espaços de
+// nomes, argumentos por omissão) e não entra num .m. As funções são exportadas
+// sem decoração de C++, portanto chega declará-las aqui com tipos C. A libMAC é
+// C++ por dentro: o alvo tem de ligar também a libc++.
+//
+// Abre-se sempre pela variante «W», com o caminho em wchar_t (UTF-32 em macOS).
+// A outra passa o caminho por uma conversão de «ANSI» que não percebe UTF-8, e
+// falha com erro -1 em qualquer nome com acentos — que na fonoteca são muitos.
+extern void   *c_APEDecompress_CreateW(const wchar_t *ficheiro, int *erro);
+extern void    c_APEDecompress_Destroy(void *ape);
+extern int     c_APEDecompress_GetData(void *ape, unsigned char *buffer, int64_t blocos, int64_t *obtidos);
+extern int     c_APEDecompress_Seek(void *ape, int64_t bloco);
+extern int64_t c_APEDecompress_GetInfo(void *ape, int campo, int64_t p1, int64_t p2);
+
+// Valores de APE_INFO_FIELDS / APE_DECOMPRESS_FIELDS, do MACLib.h.
+enum {
+    kZPApeTaxa            = 1003,   // APE_INFO_SAMPLE_RATE
+    kZPApeBits            = 1004,   // APE_INFO_BITS_PER_SAMPLE
+    kZPApeCanais          = 1006,   // APE_INFO_CHANNELS
+    kZPApeAlinhamento     = 1007,   // APE_INFO_BLOCK_ALIGN (bytes por bloco, todos os canais)
+    kZPApeTotalDeBlocos   = 1016,   // APE_INFO_TOTAL_BLOCKS
+    kZPApeBlocoActual     = 2000,   // APE_DECOMPRESS_CURRENT_BLOCK
+};
+
+static void *ZPAbrirApe(NSURL *url, int *erro) {
+    NSMutableData *largo = [[url.path dataUsingEncoding:NSUTF32LittleEndianStringEncoding] mutableCopy];
+    if (!largo) return NULL;
+    uint32_t terminador = 0;
+    [largo appendBytes:&terminador length:sizeof terminador];
+    return c_APEDecompress_CreateW((const wchar_t *)largo.bytes, erro);
+}
+
+// Uma amostra APE (PCM inteiro little-endian, 8 a 32 bits; 8 bits sem sinal,
+// como no WAV) passada a 16 bits com sinal, que é o que a AudioQueue recebe —
+// igual ao caminho do WavPack.
+static inline int16_t ZPAmostraApeEm16(const unsigned char *p, int bits) {
+    switch (bits) {
+        case 8:  return (int16_t)(((int)p[0] - 128) << 8);
+        case 16: return (int16_t)(p[0] | (p[1] << 8));
+        case 24: return (int16_t)(p[1] | (p[2] << 8));
+        case 32: return (int16_t)(p[2] | (p[3] << 8));
+        default: return 0;
+    }
+}
+
+// A mesma amostra como número real em [-1, 1), para a análise de silêncio, sem
+// perder os bits de baixo que a passagem a 16 bits deita fora.
+static inline double ZPAmostraApeEmReal(const unsigned char *p, int bits) {
+    switch (bits) {
+        case 8:  return ((int)p[0] - 128) / 128.0;
+        case 16: return (int16_t)(p[0] | (p[1] << 8)) / 32768.0;
+        case 24: return ((int32_t)(((uint32_t)p[0] << 8) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 24)) >> 8) / 8388608.0;
+        case 32: return (int32_t)(p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24)) / 2147483648.0;
+        default: return 0.0;
+    }
+}
+
+// Etiquetas APEv2 do fim do ficheiro (rodapé «APETAGEX», com ou sem uma ID3v1 a
+// seguir). É o formato que o abcde e o rsgain escrevem nos .ape. Devolve as
+// chaves em minúsculas — o APEv2 não distingue maiúsculas nas chaves — e os
+// valores em bruto: texto UTF-8 ou, nos itens binários («cover art (front)»),
+// o nome do ficheiro terminado em zero seguido da imagem.
+static NSDictionary<NSString *, NSData *> *ZPLerEtiquetasAPEv2(NSURL *url) {
+    NSFileHandle *ficheiro = [NSFileHandle fileHandleForReadingFromURL:url error:NULL];
+    if (!ficheiro) return @{};
+
+    NSMutableDictionary<NSString *, NSData *> *itens = [NSMutableDictionary dictionary];
+    unsigned long long fim = 0;
+    if (![ficheiro seekToEndReturningOffset:&fim error:NULL] || fim < 32) {
+        [ficheiro closeFile];
+        return itens;
+    }
+
+    // Uma ID3v1 («TAG», 128 bytes) pode vir depois da APEv2.
+    if (fim >= 128 + 32 && [ficheiro seekToOffset:fim - 128 error:NULL]) {
+        NSData *id3 = [ficheiro readDataUpToLength:3 error:NULL];
+        if (id3.length == 3 && memcmp(id3.bytes, "TAG", 3) == 0) fim -= 128;
+    }
+
+    NSData *rodape = nil;
+    if ([ficheiro seekToOffset:fim - 32 error:NULL]) rodape = [ficheiro readDataUpToLength:32 error:NULL];
+    const uint8_t *r = rodape.bytes;
+    if (rodape.length != 32 || memcmp(r, "APETAGEX", 8) != 0) {
+        [ficheiro closeFile];
+        return itens;
+    }
+
+    // Tamanho (itens + rodapé, sem o cabeçalho) e número de itens, little-endian.
+    uint32_t tamanho = r[12] | (r[13] << 8) | (r[14] << 16) | ((uint32_t)r[15] << 24);
+    uint32_t total   = r[16] | (r[17] << 8) | (r[18] << 16) | ((uint32_t)r[19] << 24);
+    if (tamanho < 32 || tamanho > 16 * 1024 * 1024 || tamanho > fim) {
+        [ficheiro closeFile];
+        return itens;
+    }
+
+    NSData *corpo = nil;
+    if ([ficheiro seekToOffset:fim - tamanho error:NULL]) corpo = [ficheiro readDataUpToLength:tamanho - 32 error:NULL];
+    [ficheiro closeFile];
+    const uint8_t *b = corpo.bytes;
+    NSUInteger n = corpo.length, pos = 0;
+
+    for (uint32_t i = 0; i < total && pos + 8 < n; i++) {
+        uint32_t comprimento = b[pos] | (b[pos + 1] << 8) | (b[pos + 2] << 16) | ((uint32_t)b[pos + 3] << 24);
+        pos += 8;                                            // comprimento + flags
+        const uint8_t *zero = memchr(b + pos, 0, n - pos);
+        if (!zero) break;
+        NSString *chave = [[NSString alloc] initWithBytes:b + pos length:(NSUInteger)(zero - (b + pos))
+                                                 encoding:NSUTF8StringEncoding];
+        pos = (NSUInteger)(zero - b) + 1;
+        if (comprimento > n - pos) break;
+        if (chave.length > 0) itens[chave.lowercaseString] = [corpo subdataWithRange:NSMakeRange(pos, comprimento)];
+        pos += comprimento;
+    }
+    return itens;
+}
+
+static NSString *ZPTextoAPEv2(NSDictionary<NSString *, NSData *> *itens, NSString *chave) {
+    NSData *valor = itens[chave];
+    return valor ? [[NSString alloc] initWithData:valor encoding:NSUTF8StringEncoding] : nil;
+}
+
 
 @implementation ViewController
 
@@ -473,6 +602,9 @@ typedef struct {
     AudioQueueBufferRef buffers[NUM_BUFFERS];
     WavpackContext *wpc;  // WAVPack file context
     OggOpusFile *opusFile;  // Opus file context (added for Opus playback)
+    void *ape;              // Monkey's Audio (libMAC); ver «Monkey's Audio (APE)»
+    int apeBits;            // bits por amostra do .ape
+    int apeAlinhamento;     // bytes por bloco (todos os canais)
     int32_t *sampleBuffer;
     UInt32 bufferSize;
     BOOL isPlaying;
@@ -3235,6 +3367,15 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
 }
 
 // Add Ogg Opus support
+// Os bytes de um Opus aberto da ranhura do adiantamento. A op_open_memory guarda
+// só o ponteiro: sem quem segure o NSData, o ARC larga-o à saída do
+// -handleOpusPlayback:, a ranhura (lida mapeada) é desmapeada, e a primeira
+// leitura da AudioQueue vai a memória que já não existe — foi assim que o
+// primeiro Opus da fonoteca mandou a app abaixo, em op_mem_read. É o mesmo
+// cuidado do gWvKeptData do WavPack. Só se mexe nisto no thread principal, e
+// sempre depois de o descodificador anterior estar libertado.
+static NSData *gOpusKeptData = nil;
+
 - (void)handleOpusPlayback:(NSURL *)trackURL {
     [self startBs2bIfNeeded];
 
@@ -3253,8 +3394,11 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
 
     int error;
     OggOpusFile *opusFile = NULL;
+    // O descodificador anterior já foi libertado pelo -terminateOpusPlayback,
+    // portanto os bytes dele podem ir.
+    gOpusKeptData = dataToUse;
     if (dataToUse) {
-        opusFile = op_open_memory(dataToUse.bytes, dataToUse.length, &error);
+        opusFile = op_open_memory(gOpusKeptData.bytes, gOpusKeptData.length, &error);
     } else {
         const char *filePath = [trackURL.path UTF8String];
         opusFile = op_open_file(filePath, &error);
@@ -3264,6 +3408,7 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
         #ifdef DEBUG
         NSLog(@"Error opening Opus file: %d", error);
         #endif
+        gOpusKeptData = nil;
         return;
     }
 
@@ -3460,22 +3605,29 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
         playbackState.isPlaying = NO;
     }
     
+    // A fila primeiro, o descodificador depois. O AudioQueueStop de cima não
+    // espera — com «false» deixa os buffers pendentes chegar ao fim —, e o
+    // callback continuava a poder correr e a ler do OggOpusFile já libertado.
+    // O AudioQueueDispose com «true» pára de imediato e só volta quando já não
+    // há callback nenhum por chamar.
+    if (playbackState.audioQueue) {
+        AudioQueueDispose(playbackState.audioQueue, true);
+        playbackState.audioQueue = NULL;
+    }
+
     if (playbackState.opusFile) {
         op_free(playbackState.opusFile);
         playbackState.opusFile = NULL;
     }
-    
-    if (playbackState.audioQueue) {
-        // Dispose of the audio queue after ensuring it has stopped completely
-        AudioQueueDispose(playbackState.audioQueue, true);
-        playbackState.audioQueue = NULL;
-    }
-    
+
     if (self.progressUpdateTimer) {
         [self.progressUpdateTimer invalidate];
         self.progressUpdateTimer = nil;
     }
     
+    // O memset de baixo apagava o ponteiro de um .ape aberto sem o fechar.
+    [self closeApeDecoder];
+
     // Reset playback state variables
     memset(&playbackState, 0, sizeof(playbackState)); // Properly reset all variables
 
@@ -3849,7 +4001,7 @@ void flac_metadata_callback(const FLAC__StreamDecoder *decoder,
 
 // Add this method to update the progress bar based on WavPack playback progress
 - (void)updateWavPackProgress {
-    if (playbackState.wpc && playbackState.isPlaying) {
+    if ((playbackState.wpc || playbackState.ape) && playbackState.isPlaying) {
         [self updateProgressBarForWavPack];
     }
 
@@ -4036,6 +4188,240 @@ static NSData *gWvKeptData = nil;
         [self refreshPlayCountLabel];
 }
 
+#pragma mark - Reprodução de Monkey's Audio
+
+// Fecha um .ape que esteja aberto. Só no thread principal, e sempre depois de a
+// AudioQueue estar parada: é a fila que usa o descodificador.
+- (void)closeApeDecoder {
+    if (playbackState.ape) {
+        c_APEDecompress_Destroy(playbackState.ape);
+        playbackState.ape = NULL;
+    }
+}
+
+// Igual ao -handleWavPackPlayback:, para .ape.
+- (void)handleApePlayback:(NSURL *)trackURL {
+    [[UNUserNotificationCenter currentNotificationCenter] removePendingNotificationRequestsWithIdentifiers:@[@"NowPlaying"]];
+
+    // O ganho antes de tocar — ver «ReplayGain adiantado».
+    [self primeReplayGainForTrack:trackURL];
+
+    if (self.progressUpdateTimer) {
+        [self.progressUpdateTimer invalidate];
+        self.progressUpdateTimer = nil;
+    }
+
+    if (playbackState.audioQueue) {
+        AudioQueueDispose(playbackState.audioQueue, true);
+        playbackState.audioQueue = NULL;
+    }
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self.artistLabel setStringValue:@""];
+        [self.albumLabel setStringValue:@""];
+        [self.titleLabel setStringValue:@""];
+    });
+
+    [self playApe:trackURL];
+}
+
+// Igual ao -playWavPack:. A libMAC lê do ficheiro e não de memória, portanto a
+// ranhura do adiantamento não serve aqui; esvazia-se à mesma, para não ficar a
+// ocupar memória com uma faixa que já começou.
+- (void)playApe:(NSURL *)trackURL {
+    [self startBs2bIfNeeded];
+    NSURL *originalTrackURL = self.shuffledToOriginalMap[trackURL] ?: trackURL;
+
+    [self extractAndDisplayMetadataForApe:trackURL];
+    (void)[self takePrefetchedDataForTrack:trackURL];
+
+    // Um descodificador de outra faixa ainda aberto — o -stopAudio não fecha o
+    // WavPack — seria escolhido antes deste pelo callback, que pergunta primeiro
+    // por ele. Fecha-se tudo o que possa sobrar, com a fila já parada.
+    [self cleanupCoreAudioPlayback];
+    [self closeApeDecoder];
+    if (playbackState.wpc) {
+        WavpackCloseFile(playbackState.wpc);
+        playbackState.wpc = NULL;
+        if (gWvMemBuffer) { free(gWvMemBuffer); gWvMemBuffer = NULL; }
+        gWvKeptData = nil;
+    }
+    if (playbackState.opusFile) {
+        op_free(playbackState.opusFile);
+        playbackState.opusFile = NULL;
+    }
+
+    int erro = 0;
+    void *ape = ZPAbrirApe(trackURL, &erro);
+    if (!ape) {
+        NSLog(@"[APE] Não consegui abrir %@ (erro %d).", trackURL.lastPathComponent, erro);
+        return;
+    }
+
+    int sampleRate  = (int)c_APEDecompress_GetInfo(ape, kZPApeTaxa, 0, 0);
+    int bits        = (int)c_APEDecompress_GetInfo(ape, kZPApeBits, 0, 0);
+    int numChannels = (int)c_APEDecompress_GetInfo(ape, kZPApeCanais, 0, 0);
+    int alinhamento = (int)c_APEDecompress_GetInfo(ape, kZPApeAlinhamento, 0, 0);
+    int64_t blocos  = c_APEDecompress_GetInfo(ape, kZPApeTotalDeBlocos, 0, 0);
+
+    if (sampleRate <= 0 || numChannels <= 0 || alinhamento < numChannels * (bits / 8)
+        || !(bits == 8 || bits == 16 || bits == 24 || bits == 32)) {
+        NSLog(@"[APE] Formato que este caminho não toca: %d Hz, %d bits, %d canais (%@).",
+              sampleRate, bits, numChannels, trackURL.lastPathComponent);
+        c_APEDecompress_Destroy(ape);
+        return;
+    }
+
+    #ifdef DEBUG
+    NSLog(@"[APE] %@: %d canais, %d Hz, %d bits, %lld blocos.",
+          trackURL.lastPathComponent, numChannels, sampleRate, bits, blocos);
+    #endif
+
+    playbackState.client_data = self;
+    playbackState.numChannels = numChannels;
+    playbackState.sampleRate = sampleRate;
+    playbackState.totalDuration = (blocos > 0) ? (double)blocos / (double)sampleRate : 0.0;
+    playbackState.apeBits = bits;
+    playbackState.apeAlinhamento = alinhamento;
+
+    AudioStreamBasicDescription audioFormat = {0};
+    audioFormat.mSampleRate       = sampleRate;
+    audioFormat.mFormatID         = kAudioFormatLinearPCM;
+    audioFormat.mFramesPerPacket  = 1;
+    audioFormat.mChannelsPerFrame = numChannels;
+    audioFormat.mBitsPerChannel   = 16;
+    audioFormat.mBytesPerFrame    = 2 * numChannels;
+    audioFormat.mBytesPerPacket   = audioFormat.mBytesPerFrame;
+    audioFormat.mFormatFlags      = kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked;
+
+    playbackState.bufferSize = (UInt32)(sampleRate * 2 * numChannels * 2.0);
+    // Até 10 000 blocos por chamada ao descodificador, no tamanho de bloco do
+    // ficheiro — o callback converte daí para os 16 bits da fila.
+    playbackState.sampleBuffer = malloc((size_t)10000 * (size_t)alinhamento);
+    playbackState.didApplyFadeIn = NO;
+    playbackState.pendingSeekFrame = 0;
+    playbackState.skippedFrames = 0;
+    playbackState.isPlaying = YES;
+    playbackState.ape = ape;
+
+    OSStatus status = AudioQueueNewOutput(&audioFormat, MyAudioQueueOutputCallback, &playbackState,
+                                          NULL, NULL, 0, &playbackState.audioQueue);
+    if (status == noErr) {
+        for (int i = 0; i < NUM_BUFFERS && status == noErr; i++) {
+            status = AudioQueueAllocateBuffer(playbackState.audioQueue, playbackState.bufferSize, &playbackState.buffers[i]);
+            if (status == noErr) {
+                MyAudioQueueOutputCallback(&playbackState, playbackState.audioQueue, playbackState.buffers[i]);
+            }
+        }
+    }
+    if (status == noErr) {
+        status = AudioQueueStart(playbackState.audioQueue, NULL);
+    }
+    if (status != noErr) {
+        NSLog(@"[APE] A AudioQueue recusou arrancar (%d).", (int)status);
+        playbackState.isPlaying = NO;
+        if (playbackState.audioQueue) {
+            AudioQueueDispose(playbackState.audioQueue, true);
+            playbackState.audioQueue = NULL;
+        }
+        for (int i = 0; i < NUM_BUFFERS; i++) playbackState.buffers[i] = NULL;
+        [self closeApeDecoder];
+        free(playbackState.sampleBuffer);
+        playbackState.sampleBuffer = NULL;
+        return;
+    }
+
+    [self beginSilenceAnalysisForTrack:trackURL];
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.progressUpdateTimer) {
+            [self.progressUpdateTimer invalidate];
+        }
+        // O mesmo temporizador do WavPack: serve os dois.
+        self.progressUpdateTimer = [NSTimer scheduledTimerWithTimeInterval:1.0
+                                                                    target:self
+                                                                  selector:@selector(updateWavPackProgress)
+                                                                  userInfo:nil
+                                                                   repeats:YES];
+    });
+
+    if (originalTrackURL) {
+        [self schedulePlayCountIncrementForTrack:originalTrackURL];
+    }
+    [self refreshPlayCountLabel];
+}
+
+// Metadados de um .ape: etiquetas APEv2 (como o WavPack, mas lidas à mão — a
+// libMAC só as expõe pela interface C++). Os .ape do abcde não trazem capa; nesse
+// caso vai-se à cover.jpg ou folder.jpg da pasta do álbum.
+- (void)extractAndDisplayMetadataForApe:(NSURL *)trackURL {
+    NSDictionary<NSString *, NSData *> *itens = ZPLerEtiquetasAPEv2(trackURL);
+
+    NSString *artist = ZPTextoAPEv2(itens, @"artist") ?: @"Unknown Artist";
+    NSString *album  = ZPTextoAPEv2(itens, @"album")  ?: @"Unknown Album";
+    NSString *title  = ZPTextoAPEv2(itens, @"title")  ?: trackURL.lastPathComponent.stringByDeletingPathExtension;
+    artist = [self replaceSingleQuoteAndSmartQuotes:artist];
+    album  = [self replaceSingleQuoteAndSmartQuotes:album];
+    title  = [self replaceSingleQuoteAndSmartQuotes:title];
+
+    // «01» ou «1/9»: fica o número, sem zeros à esquerda.
+    NSString *trackNumber = [(ZPTextoAPEv2(itens, @"track") ?: @"0") componentsSeparatedByString:@"/"].firstObject;
+    NSInteger numero = trackNumber.integerValue;
+    trackNumber = [NSString stringWithFormat:@"%ld", (long)numero];
+
+    NSData *coverArtData = nil;
+    NSData *binario = itens[@"cover art (front)"];
+    if (binario.length > 0) {
+        const uint8_t *b = binario.bytes;
+        const uint8_t *zero = memchr(b, 0, binario.length);
+        if (zero && (NSUInteger)(zero - b) + 1 < binario.length) {
+            NSUInteger inicio = (NSUInteger)(zero - b) + 1;
+            coverArtData = [binario subdataWithRange:NSMakeRange(inicio, binario.length - inicio)];
+        }
+    }
+    if (!coverArtData) {
+        // Primeiro a albumart_backup/cover.jpg (ou .png), onde o abcde guarda a
+        // capa de cada álbum; depois os nomes do costume; por fim qualquer
+        // imagem da pasta, por ordem alfabética. Ao embutir a capa nos vários
+        // formatos, o abcde chega a apagar a cover.jpg do álbum e a deixar só as
+        // «cover-resized-NNNN.jpg».
+        NSURL *pasta = trackURL.URLByDeletingLastPathComponent;
+        for (NSString *nome in @[@"albumart_backup/cover.jpg", @"albumart_backup/cover.png",
+                                 @"cover.jpg", @"folder.jpg", @"front.jpg", @"cover.png", @"folder.png"]) {
+            coverArtData = [NSData dataWithContentsOfURL:[pasta URLByAppendingPathComponent:nome]];
+            if (coverArtData) break;
+        }
+        if (!coverArtData) {
+            NSArray<NSURL *> *conteudo = [[NSFileManager defaultManager] contentsOfDirectoryAtURL:pasta
+                                                                       includingPropertiesForKeys:nil
+                                                                                          options:NSDirectoryEnumerationSkipsHiddenFiles
+                                                                                            error:NULL];
+            NSArray<NSURL *> *ordenado = [conteudo sortedArrayUsingComparator:^NSComparisonResult(NSURL *a, NSURL *b) {
+                return [a.lastPathComponent localizedStandardCompare:b.lastPathComponent];
+            }];
+            for (NSURL *ficheiro in ordenado) {
+                NSString *ext = ficheiro.pathExtension.lowercaseString;
+                if ([ext isEqualToString:@"jpg"] || [ext isEqualToString:@"jpeg"] || [ext isEqualToString:@"png"]) {
+                    coverArtData = [NSData dataWithContentsOfURL:ficheiro];
+                    if (coverArtData) break;
+                }
+            }
+        }
+    }
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSString *formattedTitle = [NSString stringWithFormat:@"%@. %@", trackNumber, title];
+        [self.artistLabel setStringValue:artist];
+        [self.albumLabel setStringValue:album];
+        [self.titleLabel setStringValue:formattedTitle];
+
+        NSImage *capa = coverArtData ? [[NSImage alloc] initWithData:coverArtData] : nil;
+        [self.coverArtView setImage:(capa.size.width > 0 ? capa : nil)];
+
+        [self triggerNowPlayingNotificationWithTitle:formattedTitle artist:artist album:album];
+    });
+}
+
 
 // Callback to handle audio buffer playback
 void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueueBufferRef inBuffer) {
@@ -4151,6 +4537,89 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
                 #endif
                 [viewController cleanupCoreAudioPlayback];
                 [viewController playWavPack:viewController.audioFiles[viewController.currentTrackIndex]];
+            } else {
+                [viewController handlePlaybackCompletion];
+            }
+        }
+    } else if (playbackState->ape) {
+        // Monkey's Audio: o mesmo esquema do WavPack. O salto de silêncio é
+        // aplicado aqui porque é esta a thread que usa o descodificador.
+        int64_t seekFrame = playbackState->pendingSeekFrame;
+        if (seekFrame > 0) {
+            int64_t currentFrame = c_APEDecompress_GetInfo(playbackState->ape, kZPApeBlocoActual, 0, 0);
+            if (seekFrame > currentFrame && c_APEDecompress_Seek(playbackState->ape, seekFrame) == 0) {
+                playbackState->skippedFrames += (double)(seekFrame - currentFrame);
+                playbackState->didApplyFadeIn = NO;  // fade-in curto ao retomar a música
+            }
+            playbackState->pendingSeekFrame = 0;
+        }
+
+        int numChannels = playbackState->numChannels;
+        int bits = playbackState->apeBits;
+        int bytesPorAmostra = bits / 8;
+        int alinhamento = playbackState->apeAlinhamento;
+
+        // A AudioQueue recebe 16 bits; o sampleBuffer recebe os blocos tal como
+        // a libMAC os entrega, com o tamanho de bloco do ficheiro.
+        int64_t maxBlocos = (int64_t)(inBuffer->mAudioDataBytesCapacity / (2 * (UInt32)numChannels));
+        maxBlocos = MIN(maxBlocos, 10000);
+
+        unsigned char *origem = (unsigned char *)playbackState->sampleBuffer;
+        int64_t obtidos = 0;
+        int estado = c_APEDecompress_GetData(playbackState->ape, origem, maxBlocos, &obtidos);
+
+        if (estado == 0 && obtidos > 0) {
+            int16_t *out = (int16_t *)inBuffer->mAudioData;
+            for (int64_t i = 0; i < obtidos; i++) {
+                const unsigned char *bloco = origem + i * alinhamento;
+                for (int ch = 0; ch < numChannels; ch++) {
+                    out[i * numChannels + ch] = ZPAmostraApeEm16(bloco + ch * bytesPorAmostra, bits);
+                }
+            }
+
+            ViewController *vc = (ViewController *)playbackState->client_data;
+            if (!playbackState->didApplyFadeIn &&
+                [vc respondsToSelector:@selector(applyFadeInToAudioBuffer:totalSamples:numChannels:sampleRate:)])
+            {
+                [vc applyFadeInToAudioBuffer:out
+                                totalSamples:(uint32_t)obtidos
+                                 numChannels:numChannels
+                                  sampleRate:(int)playbackState->sampleRate];
+                playbackState->didApplyFadeIn = YES;
+            }
+
+            size_t dataSize = (size_t)obtidos * 2 * (size_t)numChannels;
+            if (dataSize > inBuffer->mAudioDataBytesCapacity) {
+                dataSize = inBuffer->mAudioDataBytesCapacity;
+            }
+            inBuffer->mAudioDataByteSize = (UInt32)dataSize;
+
+            OSStatus status = AudioQueueEnqueueBuffer(inAQ, inBuffer, 0, NULL);
+            if (status != noErr) {
+                #ifdef DEBUG
+                NSLog(@"[APE] Erro a pôr o buffer na fila: %d", (int)status);
+                #endif
+            }
+        } else {
+            // Fim da faixa (ou erro do descodificador, que vale o mesmo).
+            AudioQueueStop(inAQ, true);
+            playbackState->isPlaying = NO;
+            #ifdef DEBUG
+            NSLog(@"[APE] Fim da reprodução (estado %d).", estado);
+            #endif
+
+            c_APEDecompress_Destroy(playbackState->ape);
+            playbackState->ape = NULL;
+
+            if (playbackState->sampleBuffer) {
+                free(playbackState->sampleBuffer);
+                playbackState->sampleBuffer = NULL;
+            }
+
+            ViewController *viewController = playbackState->client_data;
+            if (viewController.isRepeatModeActive) {
+                [viewController cleanupCoreAudioPlayback];
+                [viewController playApe:viewController.audioFiles[viewController.currentTrackIndex]];
             } else {
                 [viewController handlePlaybackCompletion];
             }
@@ -4315,6 +4784,12 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
                     [self handleFlacPlayback:nextTrackURL];
                 };
                 dispatch_async(dispatch_get_main_queue(), playFlacBlock);
+            } else if ([extension isEqualToString:@"ape"]) {
+                // Monkey's Audio; o -playApe: arma o seu próprio temporizador
+                dispatch_block_t playApeBlock = ^{
+                    [self handleApePlayback:nextTrackURL];
+                };
+                dispatch_async(dispatch_get_main_queue(), playApeBlock);
             } else if ([extension isEqualToString:@"opus"]) {
                 // Opus playback
                 dispatch_block_t playOpusBlock = ^{
@@ -4425,6 +4900,11 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
                     [self handleFlacPlayback:nextTrackURL];
                 };
                 dispatch_async(dispatch_get_main_queue(), playFlacBlock);
+            } else if ([extension isEqualToString:@"ape"]) {
+                dispatch_block_t playApeBlock = ^{
+                    [self handleApePlayback:nextTrackURL];
+                };
+                dispatch_async(dispatch_get_main_queue(), playApeBlock);
             } else if ([extension isEqualToString:@"opus"]) {
                 dispatch_block_t playOpusBlock = ^{
                     [self handleOpusPlayback:nextTrackURL];
@@ -4602,6 +5082,8 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
         [self handleWavPackPlayback:trackURL];
     } else if ([extension isEqualToString:@"flac"]) {
         [self handleFlacPlayback:trackURL];
+    } else if ([extension isEqualToString:@"ape"]) {
+        [self handleApePlayback:trackURL];
     } else if ([extension isEqualToString:@"opus"]) {
         [self handleOpusPlayback:trackURL];  // Add Opus playback support here
     } else {
@@ -6197,7 +6679,7 @@ static NSSet<NSString *> *ZPSupportedAudioExtensions(void) {
     static NSSet<NSString *> *extensions = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        extensions = [NSSet setWithObjects:@"mp3", @"m4a", @"wav", @"aac", @"flac", @"wv", @"opus", @"aiff", nil];
+        extensions = [NSSet setWithObjects:@"mp3", @"m4a", @"wav", @"aac", @"flac", @"wv", @"ape", @"opus", @"aiff", nil];
     });
     return extensions;
 }
@@ -6817,7 +7299,7 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     }
 
     // Handle WAVPack file progress
-    if (playbackState.wpc && playbackState.isPlaying) {
+    if ((playbackState.wpc || playbackState.ape) && playbackState.isPlaying) {
         [self updateProgressBarForWavPack];
     }
 
@@ -6928,7 +7410,7 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
 - (BOOL)currentPlaybackTime:(double *)outTime duration:(double *)outDuration {
     // WavPack e Opus: relógio da AudioQueue, corrigido pelas frames já saltadas
     if (playbackState.audioQueue && playbackState.isPlaying &&
-        (playbackState.wpc || playbackState.opusFile)) {
+        (playbackState.wpc || playbackState.ape || playbackState.opusFile)) {
 
         if (playbackState.totalDuration <= 0.0) {
             return NO;
@@ -6974,7 +7456,7 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
 
     double target = MAX(0.0, MIN(targetTime, duration));
 
-    if (playbackState.audioQueue && (playbackState.wpc || playbackState.opusFile)) {
+    if (playbackState.audioQueue && (playbackState.wpc || playbackState.ape || playbackState.opusFile)) {
         // O salto é aplicado no callback do descodificador, na thread onde este
         // corre; libwavpack e libopusfile não podem ser usados a partir daqui.
         double sampleRate = playbackState.sampleRate > 0 ? playbackState.sampleRate : 48000.0;
@@ -7009,6 +7491,9 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     }
     if ([extension isEqualToString:@"opus"]) {
         return [self silenceGapsInOpusFileAtURL:url generation:generation];
+    }
+    if ([extension isEqualToString:@"ape"]) {
+        return [self silenceGapsInApeFileAtURL:url generation:generation];
     }
     return [self silenceGapsInDecodableFileAtURL:url generation:generation];
 }
@@ -7086,6 +7571,75 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     }
 
     if (atomic_load(&gSilenceAnalysisGeneration) != generation) {
+        return nil;
+    }
+
+    // Fecha um eventual silêncio final
+    ZPSilenceAccumulate(NO, frameIndex, sampleRate, &silenceStartFrame, gaps);
+    return gaps;
+}
+
+// Monkey's Audio, com um descodificador só para isto: a análise corre noutra
+// thread, e o da reprodução é da AudioQueue.
+- (NSArray<NSValue *> *)silenceGapsInApeFileAtURL:(NSURL *)url generation:(uint64_t)generation {
+    int erro = 0;
+    void *ape = ZPAbrirApe(url, &erro);
+    if (!ape) {
+        #ifdef DEBUG
+        NSLog(@"Análise de silêncio: não foi possível abrir %@ (erro %d)", url.lastPathComponent, erro);
+        #endif
+        return nil;
+    }
+
+    int numChannels = (int)c_APEDecompress_GetInfo(ape, kZPApeCanais, 0, 0);
+    int bits        = (int)c_APEDecompress_GetInfo(ape, kZPApeBits, 0, 0);
+    int alinhamento = (int)c_APEDecompress_GetInfo(ape, kZPApeAlinhamento, 0, 0);
+    double sampleRate = (double)c_APEDecompress_GetInfo(ape, kZPApeTaxa, 0, 0);
+    int bytesPorAmostra = bits / 8;
+
+    if (numChannels <= 0 || sampleRate <= 0.0 || alinhamento < numChannels * bytesPorAmostra
+        || !(bits == 8 || bits == 16 || bits == 24 || bits == 32)) {
+        c_APEDecompress_Destroy(ape);
+        return nil;
+    }
+
+    int64_t blockFrames = (int64_t)MAX(1.0, round(sampleRate * kZPSilenceAnalysisBlockDuration));
+    unsigned char *blocos = malloc((size_t)blockFrames * (size_t)alinhamento);
+    if (!blocos) {
+        c_APEDecompress_Destroy(ape);
+        return nil;
+    }
+
+    NSMutableArray<NSValue *> *gaps = [NSMutableArray array];
+    int64_t silenceStartFrame = -1;
+    int64_t frameIndex = 0;
+
+    while (atomic_load(&gSilenceAnalysisGeneration) == generation) {
+        int64_t decoded = 0;
+        if (c_APEDecompress_GetData(ape, blocos, blockFrames, &decoded) != 0 || decoded <= 0) {
+            break;
+        }
+
+        double sum = 0.0;
+        for (int64_t f = 0; f < decoded; f++) {
+            const unsigned char *bloco = blocos + f * alinhamento;
+            for (int ch = 0; ch < numChannels; ch++) {
+                double value = ZPAmostraApeEmReal(bloco + ch * bytesPorAmostra, bits);
+                sum += value * value;
+            }
+        }
+
+        double rms = sqrt(sum / (double)(decoded * numChannels));
+        ZPSilenceAccumulate(rms < kZPSilenceThreshold, frameIndex, sampleRate, &silenceStartFrame, gaps);
+        frameIndex += decoded;
+    }
+
+    BOOL cancelled = (atomic_load(&gSilenceAnalysisGeneration) != generation);
+
+    free(blocos);
+    c_APEDecompress_Destroy(ape);
+
+    if (cancelled) {
         return nil;
     }
 
@@ -7318,6 +7872,9 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
         playbackState.opusFile = NULL;
     }
 
+    // Monkey's Audio: a fila já foi desfeita acima, o descodificador pode ir.
+    [self closeApeDecoder];
+
     // Stop the AVAudioPlayer if it's playing
     if (self.audioPlayer) {
         [self.audioPlayer stop];  // Stop the AVAudioPlayer
@@ -7350,7 +7907,7 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
 - (void)pauseAudio {
     if (playbackState.isPlaying) {
         // Handle WAVPack AudioQueue pause
-        if (playbackState.audioQueue && playbackState.wpc) {
+        if (playbackState.audioQueue && (playbackState.wpc || playbackState.ape)) {
             AudioQueuePause(playbackState.audioQueue); // Pause the AudioQueue
             playbackState.isPlaying = NO;
 
@@ -7430,7 +7987,7 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     BOOL resumed = NO;
 
     // Resume playback for WAVPack
-    if (playbackState.wpc && playbackState.audioQueue) {
+    if ((playbackState.wpc || playbackState.ape) && playbackState.audioQueue) {
         AudioQueueStart(playbackState.audioQueue, NULL); // Resume the AudioQueue
         playbackState.isPlaying = YES;
 
@@ -7814,6 +8371,8 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
         dispatch_async(dispatch_get_main_queue(), flacMetadataBlock);
     } else if ([extension isEqualToString:@"wv"]) {
         dispatch_async(dispatch_get_main_queue(), wavPackMetadataBlock);
+    } else if ([extension isEqualToString:@"ape"]) {
+        [self extractAndDisplayMetadataForApe:url];
     } else {
         dispatch_async(dispatch_get_main_queue(), otherFormatsMetadataBlock);
     }
@@ -8293,6 +8852,13 @@ static ZPReplayGainLido ZPLerReplayGain(NSURL *url, NSData *dados) {
     else if ([extensao isEqualToString:@"m4a"] || [extensao isEqualToString:@"m4b"]
              || [extensao isEqualToString:@"mp4"])  rg = ZPLerReplayGainContentor(url, dados, YES);
     else if ([extensao isEqualToString:@"mp3"])  rg = ZPLerReplayGainContentor(url, dados, NO);
+    else if ([extensao isEqualToString:@"ape"]) {
+        // Etiquetas APEv2, do fim do ficheiro; os mesmos nomes que nos outros.
+        NSDictionary<NSString *, NSData *> *itens = ZPLerEtiquetasAPEv2(url);
+        for (NSString *chave in itens) {
+            ZPAplicarEtiquetaReplayGain(chave, ZPTextoAPEv2(itens, chave), &rg);
+        }
+    }
 
     // Correu, e é isso que `pronto` quer dizer — mesmo para os formatos que aqui
     // não se lêem e mesmo para uma faixa sem etiquetas nenhumas. Quem receber

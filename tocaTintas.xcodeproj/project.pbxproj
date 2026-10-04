@@ -49,6 +49,8 @@
 		1FC9EE5F2E47CD4E006E3B2D /* ZPSpotLightwv.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1FC9EE562E47CD4D006E3B2D /* ZPSpotLightwv.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		1FC9EE632E47D3E7006E3B2D /* libwavpack.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F651EE52C88B91D00CA223D /* libwavpack.a */; };
 		1FC9EE652E4809FC006E3B2D /* CoreSpotlight.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FC9EE642E4809FC006E3B2D /* CoreSpotlight.framework */; };
+		1FE43C2E307304AF0030BCFC /* libc++.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FE43C2D307304AF0030BCFC /* libc++.tbd */; };
+		1FE43C30307305B50030BCFC /* libMAC.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FE43C2F307305B50030BCFC /* libMAC.a */; };
 		1FE94C532C7CDAE700C3EF4E /* HistogramView.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FE94C522C7CDAE700C3EF4E /* HistogramView.m */; };
 		1FF2BD3F2CEF75CE009726BF /* ListAudioDevices in Resources */ = {isa = PBXBuildFile; fileRef = 1FF2BD3E2CEF75CE009726BF /* ListAudioDevices */; };
 		9E7D6D52EBF61BE8A212D080 /* libPods-tocaTintas.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 17E8DA888F4D64ACE9A45A1E /* libPods-tocaTintas.a */; };
@@ -153,6 +155,8 @@
 		1FC9EE5B2E47CD4E006E3B2D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		1FC9EE5C2E47CD4E006E3B2D /* ZPSpotLightwv.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ZPSpotLightwv.entitlements; sourceTree = "<group>"; };
 		1FC9EE642E4809FC006E3B2D /* CoreSpotlight.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreSpotlight.framework; path = System/Library/Frameworks/CoreSpotlight.framework; sourceTree = SDKROOT; };
+		1FE43C2D307304AF0030BCFC /* libc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.tbd"; path = "usr/lib/libc++.tbd"; sourceTree = SDKROOT; };
+		1FE43C2F307305B50030BCFC /* libMAC.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libMAC.a; path = tocaTintas.xcodeproj/Frameworks/libMAC.a; sourceTree = "<group>"; };
 		1FE94C522C7CDAE700C3EF4E /* HistogramView.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = HistogramView.m; sourceTree = "<group>"; };
 		1FE94C562C7CDB5000C3EF4E /* HistogramView.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = HistogramView.h; sourceTree = "<group>"; };
 		1FEC26C92E33C1EB0099225A /* QuickLookThumbnailing.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuickLookThumbnailing.framework; path = System/Library/PrivateFrameworks/QuickLookThumbnailing.framework; sourceTree = SDKROOT; };
@@ -170,8 +174,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1FE43C2E307304AF0030BCFC /* libc++.tbd in Frameworks */,
 				1F7D75262C9642000046E0AC /* libopus.a in Frameworks */,
 				1F7D75272C9642000046E0AC /* libopusfile.a in Frameworks */,
+				1FE43C30307305B50030BCFC /* libMAC.a in Frameworks */,
 				1F651EE82C88B91D00CA223D /* libwavpack.a in Frameworks */,
 				1F651EE92C88B91D00CA223D /* libFLAC.a in Frameworks */,
 				1F651EEA2C88B91D00CA223D /* libogg.a in Frameworks */,
@@ -282,6 +288,8 @@
 		1F2614442C7DDECB0041651D /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				1FE43C2F307305B50030BCFC /* libMAC.a */,
+				1FE43C2D307304AF0030BCFC /* libc++.tbd */,
 				1F2FB2BC2E494C00008CD88C /* UniformTypeIdentifiers.framework */,
 				1F2FB2BA2E494BE7008CD88C /* Foundation.framework */,
 				1FC9EE642E4809FC006E3B2D /* CoreSpotlight.framework */,
