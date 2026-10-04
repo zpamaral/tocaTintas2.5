@@ -3,3 +3,4 @@ DerivedData/
 **/xcuserdata/
 *.xcscmblueprint
 .claude/
+.DS_Store
