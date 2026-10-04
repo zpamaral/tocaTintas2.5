@@ -8049,15 +8049,240 @@ static ZPReplayGainLido ZPLerReplayGainWavPack(NSURL *url, NSData *dados) {
     return rg;
 }
 
+// Leitura de bytes por posição, ou da ranhura do adiantamento (o ficheiro já
+// em memória) ou do próprio ficheiro, aos bocados. Num M4A que não foi
+// adiantado o `moov` pode estar no fim; ler só os átomos de que se precisa é a
+// diferença entre uns quilobytes e o ficheiro inteiro a vir do disco externo.
+typedef struct {
+    NSData *dados;
+    NSFileHandle *ficheiro;
+    unsigned long long tamanho;
+} ZPLeitorDeBytes;
+
+static NSData *ZPLerBytes(ZPLeitorDeBytes *leitor, unsigned long long posicao, NSUInteger comprimento) {
+    if (posicao >= leitor->tamanho) return nil;
+    if (comprimento > leitor->tamanho - posicao) comprimento = (NSUInteger)(leitor->tamanho - posicao);
+    if (leitor->dados) {
+        return [leitor->dados subdataWithRange:NSMakeRange((NSUInteger)posicao, comprimento)];
+    }
+    NSError *erro = nil;
+    if (![leitor->ficheiro seekToOffset:posicao error:&erro]) return nil;
+    return [leitor->ficheiro readDataUpToLength:comprimento error:&erro];
+}
+
+static uint32_t ZPBE32(const uint8_t *p) {
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
+}
+
+// Uma etiqueta de ReplayGain pelo nome, como a leitura do AVAsset as reconhece:
+// sem olhar a maiúsculas, com «_» ou espaço, e com ou sem prefixo
+// («com.apple.iTunes.», «org.hydrogenaudio.replaygain.»). O valor do ganho vem
+// como «-7.71 dB», e o -floatValue pára no espaço.
+static void ZPAplicarEtiquetaReplayGain(NSString *nome, NSString *valor, ZPReplayGainLido *rg) {
+    if (nome.length == 0 || valor.length == 0) return;
+    NSString *chave = [[nome lowercaseString] stringByReplacingOccurrencesOfString:@" " withString:@"_"];
+    float numero = valor.floatValue;
+    if ([chave hasSuffix:@"replaygain_track_gain"])      { rg->trackGain = numero; rg->lido = YES; }
+    else if ([chave hasSuffix:@"replaygain_track_peak"]) { rg->trackPeak = numero; rg->lido = YES; }
+    else if ([chave hasSuffix:@"replaygain_album_gain"]) { rg->albumGain = numero; rg->lido = YES; }
+    else if ([chave hasSuffix:@"replaygain_album_peak"]) { rg->albumPeak = numero; rg->lido = YES; }
+}
+
+// --- M4A: átomos moov/udta/meta/ilst/---- -----------------------------------
+//
+// O iTunes, o foobar2000 e o MusicBrainz Picard guardam o ReplayGain em itens
+// «----» (livres) do ilst, cada um com três filhos: «mean» (o domínio, p. ex.
+// com.apple.iTunes), «name» (REPLAYGAIN_TRACK_GAIN…) e «data» (o valor, em
+// texto). Os limites servem para um ficheiro estragado não pôr isto a ler o
+// disco inteiro: um moov com mais de 16 MB não é de música.
+
+static const unsigned long long kZPMaxMoov = 16ull * 1024 * 1024;
+
+// Procura, entre `inicio` e `fim`, um átomo do tipo dado. Devolve a posição do
+// conteúdo (a seguir ao cabeçalho) e o fim do átomo.
+static BOOL ZPProcurarAtomo(ZPLeitorDeBytes *leitor, unsigned long long inicio, unsigned long long fim,
+                            const char tipo[4], unsigned long long *conteudo, unsigned long long *fimDoAtomo) {
+    unsigned long long pos = inicio;
+    while (pos + 8 <= fim) {
+        NSData *cab = ZPLerBytes(leitor, pos, 16);
+        if (cab.length < 8) return NO;
+        const uint8_t *b = cab.bytes;
+        unsigned long long tamanho = ZPBE32(b);
+        unsigned long long cabecalho = 8;
+        if (tamanho == 1) {
+            if (cab.length < 16) return NO;
+            tamanho = ((unsigned long long)ZPBE32(b + 8) << 32) | ZPBE32(b + 12);
+            cabecalho = 16;
+        } else if (tamanho == 0) {
+            tamanho = fim - pos;          // até ao fim do contentor
+        }
+        if (tamanho < cabecalho || pos + tamanho > fim) return NO;
+        if (memcmp(b + 4, tipo, 4) == 0) {
+            *conteudo = pos + cabecalho;
+            *fimDoAtomo = pos + tamanho;
+            return YES;
+        }
+        pos += tamanho;
+    }
+    return NO;
+}
+
+static void ZPLerIlst(NSData *ilst, ZPReplayGainLido *rg) {
+    const uint8_t *b = ilst.bytes;
+    NSUInteger n = ilst.length, pos = 0;
+    while (pos + 8 <= n) {
+        uint32_t tamanho = ZPBE32(b + pos);
+        if (tamanho < 8 || pos + tamanho > n) return;
+        if (memcmp(b + pos + 4, "----", 4) == 0) {
+            NSString *nome = nil, *valor = nil;
+            NSUInteger sub = pos + 8, fim = pos + tamanho;
+            while (sub + 8 <= fim) {
+                uint32_t t = ZPBE32(b + sub);
+                if (t < 8 || sub + t > fim) break;
+                // «name» e «mean» têm 4 bytes de versão e flags; «data» tem 4
+                // de tipo e 4 de localização antes do valor.
+                if (memcmp(b + sub + 4, "name", 4) == 0 && t >= 12) {
+                    nome = [[NSString alloc] initWithBytes:b + sub + 12 length:t - 12 encoding:NSUTF8StringEncoding];
+                } else if (memcmp(b + sub + 4, "data", 4) == 0 && t >= 16) {
+                    valor = [[NSString alloc] initWithBytes:b + sub + 16 length:t - 16 encoding:NSUTF8StringEncoding];
+                }
+                sub += t;
+            }
+            ZPAplicarEtiquetaReplayGain(nome, valor, rg);
+        }
+        pos += tamanho;
+    }
+}
+
+static ZPReplayGainLido ZPLerReplayGainMP4(ZPLeitorDeBytes *leitor) {
+    ZPReplayGainLido rg = kZPReplayGainVazio;
+    unsigned long long moov = 0, fimMoov = 0;
+    if (!ZPProcurarAtomo(leitor, 0, leitor->tamanho, "moov", &moov, &fimMoov)) return rg;
+    if (fimMoov - moov > kZPMaxMoov) return rg;
+
+    // O meta costuma estar em moov/udta/meta; há ficheiros com moov/meta.
+    unsigned long long udta = 0, fimUdta = 0, meta = 0, fimMeta = 0;
+    BOOL temMeta = NO;
+    if (ZPProcurarAtomo(leitor, moov, fimMoov, "udta", &udta, &fimUdta)) {
+        temMeta = ZPProcurarAtomo(leitor, udta, fimUdta, "meta", &meta, &fimMeta);
+    }
+    if (!temMeta) {
+        temMeta = ZPProcurarAtomo(leitor, moov, fimMoov, "meta", &meta, &fimMeta);
+    }
+    if (!temMeta) return rg;
+
+    // O meta é uma «full box»: 4 bytes de versão e flags antes dos filhos.
+    unsigned long long ilst = 0, fimIlst = 0;
+    if (!ZPProcurarAtomo(leitor, meta + 4, fimMeta, "ilst", &ilst, &fimIlst)) return rg;
+
+    NSData *dados = ZPLerBytes(leitor, ilst, (NSUInteger)(fimIlst - ilst));
+    if (dados.length == fimIlst - ilst) ZPLerIlst(dados, &rg);
+    return rg;
+}
+
+// --- MP3: molduras TXXX do ID3v2 ---------------------------------------------
+//
+// Cada TXXX tem a codificação, uma descrição terminada em zero (o nome da
+// etiqueta) e o valor. Só se lê a etiqueta do início do ficheiro: é onde o
+// iTunes, o foobar2000 e o Picard a põem, e é a que o AVFoundation lê. A
+// dessincronização (rara, e só em etiquetas antigas) faz desistir.
+
+static NSString *ZPTextoID3(const uint8_t *p, NSUInteger n, uint8_t codificacao) {
+    switch (codificacao) {
+        case 0:  return [[NSString alloc] initWithBytes:p length:n encoding:NSISOLatin1StringEncoding];
+        case 1:  return [[NSString alloc] initWithBytes:p length:n encoding:NSUTF16StringEncoding];   // com BOM
+        case 2:  return [[NSString alloc] initWithBytes:p length:n encoding:NSUTF16BigEndianStringEncoding];
+        case 3:  return [[NSString alloc] initWithBytes:p length:n encoding:NSUTF8StringEncoding];
+        default: return nil;
+    }
+}
+
+static void ZPLerTXXX(const uint8_t *p, NSUInteger n, ZPReplayGainLido *rg) {
+    if (n < 2) return;
+    uint8_t codificacao = p[0];
+    const uint8_t *texto = p + 1;
+    NSUInteger resto = n - 1;
+    BOOL largo = (codificacao == 1 || codificacao == 2);
+
+    // Fim da descrição: um zero (ou dois, alinhados, em UTF-16).
+    NSUInteger corte = NSNotFound;
+    for (NSUInteger i = 0; i + (largo ? 1 : 0) < resto; i += (largo ? 2 : 1)) {
+        if (texto[i] == 0 && (!largo || texto[i + 1] == 0)) { corte = i; break; }
+    }
+    if (corte == NSNotFound) return;
+    NSUInteger salto = corte + (largo ? 2 : 1);
+
+    NSString *nome = ZPTextoID3(texto, corte, codificacao);
+    NSString *valor = ZPTextoID3(texto + salto, resto - salto, codificacao);
+    valor = [valor stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"\0 "]];
+    ZPAplicarEtiquetaReplayGain(nome, valor, rg);
+}
+
+static ZPReplayGainLido ZPLerReplayGainID3(ZPLeitorDeBytes *leitor) {
+    ZPReplayGainLido rg = kZPReplayGainVazio;
+    NSData *cab = ZPLerBytes(leitor, 0, 10);
+    if (cab.length < 10) return rg;
+    const uint8_t *h = cab.bytes;
+    if (memcmp(h, "ID3", 3) != 0) return rg;
+    uint8_t versao = h[3], flags = h[5];
+    if (versao < 3 || versao > 4) return rg;          // v2.2 (molduras de 3 letras) fica de fora
+    if (flags & 0x80) return rg;                      // dessincronização
+    NSUInteger tamanho = ((NSUInteger)(h[6] & 0x7F) << 21) | ((NSUInteger)(h[7] & 0x7F) << 14)
+                       | ((NSUInteger)(h[8] & 0x7F) << 7)  |  (NSUInteger)(h[9] & 0x7F);
+    if (tamanho == 0 || tamanho > 16 * 1024 * 1024) return rg;
+
+    NSData *etiqueta = ZPLerBytes(leitor, 10, tamanho);
+    if (etiqueta.length < tamanho) return rg;
+    const uint8_t *b = etiqueta.bytes;
+    NSUInteger pos = 0;
+
+    if (flags & 0x40) {                               // cabeçalho alargado
+        if (tamanho < 4) return rg;
+        NSUInteger ext = (versao == 4)
+            ? (((NSUInteger)(b[0] & 0x7F) << 21) | ((NSUInteger)(b[1] & 0x7F) << 14) | ((NSUInteger)(b[2] & 0x7F) << 7) | (b[3] & 0x7F))
+            : (ZPBE32(b) + 4);
+        pos = ext;
+    }
+
+    while (pos + 10 <= tamanho) {
+        const uint8_t *f = b + pos;
+        if (f[0] == 0) break;                         // enchimento
+        NSUInteger t = (versao == 4)
+            ? (((NSUInteger)(f[4] & 0x7F) << 21) | ((NSUInteger)(f[5] & 0x7F) << 14) | ((NSUInteger)(f[6] & 0x7F) << 7) | (f[7] & 0x7F))
+            : ZPBE32(f + 4);
+        if (t == 0 || pos + 10 + t > tamanho) break;
+        if (memcmp(f, "TXXX", 4) == 0) ZPLerTXXX(f + 10, t, &rg);
+        pos += 10 + t;
+    }
+    return rg;
+}
+
+static ZPReplayGainLido ZPLerReplayGainContentor(NSURL *url, NSData *dados, BOOL mp4) {
+    ZPLeitorDeBytes leitor = { .dados = dados, .ficheiro = nil, .tamanho = dados.length };
+    if (!dados) {
+        NSError *erro = nil;
+        leitor.ficheiro = [NSFileHandle fileHandleForReadingFromURL:url error:&erro];
+        if (!leitor.ficheiro) return kZPReplayGainVazio;
+        unsigned long long fim = 0;
+        if (![leitor.ficheiro seekToEndReturningOffset:&fim error:&erro]) { [leitor.ficheiro closeFile]; return kZPReplayGainVazio; }
+        leitor.tamanho = fim;
+    }
+    ZPReplayGainLido rg = mp4 ? ZPLerReplayGainMP4(&leitor) : ZPLerReplayGainID3(&leitor);
+    [leitor.ficheiro closeFile];
+    return rg;
+}
+
 // Os bytes vêm da ranhura do adiantamento quando lá estiverem: poupa a segunda
 // ida ao disco. O FLAC fica de fora porque a interface simples do libFLAC só
 // aceita caminhos — e é a que não lê a capa, que é o que aqui interessa.
 //
-// Os formatos que o AVFoundation trata (MP3, AAC, ALAC) não estão aqui: o
-// ReplayGain deles sai de uma leitura assíncrona do AVAsset que o
-// -extractAndDisplayMetadataFromURL: já faz, e duplicar aqui as duas dúzias de
-// casos especiais dessa leitura era pior do que o problema. Nesses o ganho
-// continua a chegar depois do arranque, como até aqui.
+// M4A e MP3 lêem-se aqui também, pelos átomos e molduras de cima. Antes ficavam
+// para a leitura assíncrona do AVAsset no -extractAndDisplayMetadataFromURL:,
+// e a faixa arrancava a 0 dB — 7 ou 8 dB acima do devido — até essa leitura
+// chegar, junto com a capa: às vezes em 30 ms, às vezes em quatro segundos,
+// conforme o disco externo e o thread principal. Ouvia-se no AirPlay como o
+// ganho a entrar depois da música. A leitura do AVAsset continua lá e manda o
+// mesmo valor outra vez, o que já não muda nada.
 static ZPReplayGainLido ZPLerReplayGain(NSURL *url, NSData *dados) {
     NSString *extensao = url.pathExtension.lowercaseString;
 
@@ -8065,6 +8290,9 @@ static ZPReplayGainLido ZPLerReplayGain(NSURL *url, NSData *dados) {
     if ([extensao isEqualToString:@"flac"])      rg = ZPLerReplayGainFlac(url);
     else if ([extensao isEqualToString:@"opus"]) rg = ZPLerReplayGainOpus(url, dados);
     else if ([extensao isEqualToString:@"wv"])   rg = ZPLerReplayGainWavPack(url, dados);
+    else if ([extensao isEqualToString:@"m4a"] || [extensao isEqualToString:@"m4b"]
+             || [extensao isEqualToString:@"mp4"])  rg = ZPLerReplayGainContentor(url, dados, YES);
+    else if ([extensao isEqualToString:@"mp3"])  rg = ZPLerReplayGainContentor(url, dados, NO);
 
     // Correu, e é isso que `pronto` quer dizer — mesmo para os formatos que aqui
     // não se lêem e mesmo para uma faixa sem etiquetas nenhumas. Quem receber
