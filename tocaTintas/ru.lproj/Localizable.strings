@@ -102,6 +102,9 @@
 "cd_play_later" = "Не сейчас";
 "cd_menu_item" = "Воспроизвести CD «%@»";
 "cd_menu_item_plain" = "Воспроизвести CD";
+"cd_warming" = "Подготовка CD-привода…";
+"cd_eject_tooltip" = "Извлечь «%@»";
+"cd_eject_failed" = "Не удалось извлечь CD.";
 "cd_track_title" = "Дорожка %ld";
 
 /* Настройки: аудио-CD */

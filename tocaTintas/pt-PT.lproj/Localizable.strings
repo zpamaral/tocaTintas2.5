@@ -94,6 +94,9 @@
 "cd_play_later" = "Agora não";
 "cd_menu_item" = "Tocar o CD «%@»";
 "cd_menu_item_plain" = "Tocar o CD";
+"cd_warming" = "A preparar o leitor de CD…";
+"cd_eject_tooltip" = "Ejectar «%@»";
+"cd_eject_failed" = "Não foi possível ejectar o CD.";
 "cd_track_title" = "Faixa %ld";
 
 /* Preferências: CD de áudio */

@@ -94,6 +94,9 @@
 "cd_play_later" = "Not Now";
 "cd_menu_item" = "Play the CD “%@”";
 "cd_menu_item_plain" = "Play the CD";
+"cd_warming" = "Getting the CD drive ready…";
+"cd_eject_tooltip" = "Eject “%@”";
+"cd_eject_failed" = "The CD could not be ejected.";
 "cd_track_title" = "Track %ld";
 
 /* Preferences: audio CD */

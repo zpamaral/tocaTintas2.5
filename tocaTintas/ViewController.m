@@ -33,6 +33,8 @@ SOFTWARE.
 #include <string.h>
 #include <stdatomic.h>   // For the silence-analysis generation counter
 #include <sys/mount.h>   // statfs: reconhecer um CD de áudio («cddafs»)
+#include <fcntl.h>       // open/read: o aquecimento do leitor de CD
+#include <unistd.h>
 #include <CommonCrypto/CommonDigest.h>   // SHA-1 do identificador de disco do MusicBrainz
 
 #import <TPCircularBuffer/TPCircularBuffer.h>
@@ -275,6 +277,9 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, copy, nullable) NSDictionary<NSString *, NSDictionary *> *cdFaixas;
 @property (nonatomic, strong, nullable) NSData *cdCapa;
 @property (nonatomic, copy, nullable) NSString *cdDescricao;
+@property (nonatomic) BOOL cdAquecido;              // o leitor já passou a paragem do arranque
+@property (nonatomic) BOOL cdTocarQuandoAquecido;   // pediu-se «Tocar» durante o aquecimento
+@property (atomic) NSUInteger cdGeracao;            // muda a cada disco: o aquecimento de outro desiste (lida fora do principal)
 @property (nonatomic, strong, nullable) NSMenuItem *cdMenuItem;
 @property (nonatomic, strong) NSTextField *artistLabel;
 @property (nonatomic, strong) NSTextField *albumLabel;
@@ -290,6 +295,7 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSButton *backwardButton;
 @property (nonatomic, strong) NSButton *repeatButton;
 @property (nonatomic, strong) NSButton *recordButton;
+@property (nonatomic, strong) NSButton *ejectButton;    // ⏏️: só activo com um CD de áudio no leitor
 
 @property (nonatomic, assign) BOOL isRepeatModeActive;
 @property (nonatomic, assign) BOOL isCalledFromPlayNextTrack;
@@ -393,7 +399,7 @@ static WavpackStreamReader memoryReader = {
 
 #pragma mark - Botões de transporte
 
-// Os oito botões de transporte usam emojis como título, e os emojis da Apple
+// Os nove botões de transporte usam emojis como título, e os emojis da Apple
 // Color Emoji não são símbolos soltos: cada um é um ladrilho quadrado com o
 // desenho lá dentro. Isso obriga a dois acertos, um por eixo, porque os fundos
 // verde e vermelho da selecção têm de assentar centrados nesse ladrilho.
@@ -644,6 +650,55 @@ static NSArray<NSURL *> *ZPFaixasDoCD(NSURL *volume) {
         return [@(ZPNumeroDaFaixaDoCD(a)) compare:@(ZPNumeroDaFaixaDoCD(b))];
     }];
     return faixas;
+}
+
+// Aquecimento do leitor. Medido com o iostat: uns 3 s depois de começar a ler
+// um disco acabado de entrar, o leitor deixa de entregar dados durante uns 6 s
+// (muda de rotação) e depois lê estável até ao fim. A reprodução lê à justa,
+// sem reserva, e essa paragem ouvia-se: tocava um pouco, calava-se, seguia.
+// Aqui lê-se o princípio da faixa à velocidade máxima, deitando os dados fora
+// — o cddafs não guarda nada em cache, repetir uma leitura custa o mesmo —, só
+// para a paragem acontecer antes de a música começar.
+//
+// Dá-se por aquecido quando passaram pelo menos 10 s desde a montagem e o
+// último MB veio a mais de 4× o ritmo de reprodução; desiste-se aos 25 s, no
+// fim da faixa, num erro de leitura (o disco saiu) ou quando `continuar` diz
+// que não. Devolve um resumo para o registo. Fora do thread principal.
+static NSString *ZPAquecerLeitorDeCD(NSURL *faixa, CFAbsoluteTime montagem, BOOL (^continuar)(void)) {
+    static const size_t kBloco = 64 * 1024;
+    static const double kRitmo = 44100.0 * 4;          // bytes/s de reprodução (16 bits, estéreo)
+    static const double kMinimo = 10.0, kMaximo = 25.0;  // s desde a montagem
+
+    int fd = open(faixa.fileSystemRepresentation, O_RDONLY);
+    if (fd < 0) return [NSString stringWithFormat:@"não abriu (%s)", strerror(errno)];
+    fcntl(fd, F_NOCACHE, 1);
+    void *tampao = malloc(kBloco);
+
+    CFAbsoluteTime inicio = CFAbsoluteTimeGetCurrent(), marcoDoMB = inicio;
+    size_t lidos = 0, noMB = 0;
+    double maiorEspera = 0, ultimoMB = 0;
+    NSString *fim = @"tempo esgotado";
+    while (continuar()) {
+        CFAbsoluteTime antes = CFAbsoluteTimeGetCurrent();
+        ssize_t n = read(fd, tampao, kBloco);
+        CFAbsoluteTime depois = CFAbsoluteTimeGetCurrent();
+        if (n <= 0) { fim = n == 0 ? @"fim da faixa" : @"erro de leitura"; break; }
+        lidos += (size_t)n;
+        noMB += (size_t)n;
+        maiorEspera = MAX(maiorEspera, depois - antes);
+        if (noMB >= 1024 * 1024) {
+            ultimoMB = noMB / (depois - marcoDoMB) / kRitmo;   // em múltiplos do ritmo de reprodução
+            noMB = 0;
+            marcoDoMB = depois;
+            if (depois - montagem >= kMinimo && ultimoMB > 4.0) { fim = @"aquecido"; break; }
+        }
+        if (depois - montagem >= kMaximo) break;
+    }
+    if (!continuar()) fim = @"interrompido";
+    free(tampao);
+    close(fd);
+    return [NSString stringWithFormat:@"%@: %.1f MB em %.1f s, maior espera %.1f s, último MB a %.1f×",
+            fim, lidos / 1048576.0, CFAbsoluteTimeGetCurrent() - inicio, maiorEspera, ultimoMB];
 }
 
 // Identificador freedb (o «CDDB» do abcde): soma dos dígitos dos segundos de
@@ -3847,6 +3902,7 @@ static void ZPEsperarVezNoMusicBrainz(void) {
             self.cdDescricao = descricao;
             self.cdMenuItem.title = [NSString stringWithFormat:NSLocalizedString(@"cd_menu_item", @"Tocar o CD «%@»"), descricao];
             self.cdMenuItem.hidden = NO;
+            [self acertarBotaoDeEjectar];
             #ifdef DEBUG
             NSLog(@"[CD] %@: freedb %@, %ld faixas, ordem %@; fonoteca: %@; MusicBrainz: %@; nomes de %@.",
                   volume.lastPathComponent, cddb ?: @"?", (long)faixas.count, ordem,
@@ -3904,6 +3960,15 @@ static void ZPEsperarVezNoMusicBrainz(void) {
     NSArray<NSURL *> *faixas = self.cdVolumeURL ? ZPFaixasDoCD(self.cdVolumeURL) : @[];
     if (faixas.count == 0) return;
 
+    // Com o leitor ainda a aquecer, a música espera por ele: arrancar já era
+    // ouvir a paragem do arranque a meio da primeira faixa.
+    if (!self.cdAquecido) {
+        self.cdTocarQuandoAquecido = YES;
+        self.playCountLabel.stringValue = NSLocalizedString(@"cd_warming", @"A preparar o leitor de CD…");
+        return;
+    }
+    self.cdTocarQuandoAquecido = NO;
+
     [self stopAudio];
     self.audioFiles = faixas;
     self.isPlaylistModeActive = YES;
@@ -3938,11 +4003,13 @@ static void ZPEsperarVezNoMusicBrainz(void) {
 - (void)volumeMontado:(NSURL *)volume perguntar:(BOOL)perguntar {
     if (!ZPEhCDDeAudio(volume)) return;
     self.cdVolumeURL = volume;
+    [self aquecerLeitorDoCD:volume];
     self.cdFaixas = nil;
     self.cdCapa = nil;
     self.cdDescricao = volume.lastPathComponent;
     self.cdMenuItem.title = [NSString stringWithFormat:NSLocalizedString(@"cd_menu_item", @"Tocar o CD «%@»"), self.cdDescricao];
     self.cdMenuItem.hidden = NO;
+    [self acertarBotaoDeEjectar];
     [self identificarCD:volume perguntar:perguntar];
 }
 
@@ -3952,8 +4019,10 @@ static void ZPEsperarVezNoMusicBrainz(void) {
     if (!self.cdVolumeURL || ![volume.path isEqualToString:self.cdVolumeURL.path]) return;
     NSString *prefixo = self.cdVolumeURL.path;
 
-    if ([self.currentTrackURL.path hasPrefix:prefixo]) {
+    BOOL faixaDoCD = [self.currentTrackURL.path hasPrefix:prefixo];
+    if (faixaDoCD) {
         [self stopAudio];
+        [self discardPrefetchedTrack];
     }
     BOOL listaDoCD = self.isPlaylistModeActive && [self.audioFiles.firstObject.path hasPrefix:prefixo];
 
@@ -3962,10 +4031,109 @@ static void ZPEsperarVezNoMusicBrainz(void) {
     self.cdCapa = nil;
     self.cdDescricao = nil;
     self.cdMenuItem.hidden = YES;
+    self.cdGeracao++;   // o aquecimento em curso, se houver, desiste
+    self.cdAquecido = NO;
+    if (self.cdTocarQuandoAquecido) {
+        self.cdTocarQuandoAquecido = NO;
+        self.playCountLabel.stringValue = @"";
+    }
+    [self acertarBotaoDeEjectar];
+
+    // O que estava à vista era do disco: nomes, capa e contagem saem com ele, e
+    // não fica nenhuma faixa dada como «em curso» que já não existe.
+    if (faixaDoCD) {
+        self.currentTrackURL = nil;
+        self.currentTrackIndex = -1;
+        self.artistLabel.stringValue = @"";
+        self.albumLabel.stringValue = @"";
+        self.titleLabel.stringValue = @"";
+        self.playCountLabel.stringValue = @"";
+        self.coverArtView.image = nil;
+    }
 
     if (listaDoCD) {
         [self exitPlaylistMode];
     }
+}
+
+// Ver ZPAquecerLeitorDeCD. No fim, se entretanto se pediu «Tocar», toca.
+- (void)aquecerLeitorDoCD:(NSURL *)volume {
+    NSUInteger geracao = ++self.cdGeracao;
+    self.cdAquecido = NO;
+    self.cdTocarQuandoAquecido = NO;
+    NSURL *primeira = ZPFaixasDoCD(volume).firstObject;
+    if (!primeira) {
+        self.cdAquecido = YES;
+        return;
+    }
+    CFAbsoluteTime montagem = CFAbsoluteTimeGetCurrent();
+    __weak typeof(self) fraco = self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSString *resumo = ZPAquecerLeitorDeCD(primeira, montagem, ^BOOL{
+            return fraco && fraco.cdGeracao == geracao;
+        });
+        dispatch_async(dispatch_get_main_queue(), ^{
+            typeof(self) forte = fraco;
+            if (!forte || forte.cdGeracao != geracao) return;
+            NSLog(@"[CD] Aquecimento do leitor — %@.", resumo);
+            forte.cdAquecido = YES;
+            if (forte.cdTocarQuandoAquecido) {
+                forte.playCountLabel.stringValue = @"";
+                [forte tocarCD];
+            }
+        });
+    });
+}
+
+- (void)acertarBotaoDeEjectar {
+    BOOL comCD = self.cdVolumeURL != nil;
+    self.ejectButton.enabled = comCD;
+    // O glifo é um emoji, que tem cores próprias e não esbate sozinho.
+    self.ejectButton.alphaValue = comCD ? 1.0 : 0.35;
+    self.ejectButton.toolTip = comCD
+        ? [NSString stringWithFormat:NSLocalizedString(@"cd_eject_tooltip", @"Ejectar «%@»"), self.cdDescricao ?: self.cdVolumeURL.lastPathComponent]
+        : nil;
+}
+
+- (IBAction)ejectarCDAction:(id)sender {
+    [self ejectarCD];
+}
+
+// Larga o disco (pára a faixa dele, volta à biblioteca, limpa a interface) e
+// pede ao sistema que o ejecte. Ejectar pode levar segundos — o leitor tem de
+// parar —, por isso vai para fora do thread principal. Se o sistema recusar,
+// o disco volta a ser o CD em vigor e diz-se porquê.
+- (void)ejectarCD {
+    NSURL *volume = self.cdVolumeURL;
+    if (!volume) return;
+    [self volumeVaiDesmontar:volume];
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSError *erro = nil;
+        BOOL ejectou = [[NSWorkspace sharedWorkspace] unmountAndEjectDeviceAtURL:volume error:&erro];
+        if (!ejectou) {
+            // O tocador pode ainda estar a fechar o ficheiro da faixa: mais uma vez.
+            [NSThread sleepForTimeInterval:1.0];
+            erro = nil;
+            ejectou = [[NSWorkspace sharedWorkspace] unmountAndEjectDeviceAtURL:volume error:&erro];
+        }
+        if (ejectou) return;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSLog(@"[CD] O sistema não ejectou %@: %@", volume.path, erro);
+            if ([[NSFileManager defaultManager] fileExistsAtPath:volume.path]) {
+                [self volumeMontado:volume perguntar:NO];
+            }
+            NSAlert *alerta = [[NSAlert alloc] init];
+            alerta.messageText = NSLocalizedString(@"cd_eject_failed", @"Não foi possível ejectar o CD.");
+            alerta.informativeText = erro.localizedDescription ?: @"";
+            NSWindow *janela = self.view.window;
+            if (janela) {
+                [alerta beginSheetModalForWindow:janela completionHandler:nil];
+            } else {
+                [alerta runModal];
+            }
+        });
+    });
 }
 
 // Chamado uma vez no arranque: o item do menu, os observadores de montagem e um
@@ -6100,7 +6268,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     // Buttons (centered horizontally at the bottom)
     CGFloat buttonWidth = 26;
     CGFloat buttonHeight = 26;
-    NSInteger numberOfButtons = 8;
+    NSInteger numberOfButtons = 9;
     CGFloat totalButtonWidth = buttonWidth * numberOfButtons;
     CGFloat startX = (windowWidth - totalButtonWidth) / 2.0;
     CGFloat buttonYPosition = 20;
@@ -6167,6 +6335,16 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     self.recordButton.target = self;
     self.recordButton.action = @selector(recordAudio);
     [self.view addSubview:self.recordButton];
+
+    // ⏏️ Fica sempre no lugar, para a fila não mudar de sítio quando entra ou
+    // sai um disco; sem CD fica esbatido e não responde.
+    startX += buttonWidth;
+    self.ejectButton = [[NSButton alloc] initWithFrame:NSMakeRect(startX, buttonYPosition, buttonWidth, buttonHeight)];
+    ZPPreparaBotaoDeTransporte(self.ejectButton, @"⏏️");
+    self.ejectButton.target = self;
+    self.ejectButton.action = @selector(ejectarCDAction:);
+    [self.view addSubview:self.ejectButton];
+    [self acertarBotaoDeEjectar];
 
     // Progress bar
     self.progressBar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(160, 80, windowWidth - 320, 20)];
