@@ -110,7 +110,7 @@ NSString * const kBS2BEqChangedNotification = @"BS2BEqChanged";
 
 // Repõe as correcções do AutoEQ a partir do arquivo que vem no pacote, se a
 // pasta estiver vazia. É o que faz com que apagar a pasta não perca nada: as
-// tuas contagens de reprodução não voltam, mas os 522 modelos voltam.
+// tuas contagens de reprodução não voltam, mas os 523 modelos voltam.
 //
 // Se o arquivo não estiver no pacote (não foi acrescentado ao projecto do
 // Xcode), isto não faz nada e a lista fica só com as duas entradas especiais —
@@ -372,7 +372,7 @@ NSString *ZPCurrentBS2BProfile(void) {
                               pequena:NO];
     topo = NSMinY(t.frame) - 18;
 
-    // Dois menus em vez de um: 522 modelos numa lista só não se navega. O
+    // Dois menus em vez de um: 523 modelos numa lista só não se navega. O
     // primeiro escolhe a marca (ou as duas entradas especiais), o segundo o
     // modelo dessa marca.
     [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 17, 200, 17)

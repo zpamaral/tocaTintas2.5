@@ -66,7 +66,7 @@
 "prefs_eq_none" = "Sem equalização";
 "prefs_eq_builtin" = "Sony MDR-7506 (embutida)";
 "prefs_eq_open_folder" = "Abrir a pasta das correcções…";
-"prefs_eq_note" = "A lista vem do projecto AutoEQ, com as medições do oratory1990 para o alvo Harman over-ear: 522 modelos de 106 marcas, guardados em ~/Library/Application Support/tocaTintas/eq. Para acrescentar outro, larga o ficheiro «ParametricEQ.txt» na pasta — na raiz ou numa subpasta com o nome da marca — e ele aparece aqui. A linha «Preamp» é lida e respeitada: é ela que impede o reforço de graves de saturar a saída.";
+"prefs_eq_note" = "A lista vem do projecto AutoEQ, com correcções para o alvo Harman over-ear: 523 modelos de 106 marcas, todos medidos pelo oratory1990 menos o Sony MDR-V600, que vem da Innerfidelity, guardados em ~/Library/Application Support/tocaTintas/eq. Para acrescentar outro, larga o ficheiro «ParametricEQ.txt» na pasta — na raiz ou numa subpasta com o nome da marca — e ele aparece aqui. A linha «Preamp» é lida e respeitada: é ela que impede o reforço de graves de saturar a saída.";
 "prefs_eq_brand" = "Marca:";
 "prefs_eq_model" = "Modelo:";
 "prefs_eq_mine" = "Os meus ficheiros";

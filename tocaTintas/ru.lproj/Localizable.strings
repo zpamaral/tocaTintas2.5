@@ -74,7 +74,7 @@
 "prefs_eq_none" = "Без эквализации";
 "prefs_eq_builtin" = "Sony MDR-7506 (встроенная)";
 "prefs_eq_open_folder" = "Открыть папку с коррекциями…";
-"prefs_eq_note" = "Список взят из проекта AutoEQ, по измерениям oratory1990 для цели Harman over-ear: 522 модели 106 марок, в папке ~/Library/Application Support/tocaTintas/eq. Чтобы добавить ещё одну, положите её файл «ParametricEQ.txt» в папку — в корень или в подпапку с названием марки — и он появится здесь. Строка «Preamp» читается и учитывается: именно она не даёт подъёму баса перегрузить выход.";
+"prefs_eq_note" = "Список взят из проекта AutoEQ, с коррекцией под цель Harman over-ear: 523 модели 106 марок, все по измерениям oratory1990, кроме Sony MDR-V600 — его измерила Innerfidelity, в папке ~/Library/Application Support/tocaTintas/eq. Чтобы добавить ещё одну, положите её файл «ParametricEQ.txt» в папку — в корень или в подпапку с названием марки — и он появится здесь. Строка «Preamp» читается и учитывается: именно она не даёт подъёму баса перегрузить выход.";
 "prefs_eq_brand" = "Марка:";
 "prefs_eq_model" = "Модель:";
 "prefs_eq_mine" = "Мои файлы";

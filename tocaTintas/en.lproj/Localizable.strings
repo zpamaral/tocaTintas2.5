@@ -66,7 +66,7 @@
 "prefs_eq_none" = "No equalization";
 "prefs_eq_builtin" = "Sony MDR-7506 (built in)";
 "prefs_eq_open_folder" = "Open the corrections folder…";
-"prefs_eq_note" = "The list comes from the AutoEQ project, using oratory1990's measurements against the Harman over-ear target: 522 models from 106 brands, stored in ~/Library/Application Support/tocaTintas/eq. To add another, drop its “ParametricEQ.txt” in the folder — at the top level or in a subfolder named after the brand — and it appears here. The “Preamp” line is read and honoured: it is what keeps the bass boost from overloading the output.";
+"prefs_eq_note" = "The list comes from the AutoEQ project, with corrections for the Harman over-ear target: 523 models from 106 brands, all measured by oratory1990 except the Sony MDR-V600, which comes from Innerfidelity, stored in ~/Library/Application Support/tocaTintas/eq. To add another, drop its “ParametricEQ.txt” in the folder — at the top level or in a subfolder named after the brand — and it appears here. The “Preamp” line is read and honoured: it is what keeps the bass boost from overloading the output.";
 "prefs_eq_brand" = "Brand:";
 "prefs_eq_model" = "Model:";
 "prefs_eq_mine" = "My own files";
