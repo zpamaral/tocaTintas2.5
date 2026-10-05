@@ -235,7 +235,8 @@ static WavpackStreamReader memoryReader = {
 @interface ViewController () <AVAudioPlayerDelegate>
 
 @property (nonatomic, strong) NSTextField *playCountLabel;
-@property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *trackPlayCounts;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *trackPlayCounts;   // chave da música → reproduções
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *chavesDeContagem;   // caminho → chave da música (thread principal)
 
 - (void)loadTrackPlayCounts;
 - (void)saveTrackPlayCounts;
@@ -824,6 +825,137 @@ static NSArray<NSURL *> *ZPFlacsDaPasta(NSURL *pasta) {
     return flacs;
 }
 
+#pragma mark - Contagem de reproduções: a chave da música
+
+// A contagem é da música, não do ficheiro: o FLAC da fonoteca, o m4a convertido
+// dele e a faixa do CD que lhe deu origem somam no mesmo sítio. A chave junta
+// artista, álbum, disco e número da faixa, e título. O álbum mantém à parte
+// versões com o mesmo nome (a ao vivo, o «Intro» de outro disco); o número, as
+// faixas com o mesmo título no mesmo disco (as oito «[Untitled]» do «Plux
+// Quba»); o disco, a mesma faixa em discos diferentes de uma caixa (o «Start»
+// dos dois CD do «Live in Boston 1970»). Sem
+// etiquetas que cheguem fica o caminho, como dantes — um caminho começa por «/»
+// e não se confunde com «musica:» nem «cd:».
+
+// Maiúsculas, acentos, larguras, tipografia e espaços não distinguem músicas: o
+// replaceSingleQuoteAndSmartQuotes troca ' por ’, e um ficheiro pode vir com uma
+// e outro com a outra.
+static NSString *ZPNormalizarParaChave(NSString *texto) {
+    if (texto.length == 0) return @"";
+    static NSDictionary<NSString *, NSString *> *trocas;
+    static dispatch_once_t umaVez;
+    dispatch_once(&umaVez, ^{
+        trocas = @{ @"’": @"'", @"‘": @"'", @"“": @"\"", @"”": @"\"", @"«": @"\"", @"»": @"\"",
+                    @"…": @"...", @"–": @"-", @"—": @"-" };
+    });
+    NSString *t = [texto.precomposedStringWithCanonicalMapping
+                   stringByFoldingWithOptions:NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch | NSWidthInsensitiveSearch
+                                       locale:[NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"]];
+    for (NSString *de in trocas) t = [t stringByReplacingOccurrencesOfString:de withString:trocas[de]];
+    NSMutableArray<NSString *> *palavras = [NSMutableArray array];
+    for (NSString *p in [t componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]) {
+        if (p.length) [palavras addObject:p];
+    }
+    return [palavras componentsJoinedByString:@" "];
+}
+
+// O número de «03», «3/15» ou « 3 »; 0 se não houver.
+static NSInteger ZPNumeroDaEtiquetaDeFaixa(NSString *texto) {
+    return [[texto stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet]
+            componentsSeparatedByString:@"/"].firstObject.integerValue;
+}
+
+// nil quando falta o título, ou artista e álbum ao mesmo tempo: uma chave só com
+// «Faixa 1» juntaria músicas que nada têm a ver. A posição é «9» no primeiro
+// disco — ou sem DISCNUMBER, que é o mesmo e muitas cópias não o têm — e «2.9»
+// nos outros; sem número de faixa, fica vazia.
+static NSString *ZPChaveDaMusica(NSString *artista, NSString *album, NSInteger disco, NSInteger faixa, NSString *titulo) {
+    NSString *a = ZPNormalizarParaChave(artista), *b = ZPNormalizarParaChave(album), *t = ZPNormalizarParaChave(titulo);
+    if (t.length == 0 || (a.length == 0 && b.length == 0)) return nil;
+    NSString *n = faixa <= 0 ? @""
+        : disco > 1 ? [NSString stringWithFormat:@"%ld.%ld", (long)disco, (long)faixa]
+        : [NSString stringWithFormat:@"%ld", (long)faixa];
+    return [NSString stringWithFormat:@"musica:%@|%@|%@|%@", a, b, n, t];
+}
+
+static NSString *ZPTextoUTF8(const char *texto) {
+    return texto ? [NSString stringWithUTF8String:texto] : nil;
+}
+
+// A chave a partir das etiquetas do ficheiro, conforme o formato. Lê só as
+// etiquetas, nunca o áudio; corre fora do thread principal (disco externo).
+static NSString *ZPChaveDeContagemDoFicheiro(NSURL *url) {
+    NSString *ext = url.pathExtension.lowercaseString;
+    NSString *artista = nil, *album = nil, *titulo = nil;
+    NSInteger disco = 0, faixa = 0;
+    if ([ext isEqualToString:@"flac"]) {
+        NSDictionary<NSString *, NSString *> *e = ZPEtiquetasFlac(url);
+        artista = e[@"ARTIST"]; album = e[@"ALBUM"]; titulo = e[@"TITLE"];
+        disco = ZPNumeroDaEtiquetaDeFaixa(e[@"DISCNUMBER"]);
+        faixa = ZPNumeroDaEtiquetaDeFaixa(e[@"TRACKNUMBER"]);
+    } else if ([ext isEqualToString:@"ape"] || [ext isEqualToString:@"wv"]) {
+        // O WavPack guarda as etiquetas no mesmo APEv2 do fim do ficheiro.
+        NSDictionary<NSString *, NSData *> *e = ZPLerEtiquetasAPEv2(url);
+        artista = ZPTextoAPEv2(e, @"artist"); album = ZPTextoAPEv2(e, @"album"); titulo = ZPTextoAPEv2(e, @"title");
+        disco = ZPNumeroDaEtiquetaDeFaixa(ZPTextoAPEv2(e, @"disc"));
+        faixa = ZPNumeroDaEtiquetaDeFaixa(ZPTextoAPEv2(e, @"track"));
+    } else if ([ext isEqualToString:@"opus"]) {
+        int erro = 0;
+        OggOpusFile *of = op_open_file(url.path.fileSystemRepresentation, &erro);
+        if (of) {
+            const OpusTags *tags = op_tags(of, -1);
+            if (tags) {
+                artista = ZPTextoUTF8(opus_tags_query(tags, "ARTIST", 0));
+                album = ZPTextoUTF8(opus_tags_query(tags, "ALBUM", 0));
+                titulo = ZPTextoUTF8(opus_tags_query(tags, "TITLE", 0));
+                disco = ZPNumeroDaEtiquetaDeFaixa(ZPTextoUTF8(opus_tags_query(tags, "DISCNUMBER", 0)));
+                faixa = ZPNumeroDaEtiquetaDeFaixa(ZPTextoUTF8(opus_tags_query(tags, "TRACKNUMBER", 0)));
+            }
+            op_free(of);
+        }
+    } else {
+        AVURLAsset *asset = [AVURLAsset URLAssetWithURL:url options:nil];
+        dispatch_semaphore_t pronto = dispatch_semaphore_create(0);
+        [asset loadValuesAsynchronouslyForKeys:@[@"commonMetadata", @"metadata"] completionHandler:^{
+            dispatch_semaphore_signal(pronto);
+        }];
+        dispatch_semaphore_wait(pronto, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)));
+        if ([asset statusOfValueForKey:@"commonMetadata" error:NULL] == AVKeyValueStatusLoaded) {
+            NSArray<AVMetadataItem *> *comum = asset.commonMetadata;
+            artista = [AVMetadataItem metadataItemsFromArray:comum filteredByIdentifier:AVMetadataCommonIdentifierArtist].firstObject.stringValue;
+            album = [AVMetadataItem metadataItemsFromArray:comum filteredByIdentifier:AVMetadataCommonIdentifierAlbumName].firstObject.stringValue;
+            titulo = [AVMetadataItem metadataItemsFromArray:comum filteredByIdentifier:AVMetadataCommonIdentifierTitle].firstObject.stringValue;
+        }
+        // Faixa e disco, como no extractAndDisplayMetadataFromURL: «trkn» e «disk»
+        // do MP4 (dois bytes reservados e o número, em big-endian) ou «TRCK» e
+        // «TPOS» do ID3.
+        if ([asset statusOfValueForKey:@"metadata" error:NULL] == AVKeyValueStatusLoaded) {
+            for (AVMetadataItem *item in asset.metadata) {
+                NSString *id_ = item.identifier;
+                if (([id_ isEqualToString:@"itsk/trkn"] || [id_ isEqualToString:@"itsk/disk"])
+                    && [item.value isKindOfClass:[NSData class]] && [(NSData *)item.value length] >= 4) {
+                    uint32_t n = 0;
+                    [(NSData *)item.value getBytes:&n range:NSMakeRange(0, 4)];
+                    if ([id_ isEqualToString:@"itsk/trkn"]) faixa = CFSwapInt32BigToHost(n);
+                    else disco = CFSwapInt32BigToHost(n);
+                } else if ([id_ isEqualToString:@"id3/TRCK"]) {
+                    faixa = ZPNumeroDaEtiquetaDeFaixa(item.stringValue);
+                } else if ([id_ isEqualToString:@"id3/TPOS"]) {
+                    disco = ZPNumeroDaEtiquetaDeFaixa(item.stringValue);
+                }
+            }
+        }
+    }
+    return ZPChaveDaMusica(artista, album, disco, faixa, titulo);
+}
+
+// Um CD que não se identificou: o disco (freedb) e o número da faixa. O caminho
+// não serve — «/Volumes/Audio CD/6 Audio Track.aiff» é a faixa 6 de qualquer
+// disco sem nome.
+static NSString *ZPChaveDeContagemDoCD(NSString *cddb, NSInteger numero) {
+    return (cddb.length && numero > 0) ? [NSString stringWithFormat:@"cd:%@:%ld", cddb, (long)numero] : nil;
+}
+
 
 @implementation ViewController
 
@@ -853,25 +985,12 @@ typedef struct {
 
 CoreAudioPlaybackState playbackState;
 
-- (NSString *)playCountFilePath {
+// As contagens por música (ver «Contagem de reproduções: a chave da música»).
+- (NSString *)ficheiroDasContagens {
     NSString *appSupportDirectory = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES) firstObject];
     NSString *tocaTintasDirectory = [appSupportDirectory stringByAppendingPathComponent:@"tocaTintas"];
-    
-    if (![[NSFileManager defaultManager] fileExistsAtPath:tocaTintasDirectory]) {
-        NSError *error = nil;
-        [[NSFileManager defaultManager] createDirectoryAtPath:tocaTintasDirectory withIntermediateDirectories:YES attributes:nil error:&error];
-        if (error) {
-            #ifdef DEBUG
-            NSLog(@"Error creating Application Support directory: %@", error.localizedDescription);
-            #endif
-        }
-    }
-    
-    NSString *filePath = [tocaTintasDirectory stringByAppendingPathComponent:@"trackPlayCounts.json"];
-    #ifdef DEBUG
-    NSLog(@"Saving play counts to path: %@", filePath); // Debug log
-    #endif
-    return filePath;
+    [[NSFileManager defaultManager] createDirectoryAtPath:tocaTintasDirectory withIntermediateDirectories:YES attributes:nil error:NULL];
+    return [tocaTintasDirectory stringByAppendingPathComponent:@"contagens.json"];
 }
 
 // Path for storing cached audio file information
@@ -3225,24 +3344,58 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
 - (void)incrementPlayCountForTrack:(NSURL *)trackURL {
     NSURL *originalTrackURL = self.shuffledToOriginalMap[trackURL] ?: trackURL;
     NSString *trackPath = originalTrackURL.path;
-    
-    NSNumber *currentCount = [self.trackPlayCounts objectForKey:trackPath];
-    
-    if (currentCount) {
-        [self.trackPlayCounts setObject:@(currentCount.integerValue + 1) forKey:trackPath];
-    } else {
-        [self.trackPlayCounts setObject:@1 forKey:trackPath];
+
+    // Conta na música, não no ficheiro. Normalmente a chave já se sabe: começou
+    // a ser resolvida quando a faixa começou a tocar.
+    [self resolverChaveDeContagemPara:trackPath depois:^(NSString *chave) {
+        self.trackPlayCounts[chave] = @(self.trackPlayCounts[chave].integerValue + 1);
+
+        // Save play count changes
+        [self saveTrackPlayCounts];
+
+        // Always update the play count label, even if repeat is toggled off
+        [self refreshPlayCountLabel];
+
+        // Update the “Now Playing” webpage with the new tally
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            [self generateNowPlayingPage];
+        });
+    }];
+}
+
+// A chave da faixa, se já se souber: a que a identificação do CD deu ou a que
+// ficou guardada. Thread principal.
+- (nullable NSString *)chaveDeContagemConhecidaPara:(NSString *)caminho {
+    if (caminho.length == 0) return nil;
+    return self.cdFaixas[caminho][@"chave"] ?: self.chavesDeContagem[caminho];
+}
+
+- (BOOL)caminhoEhDoCD:(NSString *)caminho {
+    return self.cdVolumeURL && [caminho hasPrefix:[self.cdVolumeURL.path stringByAppendingString:@"/"]];
+}
+
+// Resolve a chave — lendo as etiquetas fora do thread principal, se ainda não se
+// souber — e chama o bloco no thread principal. Uma faixa de CD sem identificação
+// (ainda) conta pelo disco e pelo número; se a identificação chegar depois, a
+// chave dela passa à frente.
+- (void)resolverChaveDeContagemPara:(NSString *)caminho depois:(nullable void (^)(NSString *chave))depois {
+    if (caminho.length == 0) return;
+    NSString *conhecida = [self chaveDeContagemConhecidaPara:caminho];
+    if (conhecida) {
+        if (depois) depois(conhecida);
+        return;
     }
-    
-    // Save play count changes
-    [self saveTrackPlayCounts];
-
-    // Always update the play count label, even if repeat is toggled off
-    [self refreshPlayCountLabel];
-
-    // Update the “Now Playing” webpage with the new tally
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        [self generateNowPlayingPage];
+    NSURL *volumeDoCD = [self caminhoEhDoCD:caminho] ? self.cdVolumeURL : nil;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSURL *url = [NSURL fileURLWithPath:caminho];
+        NSString *chave = volumeDoCD
+            ? ZPChaveDeContagemDoCD(ZPIdentificadorFreedbDoCD(volumeDoCD, NULL), ZPNumeroDaFaixaDoCD(url))
+            : ZPChaveDeContagemDoFicheiro(url);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSString *resolvida = chave ?: caminho;
+            self.chavesDeContagem[caminho] = resolvida;
+            if (depois) depois([self chaveDeContagemConhecidaPara:caminho] ?: resolvida);
+        });
     });
 }
 
@@ -3284,6 +3437,8 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
         // Faixa nova (ou reprodução genuinamente nova): começar do zero.
         [self resetPlayCountTracking];
         self.playCountTrackPath = trackPath;
+        // A chave fica pronta antes de o prazo terminar.
+        [self resolverChaveDeContagemPara:trackPath depois:nil];
         self.playCountRemaining = kPlayCountThreshold;
         [self resumePlayCountTracking];
 
@@ -3359,7 +3514,13 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
         }
 
         // Ler a contagem no momento de a mostrar, e não uma cópia tirada antes.
-        NSNumber *playCount = [self.trackPlayCounts objectForKey:trackPath];
+        // Depois de contar, a chave já se sabe; se não, resolve-se e volta-se cá.
+        NSString *chave = [self chaveDeContagemConhecidaPara:trackPath];
+        if (!chave) {
+            [self resolverChaveDeContagemPara:trackPath depois:^(NSString *c) { [self refreshPlayCountLabel]; }];
+            return;
+        }
+        NSNumber *playCount = self.trackPlayCounts[chave];
 
         if (!playCount || playCount.integerValue <= 0) {
             [self.playCountLabel setStringValue:@""];
@@ -3377,45 +3538,28 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
     }
 }
 
+// init e viewDidLoad chamam ambos; só a primeira vez carrega.
 - (void)loadTrackPlayCounts {
-    NSString *filePath = [self playCountFilePath];
-    NSData *data = [NSData dataWithContentsOfFile:filePath];
-    
-    if (data) {
-        NSError *error = nil;
-        NSDictionary *savedCounts = [NSJSONSerialization JSONObjectWithData:data options:0 error:&error];
-        if (error) {
-            #ifdef DEBUG
-            NSLog(@"Error deserializing JSON: %@", error.localizedDescription);
-            #endif
-        } else {
-            self.trackPlayCounts = [savedCounts mutableCopy];
-        }
-    } else {
-        self.trackPlayCounts = [NSMutableDictionary dictionary];
-    }
+    if (self.trackPlayCounts) return;
+    self.chavesDeContagem = [NSMutableDictionary dictionary];
+
+    NSData *data = [NSData dataWithContentsOfFile:[self ficheiroDasContagens]];
+    NSDictionary *guardado = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+    NSDictionary *contagens = [guardado isKindOfClass:[NSDictionary class]] ? guardado[@"contagens"] : nil;
+    self.trackPlayCounts = [contagens isKindOfClass:[NSDictionary class]] ? [contagens mutableCopy] : [NSMutableDictionary dictionary];
 }
 
 - (void)saveTrackPlayCounts {
-    NSString *filePath = [self playCountFilePath];
+    NSString *filePath = [self ficheiroDasContagens];
+    NSDictionary *guardar = @{ @"versao": @1, @"contagens": self.trackPlayCounts ?: @{} };
     NSError *error = nil;
-    NSData *data = [NSJSONSerialization dataWithJSONObject:self.trackPlayCounts options:NSJSONWritingPrettyPrinted error:&error];
-    
+    NSData *data = [NSJSONSerialization dataWithJSONObject:guardar
+                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
+                                                     error:&error];
     if (error) {
-        #ifdef DEBUG
-        NSLog(@"Error serializing play counts to JSON: %@", error.localizedDescription);
-        #endif
-    } else {
-        BOOL success = [data writeToFile:filePath atomically:YES];
-        if (!success) {
-            #ifdef DEBUG
-            NSLog(@"Failed to write play counts to file: %@", filePath);
-            #endif
-        } else {
-            #ifdef DEBUG
-            NSLog(@"Play counts successfully saved to %@", filePath);
-            #endif
-        }
+        NSLog(@"[Contagens] Não foi possível serializar: %@", error.localizedDescription);
+    } else if (![data writeToFile:filePath atomically:YES]) {
+        NSLog(@"[Contagens] Não foi possível gravar %@", filePath);
     }
 }
 
@@ -3782,6 +3926,7 @@ static void ZPEsperarVezNoMusicBrainz(void) {
     NSDictionary *resultado = @{ @"mbid": escolhida[@"id"] ?: @"",
                                  @"artista": artista,
                                  @"album": escolhida[@"title"] ?: @"",
+                                 @"disco": meio[@"position"] ?: @1,   // numa caixa, qual dos discos
                                  @"faixas": faixas };
     [resultado writeToURL:cache atomically:YES];
 
@@ -3853,6 +3998,8 @@ static void ZPEsperarVezNoMusicBrainz(void) {
 
         NSString *nomeDoVolume = volume.lastPathComponent;
         NSMutableDictionary<NSString *, NSDictionary *> *porFaixa = [NSMutableDictionary dictionary];
+        // O freedb também dá a chave de contagem dos discos que ninguém conhece.
+        NSString *cddbDoDisco = cddb ?: ZPIdentificadorFreedbDoCD(volume, NULL);
         NSString *artista = nil, *album = nil;
         for (NSURL *faixa in faixas) {
             NSInteger n = ZPNumeroDaFaixaDoCD(faixa);
@@ -3879,6 +4026,19 @@ static void ZPEsperarVezNoMusicBrainz(void) {
                                             @"album": albumDaFaixa.length ? albumDaFaixa : nomeDoVolume } mutableCopy];
             // O ganho vem sempre do FLAC, quando o disco está na fonoteca.
             if (local[@"FLAC"]) info[@"flac"] = local[@"FLAC"];
+
+            // A contagem: a do FLAC, se o disco está na fonoteca (a mesma chave que
+            // o FLAC daria a tocar); senão os nomes do MusicBrainz; senão o disco.
+            NSString *chave = nil;
+            if (local[@"FLAC"]) {
+                chave = ZPChaveDaMusica(local[@"ARTIST"], local[@"ALBUM"], ZPNumeroDaEtiquetaDeFaixa(local[@"DISCNUMBER"]),
+                                        ZPNumeroDaEtiquetaDeFaixa(local[@"TRACKNUMBER"]), local[@"TITLE"]) ?: [local[@"FLAC"] path];
+            } else if (internet[@"faixas"][[@(n) description]]) {
+                chave = ZPChaveDaMusica(internet[@"artista"], internet[@"album"], [internet[@"disco"] integerValue], n,
+                                        internet[@"faixas"][[@(n) description]]);
+            }
+            chave = chave ?: ZPChaveDeContagemDoCD(cddbDoDisco, n);
+            if (chave) info[@"chave"] = chave;
             porFaixa[faixa.path] = info;
         }
 
@@ -3900,9 +4060,7 @@ static void ZPEsperarVezNoMusicBrainz(void) {
             self.cdFaixas = porFaixa;
             self.cdCapa = capa;
             self.cdDescricao = descricao;
-            self.cdMenuItem.title = [NSString stringWithFormat:NSLocalizedString(@"cd_menu_item", @"Tocar o CD «%@»"), descricao];
-            self.cdMenuItem.hidden = NO;
-            [self acertarBotaoDeEjectar];
+            [self acertarControlosDoCD];
             #ifdef DEBUG
             NSLog(@"[CD] %@: freedb %@, %ld faixas, ordem %@; fonoteca: %@; MusicBrainz: %@; nomes de %@.",
                   volume.lastPathComponent, cddb ?: @"?", (long)faixas.count, ordem,
@@ -4007,9 +4165,7 @@ static void ZPEsperarVezNoMusicBrainz(void) {
     self.cdFaixas = nil;
     self.cdCapa = nil;
     self.cdDescricao = volume.lastPathComponent;
-    self.cdMenuItem.title = [NSString stringWithFormat:NSLocalizedString(@"cd_menu_item", @"Tocar o CD «%@»"), self.cdDescricao];
-    self.cdMenuItem.hidden = NO;
-    [self acertarBotaoDeEjectar];
+    [self acertarControlosDoCD];
     [self identificarCD:volume perguntar:perguntar];
 }
 
@@ -4030,14 +4186,17 @@ static void ZPEsperarVezNoMusicBrainz(void) {
     self.cdFaixas = nil;
     self.cdCapa = nil;
     self.cdDescricao = nil;
-    self.cdMenuItem.hidden = YES;
+    // O próximo disco pode montar no mesmo sítio («Audio CD») com outras músicas.
+    for (NSString *caminho in self.chavesDeContagem.allKeys) {
+        if ([caminho hasPrefix:[prefixo stringByAppendingString:@"/"]]) [self.chavesDeContagem removeObjectForKey:caminho];
+    }
     self.cdGeracao++;   // o aquecimento em curso, se houver, desiste
     self.cdAquecido = NO;
     if (self.cdTocarQuandoAquecido) {
         self.cdTocarQuandoAquecido = NO;
         self.playCountLabel.stringValue = @"";
     }
-    [self acertarBotaoDeEjectar];
+    [self acertarControlosDoCD];
 
     // O que estava à vista era do disco: nomes, capa e contagem saem com ele, e
     // não fica nenhuma faixa dada como «em curso» que já não existe.
@@ -4085,8 +4244,15 @@ static void ZPEsperarVezNoMusicBrainz(void) {
     });
 }
 
-- (void)acertarBotaoDeEjectar {
+// O botão ⏏️ e o item «Tocar o CD» do menu Ficheiro seguem o disco no leitor.
+- (void)acertarControlosDoCD {
     BOOL comCD = self.cdVolumeURL != nil;
+    // Sem disco, o item fica a cinzento com o título simples, como manda a casa:
+    // o menu activa sozinho os itens com acção, por isso sem CD não a tem.
+    self.cdMenuItem.title = comCD
+        ? [NSString stringWithFormat:NSLocalizedString(@"cd_menu_item", @"Tocar o CD «%@»"), self.cdDescricao ?: self.cdVolumeURL.lastPathComponent]
+        : NSLocalizedString(@"cd_menu_item_plain", @"Tocar o CD");
+    self.cdMenuItem.action = comCD ? @selector(tocarCDAction:) : NULL;
     self.ejectButton.enabled = comCD;
     // O glifo é um emoji, que tem cores próprias e não esbate sozinho.
     self.ejectButton.alphaValue = comCD ? 1.0 : 0.35;
@@ -4152,10 +4318,10 @@ static void ZPEsperarVezNoMusicBrainz(void) {
     self.cdMenuItem = [[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"cd_menu_item_plain", @"Tocar o CD")
                                                  action:@selector(tocarCDAction:) keyEquivalent:@""];
     self.cdMenuItem.target = self;
-    self.cdMenuItem.hidden = YES;
     if (sair.menu) {
         [sair.menu insertItem:self.cdMenuItem atIndex:[sair.menu indexOfItem:sair]];
     }
+    [self acertarControlosDoCD];
 
     NSNotificationCenter *centro = [[NSWorkspace sharedWorkspace] notificationCenter];
     __weak typeof(self) fraco = self;
@@ -6344,7 +6510,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     self.ejectButton.target = self;
     self.ejectButton.action = @selector(ejectarCDAction:);
     [self.view addSubview:self.ejectButton];
-    [self acertarBotaoDeEjectar];
+    [self acertarControlosDoCD];
 
     // Progress bar
     self.progressBar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(160, 80, windowWidth - 320, 20)];
@@ -6419,6 +6585,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     __block NSString *songTitle = @"";
     __block NSImage *coverArtImage = nil;
     __block NSURL *trackURL = nil;
+    __block NSNumber *playCount = nil;
 
     // Access UI elements on the main thread
     dispatch_sync(dispatch_get_main_queue(), ^{
@@ -6427,10 +6594,11 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
         songTitle = self.titleLabel.stringValue ?: @"";
         coverArtImage = self.coverArtView.image;
         trackURL = self.currentTrackURL;
+        // As contagens só se lêem no thread principal.
+        NSURL *originalTrackURL = self.shuffledToOriginalMap[trackURL] ?: trackURL;
+        NSString *chave = [self chaveDeContagemConhecidaPara:originalTrackURL.path];
+        playCount = chave ? self.trackPlayCounts[chave] : nil;
     });
-
-    NSURL *originalTrackURL = self.shuffledToOriginalMap[trackURL] ?: trackURL;
-    NSNumber *playCount = [self.trackPlayCounts objectForKey:originalTrackURL.path];
 
     // Define the paths
     NSString *homeDirectory = NSHomeDirectory();
