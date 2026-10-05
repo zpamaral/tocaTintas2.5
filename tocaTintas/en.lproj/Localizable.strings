@@ -88,3 +88,19 @@
 "airplay_pairing_required_text" = "This device only accepts sound from senders it has been paired with. It is done once, in Preferences → Pairing, with the four-digit code shown on its screen.";
 "airplay_pairing_required_open" = "Pair…";
 "airplay_pairing_required_later" = "Not Now";
+"cd_play_title" = "Play the CD “%@”?";
+"cd_play_text" = "The disc’s tracks become the playing list; the library stays where it was and comes back with “Exit playlist mode”. Titles, cover and gain come from the same album in the library, when it is there.";
+"cd_play_button" = "Play";
+"cd_play_later" = "Not Now";
+"cd_menu_item" = "Play the CD “%@”";
+"cd_menu_item_plain" = "Play the CD";
+"cd_track_title" = "Track %ld";
+
+/* Preferences: audio CD */
+"prefs_tab_cd" = "CD";
+"prefs_cd_explanation" = "When you insert an audio CD, tocaTintas looks up the track names and cover art in your library (by the CDDB or MusicBrainz ID of your FLAC files) and on MusicBrainz.";
+"prefs_cd_order_label" = "Source order:";
+"prefs_cd_order_none" = "None (just “Track 1”, “Track 2”…)";
+"prefs_cd_order_local_internet" = "Library, then MusicBrainz";
+"prefs_cd_order_internet_local" = "MusicBrainz, then library";
+"prefs_cd_note" = "ReplayGain always comes from the library when the album is there. MusicBrainz answers are cached, so each disc is only looked up once.";

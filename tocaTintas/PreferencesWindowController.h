@@ -74,6 +74,15 @@ NSURL *ZPHeadphoneEqFolder(void);
 /// recai na embutida.
 NSString *ZPCurrentBS2BEq(void);
 
+/// De onde vêm os nomes e a capa de um CD de áudio: "none" (de lado nenhum —
+/// «Faixa N» e a imagem genérica), "local_internet" (a fonoteca, e o MusicBrainz
+/// para o que lá não estiver) ou "internet_local" (o MusicBrainz, e a fonoteca se
+/// ele falhar). Ausente vale como "local_internet". O ganho vem sempre da
+/// fonoteca quando o disco lá está, menos com "none".
+extern NSString * const kCDMetadataOrderDefaultsKey;
+extern NSString * const kCDMetadataOrderChangedNotification;
+NSString *ZPCurrentCDMetadataOrder(void);
+
 @interface PreferencesWindowController : NSWindowController
 
 @property (weak) IBOutlet NSButton *saveButton; // Button for saving

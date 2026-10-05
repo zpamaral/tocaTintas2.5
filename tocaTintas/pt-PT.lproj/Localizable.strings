@@ -88,3 +88,19 @@
 "airplay_pairing_required_text" = "Este aparelho só aceita som de quem tiver feito com ele um emparelhamento. Faz-se uma vez, em Preferências → Emparelhamento, com o código de quatro dígitos que aparece no ecrã.";
 "airplay_pairing_required_open" = "Emparelhar…";
 "airplay_pairing_required_later" = "Agora não";
+"cd_play_title" = "Tocar o CD «%@»?";
+"cd_play_text" = "As faixas do disco passam a ser a lista em reprodução; a biblioteca fica onde estava e volta com «Sair do modo de lista». Os nomes, a capa e o ganho vêm do mesmo álbum na fonoteca, quando lá estiver.";
+"cd_play_button" = "Tocar";
+"cd_play_later" = "Agora não";
+"cd_menu_item" = "Tocar o CD «%@»";
+"cd_menu_item_plain" = "Tocar o CD";
+"cd_track_title" = "Faixa %ld";
+
+/* Preferências: CD de áudio */
+"prefs_tab_cd" = "CD";
+"prefs_cd_explanation" = "Quando metes um CD de áudio, o tocaTintas procura os nomes das faixas e a capa na tua fonoteca (pelo identificador CDDB ou MusicBrainz dos teus FLAC) e no MusicBrainz.";
+"prefs_cd_order_label" = "Ordem das fontes:";
+"prefs_cd_order_none" = "Nenhuma (só «Faixa 1», «Faixa 2»…)";
+"prefs_cd_order_local_internet" = "Fonoteca, depois MusicBrainz";
+"prefs_cd_order_internet_local" = "MusicBrainz, depois fonoteca";
+"prefs_cd_note" = "O ganho ReplayGain vem sempre da fonoteca, quando o álbum lá está. As respostas do MusicBrainz ficam guardadas, por isso cada disco só é pedido uma vez.";

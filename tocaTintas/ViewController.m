@@ -32,6 +32,8 @@ SOFTWARE.
 #include <opus/opusfile.h>  // For Ogg Opus playback
 #include <string.h>
 #include <stdatomic.h>   // For the silence-analysis generation counter
+#include <sys/mount.h>   // statfs: reconhecer um CD de áudio («cddafs»)
+#include <CommonCrypto/CommonDigest.h>   // SHA-1 do identificador de disco do MusicBrainz
 
 #import <TPCircularBuffer/TPCircularBuffer.h>
 
@@ -49,6 +51,7 @@ SOFTWARE.
 #import <AudioToolbox/AudioToolbox.h>   // CoreAudio
 #import <UserNotifications/UserNotifications.h>
 #import "PreferencesWindowController.h"
+#import "ZPEtiquetaDeslizante.h"   // Etiquetas que deslizam quando o texto não cabe
 
 #import "ZPAirPlay.h"
 #import "ZPAudioCapture.h"
@@ -258,8 +261,21 @@ static WavpackStreamReader memoryReader = {
 - (void)handleApePlayback:(NSURL *)trackURL;
 - (void)extractAndDisplayMetadataForApe:(NSURL *)trackURL;
 - (void)closeApeDecoder;
+- (void)mostrarMetadadosDaFaixaDoCD:(NSURL *)url;
+- (void)tocarCD;
+- (void)perguntarSeTocaCD;
 
 @property (nonatomic, strong) NSImageView *coverArtView;
+
+// CD de áudio montado (ver «CD de áudio»). As faixas do disco vão para uma lista
+// temporária; o que se mostra de cada uma vem da fonoteca, pelo identificador
+// freedb. cdFaixas: caminho da faixa no disco → título, artista, álbum, número e,
+// se o disco estiver na fonoteca, o FLAC correspondente.
+@property (nonatomic, strong, nullable) NSURL *cdVolumeURL;
+@property (nonatomic, copy, nullable) NSDictionary<NSString *, NSDictionary *> *cdFaixas;
+@property (nonatomic, strong, nullable) NSData *cdCapa;
+@property (nonatomic, copy, nullable) NSString *cdDescricao;
+@property (nonatomic, strong, nullable) NSMenuItem *cdMenuItem;
 @property (nonatomic, strong) NSTextField *artistLabel;
 @property (nonatomic, strong) NSTextField *albumLabel;
 @property (nonatomic, strong) NSTextField *titleLabel;
@@ -593,6 +609,166 @@ static NSString *ZPTextoAPEv2(NSDictionary<NSString *, NSData *> *itens, NSStrin
     return valor ? [[NSString alloc] initWithData:valor encoding:NSUTF8StringEncoding] : nil;
 }
 
+#pragma mark - CD de áudio
+
+// Um CD de áudio montado pelo macOS: sistema de ficheiros «cddafs», uma faixa por
+// ficheiro («1 Audio Track.aiff»…) e o índice do disco no .TOC.plist escondido.
+// Não traz etiquetas nem capa; o que se mostra vem da fonoteca, pelo
+// identificador freedb que o abcde grava nos FLAC (CDDB=…) e que se calcula aqui
+// a partir do índice, sem rede.
+static BOOL ZPEhCDDeAudio(NSURL *volume) {
+    struct statfs info;
+    if (!volume.isFileURL || statfs(volume.fileSystemRepresentation, &info) != 0) return NO;
+    return strcmp(info.f_fstypename, "cddafs") == 0;
+}
+
+static NSInteger ZPNumeroDaFaixaDoCD(NSURL *faixa) {
+    return faixa.lastPathComponent.integerValue;   // «12 Audio Track.aiff» → 12
+}
+
+// As faixas pela ordem do disco (pelo número, e não pela ordem alfabética, que
+// poria a 10 antes da 2).
+static NSArray<NSURL *> *ZPFaixasDoCD(NSURL *volume) {
+    NSArray<NSURL *> *conteudo = [[NSFileManager defaultManager] contentsOfDirectoryAtURL:volume
+                                                               includingPropertiesForKeys:nil
+                                                                                  options:NSDirectoryEnumerationSkipsHiddenFiles
+                                                                                    error:NULL];
+    NSMutableArray<NSURL *> *faixas = [NSMutableArray array];
+    for (NSURL *f in conteudo) {
+        NSString *ext = f.pathExtension.lowercaseString;
+        if (([ext isEqualToString:@"aiff"] || [ext isEqualToString:@"aif"]) && ZPNumeroDaFaixaDoCD(f) > 0) {
+            [faixas addObject:f];
+        }
+    }
+    [faixas sortUsingComparator:^NSComparisonResult(NSURL *a, NSURL *b) {
+        return [@(ZPNumeroDaFaixaDoCD(a)) compare:@(ZPNumeroDaFaixaDoCD(b))];
+    }];
+    return faixas;
+}
+
+// Identificador freedb (o «CDDB» do abcde): soma dos dígitos dos segundos de
+// início de cada faixa, duração do disco em segundos e número de faixas. Os
+// blocos do .TOC.plist já contam os 150 do pré-intervalo, como pede o algoritmo.
+static NSString *ZPIdentificadorFreedbDoCD(NSURL *volume, NSInteger *numeroDeFaixas) {
+    NSData *dados = [NSData dataWithContentsOfURL:[volume URLByAppendingPathComponent:@".TOC.plist"]];
+    if (!dados) return nil;
+    NSDictionary *toc = [NSPropertyListSerialization propertyListWithData:dados options:0 format:NULL error:NULL];
+    NSDictionary *sessao = [toc[@"Sessions"] isKindOfClass:[NSArray class]] ? [toc[@"Sessions"] firstObject] : nil;
+    NSArray *faixas = sessao[@"Track Array"];
+    long leadout = [sessao[@"Leadout Block"] longValue];
+    if (![faixas isKindOfClass:[NSArray class]] || faixas.count == 0 || leadout <= 0) return nil;
+
+    long soma = 0, primeiro = -1, n = 0;
+    for (NSDictionary *faixa in faixas) {
+        if ([faixa[@"Data"] boolValue]) continue;              // faixas de dados não contam
+        long inicio = [faixa[@"Start Block"] longValue];
+        if (primeiro < 0) primeiro = inicio;
+        for (long s = inicio / 75; s > 0; s /= 10) soma += s % 10;
+        n++;
+    }
+    if (n == 0) return nil;
+    long duracao = leadout / 75 - primeiro / 75;
+    if (numeroDeFaixas) *numeroDeFaixas = n;
+    uint32_t id = (uint32_t)(((soma % 0xff) << 24) | (duracao << 8) | n);
+    return [NSString stringWithFormat:@"%08x", id];
+}
+
+// As etiquetas Vorbis de um FLAC, com as chaves em maiúsculas. Para cada chave
+// fica o primeiro valor.
+static NSDictionary<NSString *, NSString *> *ZPEtiquetasFlac(NSURL *flac) {
+    NSMutableDictionary<NSString *, NSString *> *etiquetas = [NSMutableDictionary dictionary];
+    FLAC__StreamMetadata *bloco = NULL;
+    if (!FLAC__metadata_get_tags(flac.path.fileSystemRepresentation, &bloco) || !bloco) return etiquetas;
+    const FLAC__StreamMetadata_VorbisComment *vc = &bloco->data.vorbis_comment;
+    for (FLAC__uint32 i = 0; i < vc->num_comments; i++) {
+        NSString *entrada = [[NSString alloc] initWithBytes:vc->comments[i].entry length:vc->comments[i].length
+                                                   encoding:NSUTF8StringEncoding];
+        NSRange igual = [entrada rangeOfString:@"="];
+        if (igual.location == NSNotFound) continue;
+        NSString *chave = [entrada substringToIndex:igual.location].uppercaseString;
+        if (!etiquetas[chave]) etiquetas[chave] = [entrada substringFromIndex:NSMaxRange(igual)];
+    }
+    FLAC__metadata_object_delete(bloco);
+    return etiquetas;
+}
+
+// Identificador de disco do MusicBrainz: SHA-1 do primeiro e último número de
+// faixa e dos 100 deslocamentos (o leadout e as 99 faixas possíveis), tudo em
+// hexadecimal maiúsculo, e o resultado em base64 com «+/=» trocados por «._-».
+static NSString *ZPDiscIDMusicBrainzDoCD(NSURL *volume) {
+    NSData *dados = [NSData dataWithContentsOfURL:[volume URLByAppendingPathComponent:@".TOC.plist"]];
+    if (!dados) return nil;
+    NSDictionary *toc = [NSPropertyListSerialization propertyListWithData:dados options:0 format:NULL error:NULL];
+    NSDictionary *sessao = [toc[@"Sessions"] isKindOfClass:[NSArray class]] ? [toc[@"Sessions"] firstObject] : nil;
+    NSArray *faixas = sessao[@"Track Array"];
+    long leadout = [sessao[@"Leadout Block"] longValue];
+    if (![faixas isKindOfClass:[NSArray class]] || leadout <= 0) return nil;
+
+    long deslocamentos[100] = {0};
+    deslocamentos[0] = leadout;
+    long primeira = 0, ultima = 0;
+    for (NSDictionary *faixa in faixas) {
+        if ([faixa[@"Data"] boolValue]) continue;
+        long n = [faixa[@"Point"] longValue];
+        if (n < 1 || n > 99) continue;
+        deslocamentos[n] = [faixa[@"Start Block"] longValue];
+        if (primeira == 0) primeira = n;
+        ultima = n;
+    }
+    if (primeira == 0) return nil;
+
+    NSMutableString *texto = [NSMutableString stringWithFormat:@"%02lX%02lX", primeira, ultima];
+    for (int i = 0; i < 100; i++) [texto appendFormat:@"%08lX", deslocamentos[i]];
+
+    NSData *bytes = [texto dataUsingEncoding:NSASCIIStringEncoding];
+    unsigned char resumo[CC_SHA1_DIGEST_LENGTH];
+    CC_SHA1(bytes.bytes, (CC_LONG)bytes.length, resumo);
+    NSString *b64 = [[NSData dataWithBytes:resumo length:sizeof resumo] base64EncodedStringWithOptions:0];
+    b64 = [b64 stringByReplacingOccurrencesOfString:@"+" withString:@"."];
+    b64 = [b64 stringByReplacingOccurrencesOfString:@"/" withString:@"_"];
+    return [b64 stringByReplacingOccurrencesOfString:@"=" withString:@"-"];
+}
+
+// Um GET síncrono, para correr só fora do thread principal. O MusicBrainz exige
+// um User-Agent que identifique a aplicação e não pede autenticação para ler.
+static NSData *ZPPedidoHTTP(NSURL *url, NSInteger *estado) {
+    NSMutableURLRequest *pedido = [NSMutableURLRequest requestWithURL:url
+                                                          cachePolicy:NSURLRequestUseProtocolCachePolicy
+                                                      timeoutInterval:15.0];
+    NSString *versao = [NSBundle mainBundle].infoDictionary[@"CFBundleShortVersionString"] ?: @"0";
+    [pedido setValue:[NSString stringWithFormat:@"tocaTintas/%@ ( https://github.com/zpamaral )", versao]
+  forHTTPHeaderField:@"User-Agent"];
+    [pedido setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+
+    __block NSData *corpo = nil;
+    __block NSInteger codigo = 0;
+    dispatch_semaphore_t feito = dispatch_semaphore_create(0);
+    [[[NSURLSession sharedSession] dataTaskWithRequest:pedido
+                                     completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+        codigo = [r isKindOfClass:[NSHTTPURLResponse class]] ? ((NSHTTPURLResponse *)r).statusCode : 0;
+        if (!e) corpo = d;
+        dispatch_semaphore_signal(feito);
+    }] resume];
+    dispatch_semaphore_wait(feito, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(20 * NSEC_PER_SEC)));
+    if (estado) *estado = codigo;
+    return corpo;
+}
+
+static NSArray<NSURL *> *ZPFlacsDaPasta(NSURL *pasta) {
+    NSArray<NSURL *> *conteudo = [[NSFileManager defaultManager] contentsOfDirectoryAtURL:pasta
+                                                               includingPropertiesForKeys:nil
+                                                                                  options:NSDirectoryEnumerationSkipsHiddenFiles
+                                                                                    error:NULL];
+    NSMutableArray<NSURL *> *flacs = [NSMutableArray array];
+    for (NSURL *f in conteudo) {
+        if ([f.pathExtension.lowercaseString isEqualToString:@"flac"]) [flacs addObject:f];
+    }
+    [flacs sortUsingComparator:^NSComparisonResult(NSURL *a, NSURL *b) {
+        return [a.lastPathComponent localizedStandardCompare:b.lastPathComponent];
+    }];
+    return flacs;
+}
+
 
 @implementation ViewController
 
@@ -719,11 +895,11 @@ CoreAudioPlaybackState playbackState;
 }
 
 - (NSString *)replaceSingleQuoteAndSmartQuotes:(NSString *)input {
-    // Replacing single quotes with typographic single quote ‘
+    // Replacing single quotes with typographic single quote ’
     NSString *output = [input stringByReplacingOccurrencesOfString:@"'" withString:@"’"];
     
-    // Replacing … with typographic ellipsis …
-    output = [output stringByReplacingOccurrencesOfString:@"…" withString:@"…"];
+    // Replacing ... with typographic ellipsis …
+    output = [output stringByReplacingOccurrencesOfString:@"..." withString:@"…"];
  
     // Replace each pair of quotes with “ and ”
     NSUInteger quoteCount = 0;
@@ -745,6 +921,14 @@ CoreAudioPlaybackState playbackState;
         searchRange = NSMakeRange(NSMaxRange(foundRange), [mutableOutput length] - NSMaxRange(foundRange));
     }
     
+    // Replace -- and --- (LaTeX style) with m-dash (—), with or without spaces;
+    // four or more hyphens are left alone (separator lines)
+    NSRegularExpression *tripleHyphenRegex = [NSRegularExpression regularExpressionWithPattern:@"(?<!-)-{2,3}(?!-)" options:0 error:nil];
+    mutableOutput = [[tripleHyphenRegex stringByReplacingMatchesInString:mutableOutput
+                                        options:0
+                                        range:NSMakeRange(0, mutableOutput.length)
+                                        withTemplate:@"—"] mutableCopy];
+
     // Replace hyphens flanked by spaces with m-dash (—)
     NSRegularExpression *spaceHyphenSpaceRegex = [NSRegularExpression regularExpressionWithPattern:@"\\s-\\s" options:0 error:nil];
     mutableOutput = [[spaceHyphenSpaceRegex stringByReplacingMatchesInString:mutableOutput
@@ -921,6 +1105,9 @@ CoreAudioPlaybackState playbackState;
                                                   usingBlock:^(NSNotification *nota) {
         [fraco retomarDepoisDeEmparelhar:nota.userInfo[@"identificador"]];
     }];
+
+    // CD de áudio: item do menu, montagem e desmontagem, e um disco já no leitor.
+    [self prepararCDDeAudio];
     
     // Initialize ZPAudioCapture instance
     self.audioCapture = [[ZPAudioCapture alloc] init];
@@ -2911,6 +3098,12 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
     //if (self.audioFiles.count > 0) {
         //[self playAudio];
     //}
+
+    // Um CD no leitor foi identificado contra a biblioteca antiga: volta a
+    // procurar-se na nova. O índice muda de raiz, portanto é refeito.
+    if (self.cdVolumeURL) {
+        [self identificarCD:self.cdVolumeURL perguntar:NO];
+    }
 }
 
 - (void)validatePlaylistFiles {
@@ -3366,6 +3559,467 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
     //[self playAudio]; // Start playback from the first track
 }
 
+#pragma mark - CD de áudio: identificação e reprodução
+
+// Índice «identificador freedb → pasta do álbum» da fonoteca, guardado no
+// Application Support. Constrói-se a partir do primeiro FLAC de cada álbum
+// (Artista/Álbum), que é onde o abcde deixa o CDDB=…; refaz-se quando a raiz da
+// fonoteca muda ou quando um disco não é lá encontrado.
+- (NSURL *)ficheiroDoIndiceCDDB {
+    NSURL *suporte = [[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory
+                                                             inDomains:NSUserDomainMask] firstObject];
+    NSURL *pasta = [suporte URLByAppendingPathComponent:@"tocaTintas" isDirectory:YES];
+    [[NSFileManager defaultManager] createDirectoryAtURL:pasta withIntermediateDirectories:YES attributes:nil error:NULL];
+    return [pasta URLByAppendingPathComponent:@"indice_cddb.plist"];
+}
+
+// Corre fora do thread principal: são umas mil e tal leituras de cabeçalhos
+// FLAC no disco externo.
+- (NSDictionary<NSString *, NSString *> *)construirIndiceCDDBEm:(NSString *)raiz {
+    // Duas chaves por álbum, quando as houver: «cddb:…» (o identificador freedb
+    // que o abcde grava) e «mbid:…» (o MUSICBRAINZ_ALBUMID do Picard). A
+    // segunda serve os discos que o MusicBrainz identifica e que não têm CDDB.
+    NSMutableDictionary<NSString *, NSString *> *albuns = [NSMutableDictionary dictionary];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSURL *raizURL = [NSURL fileURLWithPath:raiz isDirectory:YES];
+    NSArray<NSURL *> *artistas = [fm contentsOfDirectoryAtURL:raizURL includingPropertiesForKeys:@[NSURLIsDirectoryKey]
+                                                      options:NSDirectoryEnumerationSkipsHiddenFiles error:NULL];
+    for (NSURL *artista in artistas) {
+        NSNumber *ehPasta = nil;
+        [artista getResourceValue:&ehPasta forKey:NSURLIsDirectoryKey error:NULL];
+        if (!ehPasta.boolValue) continue;
+        NSArray<NSURL *> *discos = [fm contentsOfDirectoryAtURL:artista includingPropertiesForKeys:@[NSURLIsDirectoryKey]
+                                                        options:NSDirectoryEnumerationSkipsHiddenFiles error:NULL];
+        for (NSURL *disco in discos) {
+            [disco getResourceValue:&ehPasta forKey:NSURLIsDirectoryKey error:NULL];
+            if (!ehPasta.boolValue) continue;
+            NSURL *primeiro = ZPFlacsDaPasta(disco).firstObject;
+            if (!primeiro) continue;
+            NSDictionary<NSString *, NSString *> *etiquetas = ZPEtiquetasFlac(primeiro);
+            NSString *cddb = etiquetas[@"CDDB"].lowercaseString;
+            NSString *mbid = etiquetas[@"MUSICBRAINZ_ALBUMID"].lowercaseString;
+            if (cddb.length > 0) {
+                NSString *chave = [@"cddb:" stringByAppendingString:cddb];
+                if (!albuns[chave]) albuns[chave] = disco.path;
+            }
+            if (mbid.length > 0) {
+                NSString *chave = [@"mbid:" stringByAppendingString:mbid];
+                if (!albuns[chave]) albuns[chave] = disco.path;
+            }
+        }
+    }
+    NSDictionary *indice = @{ @"versao": @2, @"raiz": raiz, @"albuns": albuns };
+    [indice writeToURL:[self ficheiroDoIndiceCDDB] atomically:YES];
+    #ifdef DEBUG
+    NSLog(@"[CD] Índice da fonoteca refeito: %lu chaves.", (unsigned long)albuns.count);
+    #endif
+    return albuns;
+}
+
+// A pasta do álbum com esta chave («cddb:…» ou «mbid:…») e este número de
+// faixas, ou nil. O número de FLAC tem de bater com o de faixas do disco: os
+// identificadores freedb podem repetir-se entre discos diferentes, e um MBID de
+// edição com vários discos não diz qual deles é.
+- (nullable NSURL *)pastaDoAlbumComChave:(NSString *)chave faixas:(NSInteger)numero {
+    NSString *raiz = [self loadSongsDirectoryPath];
+    NSDictionary *indice = [NSDictionary dictionaryWithContentsOfURL:[self ficheiroDoIndiceCDDB]];
+    BOOL serve = [indice[@"versao"] integerValue] == 2 && [indice[@"raiz"] isEqualToString:raiz];
+    NSDictionary<NSString *, NSString *> *albuns = serve ? indice[@"albuns"] : nil;
+
+    for (int tentativa = 0; tentativa < 2; tentativa++) {
+        if (!albuns) albuns = [self construirIndiceCDDBEm:raiz];
+        NSString *caminho = albuns[chave.lowercaseString];
+        if (caminho) {
+            NSURL *pasta = [NSURL fileURLWithPath:caminho isDirectory:YES];
+            if ((NSInteger)ZPFlacsDaPasta(pasta).count == numero) return pasta;
+        }
+        if (tentativa == 0 && !serve) break;   // acabou de ser feito: refazê-lo não muda nada
+        albuns = nil;
+    }
+    return nil;
+}
+
+#pragma mark CD de áudio: MusicBrainz
+
+- (NSURL *)pastaDaCacheMusicBrainz {
+    NSURL *pasta = [[[self ficheiroDoIndiceCDDB] URLByDeletingLastPathComponent]
+                    URLByAppendingPathComponent:@"musicbrainz" isDirectory:YES];
+    [[NSFileManager defaultManager] createDirectoryAtURL:pasta withIntermediateDirectories:YES attributes:nil error:NULL];
+    return pasta;
+}
+
+// No máximo um pedido por segundo ao MusicBrainz, como as regras do serviço
+// pedem. O Cover Art Archive é outro serviço e não conta.
+static void ZPEsperarVezNoMusicBrainz(void) {
+    static NSDate *ultimo = nil;
+    @synchronized ([NSDate class]) {
+        if (ultimo) {
+            NSTimeInterval falta = 1.1 + [ultimo timeIntervalSinceNow];
+            if (falta > 0) [NSThread sleepForTimeInterval:falta];
+        }
+        ultimo = [NSDate date];
+    }
+}
+
+// Nomes e capa de um disco pelo MusicBrainz, com cache no Application Support:
+// { mbid, artista, album, faixas: { "1": título, … } } e a capa à parte. Um
+// disco que o MusicBrainz não conhece também fica guardado, por uma semana, para
+// não se repetir a pergunta a cada vez que o CD entra. Fora do thread principal.
+- (nullable NSDictionary *)metadadosMusicBrainzDoCD:(NSURL *)volume capa:(NSData **)capaSaida {
+    NSString *discid = ZPDiscIDMusicBrainzDoCD(volume);
+    if (!discid) return nil;
+    NSURL *cache = [[self pastaDaCacheMusicBrainz] URLByAppendingPathComponent:[discid stringByAppendingPathExtension:@"plist"]];
+    NSURL *cacheCapa = [[self pastaDaCacheMusicBrainz] URLByAppendingPathComponent:[discid stringByAppendingPathExtension:@"img"]];
+
+    NSDictionary *guardado = [NSDictionary dictionaryWithContentsOfURL:cache];
+    if (guardado[@"naoEncontrado"]) {
+        if ([guardado[@"quando"] timeIntervalSinceNow] > -7 * 24 * 3600) return nil;
+    } else if (guardado) {
+        if (capaSaida) *capaSaida = [NSData dataWithContentsOfURL:cacheCapa];
+        return guardado;
+    }
+
+    ZPEsperarVezNoMusicBrainz();
+    NSString *endereco = [NSString stringWithFormat:@"https://musicbrainz.org/ws/2/discid/%@?inc=artist-credits+recordings&fmt=json", discid];
+    NSInteger estado = 0;
+    NSData *corpo = ZPPedidoHTTP([NSURL URLWithString:endereco], &estado);
+    if (!corpo) {
+        // Sem rede ou sem resposta: não se guarda nada, tenta-se da próxima vez.
+        NSLog(@"[CD] MusicBrainz sem resposta para %@ (HTTP %ld).", discid, (long)estado);
+        return nil;
+    }
+    NSDictionary *json = [NSJSONSerialization JSONObjectWithData:corpo options:0 error:NULL];
+    NSArray *edicoes = [json isKindOfClass:[NSDictionary class]] ? json[@"releases"] : nil;
+
+    // A edição e o disco (medium) que contêm este identificador; das que o
+    // têm, primeiro as que têm capa no Cover Art Archive.
+    NSDictionary *escolhida = nil, *meio = nil;
+    NSMutableArray<NSString *> *comCapa = [NSMutableArray array];
+    for (NSDictionary *edicao in [edicoes isKindOfClass:[NSArray class]] ? edicoes : @[]) {
+        for (NSDictionary *m in edicao[@"media"]) {
+            BOOL tem = NO;
+            for (NSDictionary *d in m[@"discs"]) if ([d[@"id"] isEqualToString:discid]) tem = YES;
+            if (!tem) continue;
+            BOOL capa = [edicao[@"cover-art-archive"][@"front"] boolValue];
+            if (capa && edicao[@"id"]) [comCapa addObject:edicao[@"id"]];
+            if (!escolhida || (capa && ![escolhida[@"cover-art-archive"][@"front"] boolValue])) {
+                escolhida = edicao;
+                meio = m;
+            }
+        }
+    }
+
+    if (!escolhida) {
+        [@{ @"naoEncontrado": @YES, @"quando": [NSDate date] } writeToURL:cache atomically:YES];
+        NSLog(@"[CD] O MusicBrainz não conhece o disco %@.", discid);
+        return nil;
+    }
+
+    NSMutableString *artista = [NSMutableString string];
+    for (NSDictionary *credito in escolhida[@"artist-credit"]) {
+        [artista appendFormat:@"%@%@", credito[@"name"] ?: @"", credito[@"joinphrase"] ?: @""];
+    }
+    NSMutableDictionary<NSString *, NSString *> *faixas = [NSMutableDictionary dictionary];
+    for (NSDictionary *faixa in meio[@"tracks"]) {
+        NSString *titulo = faixa[@"title"] ?: faixa[@"recording"][@"title"];
+        if (titulo && faixa[@"position"]) faixas[[faixa[@"position"] description]] = titulo;
+    }
+    NSDictionary *resultado = @{ @"mbid": escolhida[@"id"] ?: @"",
+                                 @"artista": artista,
+                                 @"album": escolhida[@"title"] ?: @"",
+                                 @"faixas": faixas };
+    [resultado writeToURL:cache atomically:YES];
+
+    // A capa: a da edição escolhida, ou a de outra edição do mesmo disco.
+    NSData *capa = nil;
+    for (NSString *mbid in comCapa) {
+        NSString *url = [NSString stringWithFormat:@"https://coverartarchive.org/release/%@/front-500", mbid];
+        NSInteger codigo = 0;
+        NSData *imagem = ZPPedidoHTTP([NSURL URLWithString:url], &codigo);
+        if (codigo == 200 && imagem.length > 0 && [[NSImage alloc] initWithData:imagem]) {
+            capa = imagem;
+            break;
+        }
+    }
+    if (capa) [capa writeToURL:cacheCapa atomically:YES];
+    if (capaSaida) *capaSaida = capa;
+
+    #ifdef DEBUG
+    NSLog(@"[CD] MusicBrainz: %@ — %@ (%@), %lu faixas, capa %@.", artista, resultado[@"album"], resultado[@"mbid"],
+          (unsigned long)faixas.count, capa ? @"sim" : @"não");
+    #endif
+    return resultado;
+}
+
+#pragma mark CD de áudio: identificação
+
+// Lê o disco, a fonoteca e o MusicBrainz, pela ordem das preferências, e
+// prepara o que se mostra de cada faixa. Fora do thread principal; o resultado
+// vai para as propriedades no principal.
+- (void)identificarCD:(NSURL *)volume perguntar:(BOOL)perguntar {
+    NSString *ordem = ZPCurrentCDMetadataOrder();
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSArray<NSURL *> *faixas = ZPFaixasDoCD(volume);
+        BOOL nenhuma = [ordem isEqualToString:@"none"];
+        BOOL internetPrimeiro = [ordem isEqualToString:@"internet_local"];
+
+        // A fonoteca pelo identificador freedb.
+        NSInteger numero = 0;
+        NSString *cddb = nenhuma ? nil : ZPIdentificadorFreedbDoCD(volume, &numero);
+        NSURL *pasta = (cddb && numero == (NSInteger)faixas.count)
+            ? [self pastaDoAlbumComChave:[@"cddb:" stringByAppendingString:cddb] faixas:numero] : nil;
+
+        // O MusicBrainz: sempre que vem primeiro; senão, só se a fonoteca não
+        // reconheceu o disco.
+        NSData *capaInternet = nil;
+        NSDictionary *internet = (!nenhuma && (internetPrimeiro || !pasta))
+            ? [self metadadosMusicBrainzDoCD:volume capa:&capaInternet] : nil;
+
+        // Segunda oportunidade na fonoteca: o álbum com o MBID que o MusicBrainz
+        // deu, para os discos sem CDDB. Dá o ganho e, por omissão, nomes e capa.
+        if (!pasta && [internet[@"mbid"] length] > 0) {
+            pasta = [self pastaDoAlbumComChave:[@"mbid:" stringByAppendingString:internet[@"mbid"]] faixas:(NSInteger)faixas.count];
+        }
+
+        // Faixas do álbum na fonoteca, pelo número de faixa (ou pela ordem).
+        NSMutableDictionary<NSNumber *, NSDictionary *> *locais = [NSMutableDictionary dictionary];
+        NSArray<NSURL *> *flacs = pasta ? ZPFlacsDaPasta(pasta) : @[];
+        for (NSUInteger i = 0; i < flacs.count; i++) {
+            NSDictionary<NSString *, NSString *> *etiquetas = ZPEtiquetasFlac(flacs[i]);
+            NSInteger n = [etiquetas[@"TRACKNUMBER"] integerValue];
+            if (n <= 0) n = (NSInteger)i + 1;
+            NSMutableDictionary *info = [etiquetas mutableCopy];
+            info[@"FLAC"] = flacs[i];
+            locais[@(n)] = info;
+        }
+
+        // Quem dá os nomes: a fonte que vem primeiro, se respondeu; senão a outra.
+        BOOL nomesDaInternet = internet && (internetPrimeiro || locais.count == 0);
+
+        NSString *nomeDoVolume = volume.lastPathComponent;
+        NSMutableDictionary<NSString *, NSDictionary *> *porFaixa = [NSMutableDictionary dictionary];
+        NSString *artista = nil, *album = nil;
+        for (NSURL *faixa in faixas) {
+            NSInteger n = ZPNumeroDaFaixaDoCD(faixa);
+            NSDictionary *local = locais[@(n)];
+            NSString *titulo, *artistaDaFaixa, *albumDaFaixa;
+            if (nomesDaInternet) {
+                titulo = internet[@"faixas"][[@(n) description]];
+                artistaDaFaixa = internet[@"artista"];
+                albumDaFaixa = internet[@"album"];
+            } else {
+                titulo = local[@"TITLE"];
+                artistaDaFaixa = local[@"ARTIST"];
+                albumDaFaixa = local[@"ALBUM"];
+            }
+            // A mesma normalização tipográfica das outras fontes (’ “ ” …).
+            if (titulo) titulo = [self replaceSingleQuoteAndSmartQuotes:titulo];
+            if (artistaDaFaixa) artistaDaFaixa = [self replaceSingleQuoteAndSmartQuotes:artistaDaFaixa];
+            if (albumDaFaixa) albumDaFaixa = [self replaceSingleQuoteAndSmartQuotes:albumDaFaixa];
+            titulo = titulo ?: [NSString stringWithFormat:NSLocalizedString(@"cd_track_title", @"Faixa %ld"), (long)n];
+            artista = artistaDaFaixa.length ? artistaDaFaixa : artista;
+            album = albumDaFaixa.length ? albumDaFaixa : album;
+            NSMutableDictionary *info = [@{ @"numero": @(n), @"titulo": titulo,
+                                            @"artista": artistaDaFaixa ?: @"",
+                                            @"album": albumDaFaixa.length ? albumDaFaixa : nomeDoVolume } mutableCopy];
+            // O ganho vem sempre do FLAC, quando o disco está na fonoteca.
+            if (local[@"FLAC"]) info[@"flac"] = local[@"FLAC"];
+            porFaixa[faixa.path] = info;
+        }
+
+        // A capa, pela mesma ordem: a do MusicBrainz ou a albumart_backup; a
+        // imagem genérica de CD fica para quando não houver nenhuma.
+        NSData *capaLocal = nil;
+        for (NSString *nome in @[@"albumart_backup/cover.jpg", @"albumart_backup/cover.png", @"cover.jpg", @"folder.jpg"]) {
+            if (!pasta) break;
+            capaLocal = [NSData dataWithContentsOfURL:[pasta URLByAppendingPathComponent:nome]];
+            if (capaLocal) break;
+        }
+        NSData *capa = internetPrimeiro ? (capaInternet ?: capaLocal) : (capaLocal ?: capaInternet);
+
+        NSString *descricao = (artista && album) ? [NSString stringWithFormat:@"%@ — %@", artista, album] : nomeDoVolume;
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            // O disco pode ter saído entretanto.
+            if (![self.cdVolumeURL isEqual:volume]) return;
+            self.cdFaixas = porFaixa;
+            self.cdCapa = capa;
+            self.cdDescricao = descricao;
+            self.cdMenuItem.title = [NSString stringWithFormat:NSLocalizedString(@"cd_menu_item", @"Tocar o CD «%@»"), descricao];
+            self.cdMenuItem.hidden = NO;
+            #ifdef DEBUG
+            NSLog(@"[CD] %@: freedb %@, %ld faixas, ordem %@; fonoteca: %@; MusicBrainz: %@; nomes de %@.",
+                  volume.lastPathComponent, cddb ?: @"?", (long)faixas.count, ordem,
+                  pasta ? pasta.path : @"não", internet ? internet[@"mbid"] : @"não",
+                  nomesDaInternet ? @"MusicBrainz" : (locais.count ? @"fonoteca" : @"lado nenhum"));
+            #endif
+
+            // Uma nova identificação (a biblioteca mudou) com o CD já a tocar: o
+            // que está à vista passa a usar a informação nova — a lista, os
+            // nomes e a capa da faixa em curso, e o ganho dela.
+            NSString *prefixo = volume.path;
+            if (self.isPlaylistModeActive && [self.audioFiles.firstObject.path hasPrefix:prefixo]) {
+                [self createComboBox];
+                [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
+            }
+            NSURL *emCurso = self.currentTrackURL;
+            if (emCurso && self.cdFaixas[emCurso.path]) {
+                [self mostrarMetadadosDaFaixaDoCD:emCurso];
+                [self primeReplayGainForTrack:emCurso];
+            }
+
+            if (perguntar) [self perguntarSeTocaCD];
+        });
+    });
+}
+
+- (void)perguntarSeTocaCD {
+    NSAlert *alerta = [[NSAlert alloc] init];
+    alerta.messageText = [NSString stringWithFormat:NSLocalizedString(@"cd_play_title", @"Tocar o CD «%@»?"), self.cdDescricao ?: @""];
+    alerta.informativeText = NSLocalizedString(@"cd_play_text", @"O que acontece ao tocar o CD");
+    NSImage *icone = self.cdCapa ? [[NSImage alloc] initWithData:self.cdCapa] : [NSImage imageNamed:@"placeholder"];
+    if (icone) alerta.icon = icone;
+    [alerta addButtonWithTitle:NSLocalizedString(@"cd_play_button", @"Tocar")];
+    [alerta addButtonWithTitle:NSLocalizedString(@"cd_play_later", @"Agora não")];
+
+    __weak typeof(self) fraco = self;
+    void (^resposta)(NSModalResponse) = ^(NSModalResponse r) {
+        if (r == NSAlertFirstButtonReturn) [fraco tocarCD];
+    };
+    NSWindow *janela = self.view.window;
+    if (janela) {
+        [alerta beginSheetModalForWindow:janela completionHandler:resposta];
+    } else {
+        resposta([alerta runModal]);
+    }
+}
+
+- (IBAction)tocarCDAction:(id)sender {
+    [self tocarCD];
+}
+
+// As faixas do disco passam a ser a lista em vigor, como uma lista M3U: a
+// biblioteca fica onde estava, e o «Sair da lista» volta a ela.
+- (void)tocarCD {
+    NSArray<NSURL *> *faixas = self.cdVolumeURL ? ZPFaixasDoCD(self.cdVolumeURL) : @[];
+    if (faixas.count == 0) return;
+
+    [self stopAudio];
+    self.audioFiles = faixas;
+    self.isPlaylistModeActive = YES;
+    self.currentTrackIndex = -1;
+    self.currentTrackURL = nil;
+    if (self.isShuffleModeActive) {
+        [self initializeShuffledTrackList];
+    }
+    [self createComboBox];
+    [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
+    [self playAudio];
+}
+
+- (void)mostrarMetadadosDaFaixaDoCD:(NSURL *)url {
+    NSDictionary *info = self.cdFaixas[url.path];
+    if (!info) return;
+    NSString *titulo = [NSString stringWithFormat:@"%@. %@", info[@"numero"], info[@"titulo"]];
+    NSString *artista = info[@"artista"];
+    NSString *album = info[@"album"];
+    NSImage *capa = self.cdCapa ? [[NSImage alloc] initWithData:self.cdCapa] : nil;
+    if (capa.size.width <= 0) capa = [NSImage imageNamed:@"placeholder"];
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self.titleLabel setStringValue:titulo];
+        [self.artistLabel setStringValue:artista];
+        [self.albumLabel setStringValue:album];
+        [self.coverArtView setImage:capa];
+        [self triggerNowPlayingNotificationWithTitle:titulo artist:artista album:album];
+    });
+}
+
+- (void)volumeMontado:(NSURL *)volume perguntar:(BOOL)perguntar {
+    if (!ZPEhCDDeAudio(volume)) return;
+    self.cdVolumeURL = volume;
+    self.cdFaixas = nil;
+    self.cdCapa = nil;
+    self.cdDescricao = volume.lastPathComponent;
+    self.cdMenuItem.title = [NSString stringWithFormat:NSLocalizedString(@"cd_menu_item", @"Tocar o CD «%@»"), self.cdDescricao];
+    self.cdMenuItem.hidden = NO;
+    [self identificarCD:volume perguntar:perguntar];
+}
+
+// Antes de o disco sair: se está a tocar, pára já, que um ficheiro aberto no CD
+// impede o sistema de o ejectar. A lista do CD dá lugar à biblioteca.
+- (void)volumeVaiDesmontar:(NSURL *)volume {
+    if (!self.cdVolumeURL || ![volume.path isEqualToString:self.cdVolumeURL.path]) return;
+    NSString *prefixo = self.cdVolumeURL.path;
+
+    if ([self.currentTrackURL.path hasPrefix:prefixo]) {
+        [self stopAudio];
+    }
+    BOOL listaDoCD = self.isPlaylistModeActive && [self.audioFiles.firstObject.path hasPrefix:prefixo];
+
+    self.cdVolumeURL = nil;
+    self.cdFaixas = nil;
+    self.cdCapa = nil;
+    self.cdDescricao = nil;
+    self.cdMenuItem.hidden = YES;
+
+    if (listaDoCD) {
+        [self exitPlaylistMode];
+    }
+}
+
+// Chamado uma vez no arranque: o item do menu, os observadores de montagem e um
+// CD que já esteja no leitor (esse não pergunta nada — fica o item do menu).
+- (void)prepararCDDeAudio {
+    NSMenuItem *sair = nil;
+    NSMutableArray<NSMenu *> *porVer = [NSMutableArray arrayWithObject:NSApp.mainMenu];
+    while (porVer.count && !sair) {
+        NSMenu *menu = porVer.lastObject;
+        [porVer removeLastObject];
+        for (NSMenuItem *item in menu.itemArray) {
+            if (item.action == @selector(exitPlaylistModeAction:)) { sair = item; break; }
+            if (item.submenu) [porVer addObject:item.submenu];
+        }
+    }
+    self.cdMenuItem = [[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"cd_menu_item_plain", @"Tocar o CD")
+                                                 action:@selector(tocarCDAction:) keyEquivalent:@""];
+    self.cdMenuItem.target = self;
+    self.cdMenuItem.hidden = YES;
+    if (sair.menu) {
+        [sair.menu insertItem:self.cdMenuItem atIndex:[sair.menu indexOfItem:sair]];
+    }
+
+    NSNotificationCenter *centro = [[NSWorkspace sharedWorkspace] notificationCenter];
+    __weak typeof(self) fraco = self;
+    [centro addObserverForName:NSWorkspaceDidMountNotification object:nil queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(NSNotification *nota) {
+        [fraco volumeMontado:nota.userInfo[NSWorkspaceVolumeURLKey] perguntar:YES];
+    }];
+    [centro addObserverForName:NSWorkspaceWillUnmountNotification object:nil queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(NSNotification *nota) {
+        [fraco volumeVaiDesmontar:nota.userInfo[NSWorkspaceVolumeURLKey]];
+    }];
+    [centro addObserverForName:NSWorkspaceDidUnmountNotification object:nil queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(NSNotification *nota) {
+        [fraco volumeVaiDesmontar:nota.userInfo[NSWorkspaceVolumeURLKey]];
+    }];
+
+    // Mudar a ordem das fontes nas preferências volta a identificar o disco.
+    [[NSNotificationCenter defaultCenter] addObserverForName:kCDMetadataOrderChangedNotification object:nil
+                                                       queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *nota) {
+        NSURL *volume = fraco.cdVolumeURL;
+        if (volume) [fraco identificarCD:volume perguntar:NO];
+    }];
+
+    for (NSURL *volume in [[NSFileManager defaultManager] mountedVolumeURLsIncludingResourceValuesForKeys:nil
+                                                                                                 options:NSVolumeEnumerationSkipHiddenVolumes]) {
+        if (ZPEhCDDeAudio(volume)) {
+            [self volumeMontado:volume perguntar:NO];
+            break;
+        }
+    }
+}
+
 // Add Ogg Opus support
 // Os bytes de um Opus aberto da ranhura do adiantamento. A op_open_memory guarda
 // só o ponteiro: sem quem segure o NSData, o ARC larga-o à saída do
@@ -3460,8 +4114,10 @@ static NSData *gOpusKeptData = nil;
         dispatch_async(dispatch_get_main_queue(), updateTitleLabelBlock);
 
     } else {
-        // Handle case when metadata extraction fails
-        self.coverArtView.image = [NSImage imageNamed:@"defaultAlbumArt"];
+        // Handle case when metadata extraction fails. A imagem genérica é a
+        // placeholder.png dos recursos; a «defaultAlbumArt» que aqui estava não
+        // existia no projecto e deixava a capa vazia.
+        self.coverArtView.image = [NSImage imageNamed:@"placeholder"];
         self.artistLabel.stringValue = @"Unknown Artist";
         self.albumLabel.stringValue = @"Unknown Album";
         self.titleLabel.stringValue = @"Unknown Title";
@@ -5395,7 +6051,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     CGFloat labelMaxWidth  = 320;   // (440 - 160)
 
     // Artist label
-    self.artistLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(labelXPosition, 205, labelMaxWidth, 30)];
+    self.artistLabel = [[ZPEtiquetaDeslizante alloc] initWithFrame:NSMakeRect(labelXPosition, 205, labelMaxWidth, 30)];
     self.artistLabel.font = [NSFont systemFontOfSize:22];
     self.artistLabel.alignment = NSTextAlignmentLeft;
     self.artistLabel.bezeled = NO;
@@ -5406,7 +6062,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     [self.view addSubview:self.artistLabel];
 
     // Album label
-    self.albumLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(labelXPosition, 165, labelMaxWidth, 30)];
+    self.albumLabel = [[ZPEtiquetaDeslizante alloc] initWithFrame:NSMakeRect(labelXPosition, 165, labelMaxWidth, 30)];
     self.albumLabel.font = [NSFont systemFontOfSize:22];
     self.albumLabel.alignment = NSTextAlignmentLeft;
     self.albumLabel.bezeled = NO;
@@ -5417,7 +6073,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     [self.view addSubview:self.albumLabel];
 
     // Title label
-    self.titleLabel = [[NSTextField alloc] initWithFrame:NSMakeRect(labelXPosition, 125, labelMaxWidth, 30)];
+    self.titleLabel = [[ZPEtiquetaDeslizante alloc] initWithFrame:NSMakeRect(labelXPosition, 125, labelMaxWidth, 30)];
     self.titleLabel.font = [NSFont systemFontOfSize:22];
     self.titleLabel.alignment = NSTextAlignmentLeft;
     self.titleLabel.bezeled = NO;
@@ -5426,6 +6082,20 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     self.titleLabel.selectable = NO;
     self.titleLabel.cell.lineBreakMode = NSLineBreakByTruncatingMiddle;
     [self.view addSubview:self.titleLabel];
+
+    // As etiquetas só deslizam se a faixa durar o suficiente para uma passagem
+    // inteira; o tempo restante vem do motor que estiver a tocar.
+    __weak typeof(self) fracoEtiquetas = self;
+    NSTimeInterval (^restante)(void) = ^NSTimeInterval {
+        double agora = 0, duracao = 0;
+        return [fracoEtiquetas currentPlaybackTime:&agora duration:&duracao] ? duracao - agora : -1;
+    };
+    NSArray<ZPEtiquetaDeslizante *> *etiquetas = (NSArray *)@[self.artistLabel, self.albumLabel, self.titleLabel];
+    for (ZPEtiquetaDeslizante *etiqueta in etiquetas) {
+        etiqueta.tempoRestante = restante;
+    }
+    // Só uma a deslizar de cada vez, de cima para baixo.
+    [ZPEtiquetaDeslizante agruparDeCimaParaBaixo:etiquetas];
 
     // Buttons (centered horizontally at the bottom)
     CGFloat buttonWidth = 26;
@@ -6125,6 +6795,11 @@ static NSScrollView *ZPScrollViewComTabela(NSView *vista) {
 
         // Construct the display string in the desired format
         NSString *displayName = [NSString stringWithFormat:@"%@ (%@)", cleanedSongName, extension];
+        NSDictionary *faixaDoCD = self.cdFaixas[fileURL.path];
+        if (faixaDoCD) {
+            // «Audio Track (aiff)» em todas as faixas não dizia nada.
+            displayName = [NSString stringWithFormat:@"%@. %@ (CD)", faixaDoCD[@"numero"], faixaDoCD[@"titulo"]];
+        }
 
         // Log the display name
         #ifdef DEBUG
@@ -7327,6 +8002,12 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
         return;
     }
 
+    // Num CD não: ler a faixa inteira para a análise enquanto o leitor a toca
+    // punha a cabeça óptica a saltar entre os dois pontos do disco.
+    if (self.cdVolumeURL && [trackURL.path hasPrefix:self.cdVolumeURL.path]) {
+        return;
+    }
+
     dispatch_async(ZPSilenceAnalysisQueue(), ^{
         NSArray<NSValue *> *gaps = [self silenceGapsForTrackAtURL:trackURL generation:generation];
         if (gaps.count == 0) {
@@ -8056,6 +8737,14 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     // Este pedido passa a ser o mais recente; qualquer um anterior que ainda
     // venha a terminar fica com a geração desactualizada e cala-se.
     const uint64_t geracao = atomic_fetch_add(&gMetadataGeneration, 1) + 1;
+
+    // Faixa de um CD: os metadados vêm da fonoteca, já lidos ao montar o disco.
+    // Depois da geração, para um pedido anterior que ainda chegue não escrever
+    // por cima.
+    if (self.cdFaixas[url.path]) {
+        [self mostrarMetadadosDaFaixaDoCD:url];
+        return;
+    }
 
     // Define a block to extract and display metadata for FLAC files
     dispatch_block_t flacMetadataBlock = ^{
@@ -8880,7 +9569,11 @@ static ZPReplayGainLido ZPLerReplayGain(NSURL *url, NSData *dados) {
 // que permite chamar isto sempre que alguma coisa mexe na fila, sem se estar a
 // reler o mesmo ficheiro.
 - (void)prefetchTrackAtURL:(NSURL *)trackURL {
-    if (!trackURL) {
+    // Faixas de um CD não se adiantam. O AVAudioPlayer vai lendo a faixa em
+    // curso do disco aos poucos; ler de uma vez os trinta e tal MB da seguinte
+    // punha a cabeça óptica a servir as duas, e a que toca ficava sem dados —
+    // ouviam-se os primeiros segundos e depois silêncio, com a barra a andar.
+    if (!trackURL || (self.cdVolumeURL && [trackURL.path hasPrefix:self.cdVolumeURL.path])) {
         [self discardPrefetchedTrack];
         return;
     }
@@ -8982,7 +9675,19 @@ static ZPReplayGainLido ZPLerReplayGain(NSURL *url, NSData *dados) {
     if (!trackURL) return;
 
     ZPReplayGainLido ganho;
-    if ([self prefetchedGainForTrack:trackURL into:&ganho]) {
+    NSDictionary *faixaDoCD = self.cdFaixas[trackURL.path];
+    if (faixaDoCD) {
+        // Faixa de um CD: o disco não tem etiquetas, mas se estiver na fonoteca
+        // o FLAC correspondente tem — e o áudio é o mesmo, portanto o ganho
+        // também. Sem FLAC fica a 0 dB.
+        NSURL *flac = faixaDoCD[@"flac"];
+        ganho = flac ? ZPLerReplayGain(flac, nil) : kZPReplayGainVazio;
+        ganho.pronto = YES;
+        #ifdef DEBUG
+        NSLog(@"[ReplayGain] %@ (CD): %@.", trackURL.lastPathComponent,
+              flac ? [NSString stringWithFormat:@"ganho de %@", flac.lastPathComponent] : @"disco fora da fonoteca, 0 dB");
+        #endif
+    } else if ([self prefetchedGainForTrack:trackURL into:&ganho]) {
         #ifdef DEBUG
         NSLog(@"[ReplayGain] %@: ganho vindo do adiantamento, sem ir ao disco (%@).",
               trackURL.lastPathComponent, ganho.lido ? @"com etiquetas" : @"sem etiquetas");

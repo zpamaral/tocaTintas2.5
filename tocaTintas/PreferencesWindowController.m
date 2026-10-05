@@ -90,6 +90,21 @@ void ZPResolveReplayGain(float trackGain, float trackPeak,
     if (outPeak) *outPeak = trackPeak;
 }
 
+NSString * const kCDMetadataOrderDefaultsKey        = @"cdMetadataOrder";
+NSString * const kCDMetadataOrderChangedNotification = @"CDMetadataOrderChanged";
+
+// A ordem é a do menu.
+static NSString * const kOrdensCD[] = { @"none", @"local_internet", @"internet_local" };
+static const NSUInteger kNumOrdensCD = sizeof(kOrdensCD) / sizeof(kOrdensCD[0]);
+
+NSString *ZPCurrentCDMetadataOrder(void) {
+    NSString *guardado = [[NSUserDefaults standardUserDefaults] stringForKey:kCDMetadataOrderDefaultsKey];
+    for (NSUInteger i = 0; i < kNumOrdensCD; ++i) {
+        if ([kOrdensCD[i] isEqualToString:guardado]) return guardado;
+    }
+    return @"local_internet";
+}
+
 NSString * const kBS2BEqDefaultsKey        = @"bs2bEq";
 NSString * const kBS2BEqChangedNotification = @"BS2BEqChanged";
 
@@ -181,6 +196,7 @@ NSString *ZPCurrentBS2BProfile(void) {
 // Separador do emparelhamento. Tem a sua própria descoberta de aparelhos: é
 // barata, e evita que as preferências dependam da janela principal.
 @property (strong, nonatomic) NSTabView *separadores;
+@property (strong, nonatomic) NSPopUpButton *cdOrdemPopUp;
 @property (strong, nonatomic) ZPAirPlay *descobertaEmparelhamento;
 @property (strong, nonatomic) NSPopUpButton *emparelharPopUp;
 @property (strong, nonatomic) NSTextField *emparelharEstado;
@@ -251,6 +267,11 @@ NSString *ZPCurrentBS2BProfile(void) {
     itemAirPlay.label = NSLocalizedString(@"prefs_tab_airplay", @"Título do separador do AirPlay");
     itemAirPlay.view = [self criarVistaAirPlay];
     [separadores addTabViewItem:itemAirPlay];
+
+    NSTabViewItem *itemCD = [[NSTabViewItem alloc] initWithIdentifier:@"cd"];
+    itemCD.label = NSLocalizedString(@"prefs_tab_cd", @"Título do separador do CD de áudio");
+    itemCD.view = [self criarVistaCD];
+    [separadores addTabViewItem:itemCD];
 
     NSTabViewItem *itemEmparelhar = [[NSTabViewItem alloc] initWithIdentifier:@"emparelhar"];
     itemEmparelhar.label = NSLocalizedString(@"prefs_tab_pairing", @"Título do separador do emparelhamento AirPlay");
@@ -621,6 +642,55 @@ NSString *ZPCurrentBS2BProfile(void) {
     [[NSUserDefaults standardUserDefaults] setObject:perfil forKey:kBS2BProfileDefaultsKey];
     [[NSUserDefaults standardUserDefaults] synchronize];
     [[NSNotificationCenter defaultCenter] postNotificationName:kBS2BProfileChangedNotification object:nil];
+}
+
+#pragma mark - CD de áudio
+
+- (NSView *)criarVistaCD {
+    const CGFloat A = 390, margem = 20, largura = 440;
+    NSView *vista = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 480, A)];
+    CGFloat topo = A - margem;
+
+    NSTextField *t = [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 200, largura, 200)
+                                texto:NSLocalizedString(@"prefs_cd_explanation", @"De onde vêm os nomes e a capa de um CD")
+                              pequena:NO];
+    topo = NSMinY(t.frame) - 18;
+
+    [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 17, 330, 17)
+               texto:NSLocalizedString(@"prefs_cd_order_label", @"Etiqueta do menu da ordem")
+             pequena:NO];
+    topo -= 17 + 6;
+
+    self.cdOrdemPopUp = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(margem, topo - 26, 330, 26) pullsDown:NO];
+    NSArray<NSString *> *chaves = @[@"prefs_cd_order_none", @"prefs_cd_order_local_internet", @"prefs_cd_order_internet_local"];
+    for (NSUInteger i = 0; i < kNumOrdensCD; ++i) {
+        [self.cdOrdemPopUp addItemWithTitle:NSLocalizedString(chaves[i], @"Ordem das fontes de metadados do CD")];
+        self.cdOrdemPopUp.lastItem.representedObject = kOrdensCD[i];
+    }
+    self.cdOrdemPopUp.target = self;
+    self.cdOrdemPopUp.action = @selector(cdOrdemMudou:);
+    [vista addSubview:self.cdOrdemPopUp];
+    topo -= 26 + 20;
+
+    NSString *actual = ZPCurrentCDMetadataOrder();
+    for (NSMenuItem *item in self.cdOrdemPopUp.itemArray) {
+        if ([item.representedObject isEqualToString:actual]) {
+            [self.cdOrdemPopUp selectItem:item];
+            break;
+        }
+    }
+
+    [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 160, largura, 160)
+               texto:NSLocalizedString(@"prefs_cd_note", @"Nota sobre o ganho, a rede e a cache")
+             pequena:YES];
+    return vista;
+}
+
+- (void)cdOrdemMudou:(id)sender {
+    NSString *ordem = self.cdOrdemPopUp.selectedItem.representedObject;
+    if (!ordem) return;
+    [[NSUserDefaults standardUserDefaults] setObject:ordem forKey:kCDMetadataOrderDefaultsKey];
+    [[NSNotificationCenter defaultCenter] postNotificationName:kCDMetadataOrderChangedNotification object:nil];
 }
 
 #pragma mark - Emparelhamento AirPlay

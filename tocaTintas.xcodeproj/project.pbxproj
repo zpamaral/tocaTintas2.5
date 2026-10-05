@@ -51,6 +51,7 @@
 		1FC9EE652E4809FC006E3B2D /* CoreSpotlight.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FC9EE642E4809FC006E3B2D /* CoreSpotlight.framework */; };
 		1FE43C2E307304AF0030BCFC /* libc++.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FE43C2D307304AF0030BCFC /* libc++.tbd */; };
 		1FE43C30307305B50030BCFC /* libMAC.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FE43C2F307305B50030BCFC /* libMAC.a */; };
+		1FE43C333073B7A20030BCFC /* ZPEtiquetaDeslizante.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FE43C323073B7A20030BCFC /* ZPEtiquetaDeslizante.m */; };
 		1FE94C532C7CDAE700C3EF4E /* HistogramView.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FE94C522C7CDAE700C3EF4E /* HistogramView.m */; };
 		1FF2BD3F2CEF75CE009726BF /* ListAudioDevices in Resources */ = {isa = PBXBuildFile; fileRef = 1FF2BD3E2CEF75CE009726BF /* ListAudioDevices */; };
 		9E7D6D52EBF61BE8A212D080 /* libPods-tocaTintas.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 17E8DA888F4D64ACE9A45A1E /* libPods-tocaTintas.a */; };
@@ -127,7 +128,6 @@
 		1F651EE62C88B91D00CA223D /* libFLAC.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libFLAC.a; path = tocaTintas.xcodeproj/Frameworks/libFLAC.a; sourceTree = "<group>"; };
 		1F651EE72C88B91D00CA223D /* libogg.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libogg.a; path = tocaTintas.xcodeproj/Frameworks/libogg.a; sourceTree = "<group>"; };
 		1F73F9C12CFE0C2D007C70AD /* refresh_icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = refresh_icon.png; sourceTree = "<group>"; };
-		1F73F9C32CFE7744007C70AD /* placeholder.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = placeholder.jpg; sourceTree = "<group>"; };
 		1F75D8DF2EE994110005EE27 /* bs2b_bridge */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = bs2b_bridge; sourceTree = "<group>"; };
 		1F7D751E2C95DCAF0046E0AC /* M3UPlaylist.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = M3UPlaylist.h; sourceTree = "<group>"; };
 		1F7D751F2C95DCAF0046E0AC /* M3UPlaylist.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = M3UPlaylist.m; sourceTree = "<group>"; };
@@ -157,6 +157,8 @@
 		1FC9EE642E4809FC006E3B2D /* CoreSpotlight.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreSpotlight.framework; path = System/Library/Frameworks/CoreSpotlight.framework; sourceTree = SDKROOT; };
 		1FE43C2D307304AF0030BCFC /* libc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.tbd"; path = "usr/lib/libc++.tbd"; sourceTree = SDKROOT; };
 		1FE43C2F307305B50030BCFC /* libMAC.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libMAC.a; path = tocaTintas.xcodeproj/Frameworks/libMAC.a; sourceTree = "<group>"; };
+		1FE43C313073B78A0030BCFC /* ZPEtiquetaDeslizante.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPEtiquetaDeslizante.h; sourceTree = "<group>"; };
+		1FE43C323073B7A20030BCFC /* ZPEtiquetaDeslizante.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPEtiquetaDeslizante.m; sourceTree = "<group>"; };
 		1FE94C522C7CDAE700C3EF4E /* HistogramView.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = HistogramView.m; sourceTree = "<group>"; };
 		1FE94C562C7CDB5000C3EF4E /* HistogramView.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = HistogramView.h; sourceTree = "<group>"; };
 		1FEC26C92E33C1EB0099225A /* QuickLookThumbnailing.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuickLookThumbnailing.framework; path = System/Library/PrivateFrameworks/QuickLookThumbnailing.framework; sourceTree = SDKROOT; };
@@ -257,6 +259,8 @@
 				1FC8C3EA2CE4254300271175 /* ZPAudioCapture.m */,
 				1FC8C3F02CE63CE500271175 /* ZPAirPlayStreamer.h */,
 				1FC8C3F12CE63CE500271175 /* ZPAirPlayStreamer.m */,
+				1FE43C313073B78A0030BCFC /* ZPEtiquetaDeslizante.h */,
+				1FE43C323073B7A20030BCFC /* ZPEtiquetaDeslizante.m */,
 				1FE94C562C7CDB5000C3EF4E /* HistogramView.h */,
 				1FE94C522C7CDAE700C3EF4E /* HistogramView.m */,
 				1F7D75212C963F600046E0AC /* ZPOpusDecoder.h */,
@@ -312,7 +316,6 @@
 			isa = PBXGroup;
 			children = (
 				1FBE937B2D0B130E00E14743 /* placeholder.png */,
-				1F73F9C32CFE7744007C70AD /* placeholder.jpg */,
 				1F73F9C12CFE0C2D007C70AD /* refresh_icon.png */,
 				1FF2BD3E2CEF75CE009726BF /* ListAudioDevices */,
 				1F7E10AE30432D7E00C86ED4 /* eq_autoeq.tgz */,
@@ -551,6 +554,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1FE43C333073B7A20030BCFC /* ZPEtiquetaDeslizante.m in Sources */,
 				1F7D75202C95DCAF0046E0AC /* M3UPlaylist.m in Sources */,
 				1FC8C3F22CE63CE500271175 /* ZPAirPlayStreamer.m in Sources */,
 				1F12F2AA2C7C85480064C694 /* ViewController.m in Sources */,
@@ -766,7 +770,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 3.5.0;
+				CURRENT_PROJECT_VERSION = 3.6.0;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = FJ238DJ67E;
 				ENABLE_APP_SANDBOX = NO;
@@ -789,7 +793,7 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 3.5.0;
+				MARKETING_VERSION = 3.6.0;
 				OTHER_CFLAGS = "-Wno-documentation";
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -814,7 +818,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 3.5.0;
+				CURRENT_PROJECT_VERSION = 3.6.0;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = FJ238DJ67E;
 				ENABLE_APP_SANDBOX = NO;
@@ -841,7 +845,7 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 3.5.0;
+				MARKETING_VERSION = 3.6.0;
 				OTHER_CFLAGS = "-Wno-documentation";
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -861,7 +865,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ZPQLverwv/ZPQLverwv.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3.5.0;
+				CURRENT_PROJECT_VERSION = 3.6.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -883,7 +887,7 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 3.5.0;
+				MARKETING_VERSION = 3.6.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPQLverwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -896,7 +900,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ZPQLverwv/ZPQLverwv.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3.5.0;
+				CURRENT_PROJECT_VERSION = 3.6.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -917,7 +921,7 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 3.5.0;
+				MARKETING_VERSION = 3.6.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPQLverwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -930,7 +934,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ZPQLiconwv/ZPQLiconwv.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3.5.0;
+				CURRENT_PROJECT_VERSION = 3.6.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -952,7 +956,7 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 3.5.0;
+				MARKETING_VERSION = 3.6.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPQLiconwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -970,7 +974,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ZPQLiconwv/ZPQLiconwv.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3.5.0;
+				CURRENT_PROJECT_VERSION = 3.6.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -991,7 +995,7 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 3.5.0;
+				MARKETING_VERSION = 3.6.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPQLiconwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -1010,7 +1014,7 @@
 				CODE_SIGN_ENTITLEMENTS = ZPSpotLightwv/ZPSpotLightwv.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3.5.0;
+				CURRENT_PROJECT_VERSION = 3.6.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -1032,7 +1036,7 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 3.5.0;
+				MARKETING_VERSION = 3.6.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPSpotLightwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1046,7 +1050,7 @@
 				CODE_SIGN_ENTITLEMENTS = ZPSpotLightwv/ZPSpotLightwv.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3.5.0;
+				CURRENT_PROJECT_VERSION = 3.6.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -1067,7 +1071,7 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 3.5.0;
+				MARKETING_VERSION = 3.6.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPSpotLightwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
