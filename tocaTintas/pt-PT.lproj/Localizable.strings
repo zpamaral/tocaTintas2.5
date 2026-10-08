@@ -107,3 +107,20 @@
 "prefs_cd_order_local_internet" = "Fonoteca, depois MusicBrainz";
 "prefs_cd_order_internet_local" = "MusicBrainz, depois fonoteca";
 "prefs_cd_note" = "O ganho ReplayGain vem sempre da fonoteca, quando o álbum lá está. As respostas do MusicBrainz ficam guardadas, por isso cada disco só é pedido uma vez.";
+
+/* Preferências e avisos: gravação */
+"prefs_tab_recording" = "Gravação";
+"prefs_rec_explanation" = "O botão ⏺️ grava para um ficheiro WAV, em vírgula flutuante de 32 bits, na pasta do tocaTintas em ~/Library/Application Support. Podes gravar tudo o que o Mac toca, ou só o som do app Música.";
+"prefs_rec_source_label" = "Gravar:";
+"prefs_rec_source_loopback" = "O que o Mac toca (BlackHole)";
+"prefs_rec_source_music" = "O app Música (Dolby Atmos binaural)";
+"prefs_rec_note" = "Para gravar o Dolby Atmos do Música, põe-no a tocar para os AirPods e, no menu do som da barra de menus, escolhe «Fixo» no áudio espacial. O Música faz então o binaural do Atmos, e é isso que fica gravado, em estéreo a 48 kHz. Com o seguimento da cabeça ligado, os teus movimentos ficavam no ficheiro; o tocaTintas avisa se der por isso. Para outras saídas, o Música entrega uma mistura estéreo comum. Na primeira gravação, o macOS pede autorização para gravar o áudio do Música e para ler o movimento dos AirPods.";
+"rec_music_absent_title" = "O Música não está a tocar";
+"rec_music_absent_text" = "Para gravar do Música, abre-o e põe uma faixa a tocar antes de carregares no ⏺️.";
+"rec_music_failed_title" = "Não foi possível gravar o Música";
+"rec_music_failed_text" = "O macOS não deixou captar o áudio do Música. Confirma em Definições do Sistema → Privacidade e segurança, na gravação do áudio do sistema, que o tocaTintas tem autorização.";
+"rec_music_not_headphones_title" = "Isto não é o Dolby Atmos binaural";
+"rec_music_not_headphones_text" = "O Música está a tocar para «%@». Só para os AirPods é que ele faz o binaural do Atmos; para esta saída, grava-se a mistura estéreo comum. A gravação continua.";
+"rec_head_tracking_title" = "O seguimento da cabeça está a ficar gravado";
+"rec_head_tracking_text" = "O som acompanha os movimentos da tua cabeça, e é assim que vai ficar no ficheiro. Com o Música a tocar para os AirPods, abre o menu do som da barra de menus, escolhe «Fixo» no áudio espacial e grava outra vez.";
+"rec_warning_ok" = "OK";

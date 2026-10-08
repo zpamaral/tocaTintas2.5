@@ -105,6 +105,20 @@ NSString *ZPCurrentCDMetadataOrder(void) {
     return @"local_internet";
 }
 
+NSString * const kRecordSourceDefaultsKey = @"recordSource";
+
+// A ordem é a do menu.
+static NSString * const kFontesGravacao[] = { @"loopback", @"music" };
+static const NSUInteger kNumFontesGravacao = sizeof(kFontesGravacao) / sizeof(kFontesGravacao[0]);
+
+NSString *ZPCurrentRecordSource(void) {
+    NSString *guardado = [[NSUserDefaults standardUserDefaults] stringForKey:kRecordSourceDefaultsKey];
+    for (NSUInteger i = 0; i < kNumFontesGravacao; ++i) {
+        if ([kFontesGravacao[i] isEqualToString:guardado]) return guardado;
+    }
+    return @"loopback";   // a gravação de sempre
+}
+
 NSString * const kBS2BEqDefaultsKey        = @"bs2bEq";
 NSString * const kBS2BEqChangedNotification = @"BS2BEqChanged";
 
@@ -197,6 +211,7 @@ NSString *ZPCurrentBS2BProfile(void) {
 // barata, e evita que as preferências dependam da janela principal.
 @property (strong, nonatomic) NSTabView *separadores;
 @property (strong, nonatomic) NSPopUpButton *cdOrdemPopUp;
+@property (strong, nonatomic) NSPopUpButton *gravacaoFontePopUp;
 @property (strong, nonatomic) ZPAirPlay *descobertaEmparelhamento;
 @property (strong, nonatomic) NSPopUpButton *emparelharPopUp;
 @property (strong, nonatomic) NSTextField *emparelharEstado;
@@ -272,6 +287,11 @@ NSString *ZPCurrentBS2BProfile(void) {
     itemCD.label = NSLocalizedString(@"prefs_tab_cd", @"Título do separador do CD de áudio");
     itemCD.view = [self criarVistaCD];
     [separadores addTabViewItem:itemCD];
+
+    NSTabViewItem *itemGravacao = [[NSTabViewItem alloc] initWithIdentifier:@"gravacao"];
+    itemGravacao.label = NSLocalizedString(@"prefs_tab_recording", @"Título do separador da gravação");
+    itemGravacao.view = [self criarVistaGravacao];
+    [separadores addTabViewItem:itemGravacao];
 
     NSTabViewItem *itemEmparelhar = [[NSTabViewItem alloc] initWithIdentifier:@"emparelhar"];
     itemEmparelhar.label = NSLocalizedString(@"prefs_tab_pairing", @"Título do separador do emparelhamento AirPlay");
@@ -691,6 +711,56 @@ NSString *ZPCurrentBS2BProfile(void) {
     if (!ordem) return;
     [[NSUserDefaults standardUserDefaults] setObject:ordem forKey:kCDMetadataOrderDefaultsKey];
     [[NSNotificationCenter defaultCenter] postNotificationName:kCDMetadataOrderChangedNotification object:nil];
+}
+
+#pragma mark - Gravação
+
+- (NSView *)criarVistaGravacao {
+    const CGFloat A = 390, margem = 20, largura = 440;
+    NSView *vista = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 480, A)];
+    CGFloat topo = A - margem;
+
+    NSTextField *t = [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 200, largura, 200)
+                                texto:NSLocalizedString(@"prefs_rec_explanation", @"O que o botão de gravar grava")
+                              pequena:NO];
+    topo = NSMinY(t.frame) - 18;
+
+    [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 17, 330, 17)
+               texto:NSLocalizedString(@"prefs_rec_source_label", @"Etiqueta do menu da fonte da gravação")
+             pequena:NO];
+    topo -= 17 + 6;
+
+    self.gravacaoFontePopUp = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(margem, topo - 26, largura, 26) pullsDown:NO];
+    NSArray<NSString *> *chaves = @[@"prefs_rec_source_loopback", @"prefs_rec_source_music"];
+    for (NSUInteger i = 0; i < kNumFontesGravacao; ++i) {
+        [self.gravacaoFontePopUp addItemWithTitle:NSLocalizedString(chaves[i], @"Fonte da gravação")];
+        self.gravacaoFontePopUp.lastItem.representedObject = kFontesGravacao[i];
+    }
+    self.gravacaoFontePopUp.target = self;
+    self.gravacaoFontePopUp.action = @selector(gravacaoFonteMudou:);
+    [vista addSubview:self.gravacaoFontePopUp];
+    topo -= 26 + 20;
+
+    NSString *actual = ZPCurrentRecordSource();
+    for (NSMenuItem *item in self.gravacaoFontePopUp.itemArray) {
+        if ([item.representedObject isEqualToString:actual]) {
+            [self.gravacaoFontePopUp selectItem:item];
+            break;
+        }
+    }
+
+    [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 200, largura, 200)
+               texto:NSLocalizedString(@"prefs_rec_note", @"Como gravar o Dolby Atmos com os AirPods")
+             pequena:YES];
+    return vista;
+}
+
+// Não há notificação: a fonte só é lida quando se carrega no ⏺️, e uma
+// gravação em curso acaba com a fonte com que começou.
+- (void)gravacaoFonteMudou:(id)sender {
+    NSString *fonte = self.gravacaoFontePopUp.selectedItem.representedObject;
+    if (!fonte) return;
+    [[NSUserDefaults standardUserDefaults] setObject:fonte forKey:kRecordSourceDefaultsKey];
 }
 
 #pragma mark - Emparelhamento AirPlay

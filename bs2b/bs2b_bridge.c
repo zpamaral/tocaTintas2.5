@@ -29,7 +29,7 @@
 
 // Nomes (ou fragmentos de nome) dos dispositivos PortAudio.
 // Ajustar estes nomes se os nomes mudarem no macOS.
-#define IN_DEV_NAME   "BlackHole 2ch"          // entrada: onde o sistema toca (loopback)
+#define IN_DEV_NAME   "BlackHole 16ch"         // entrada: onde o sistema toca (loopback)
 #define OUT_DEV_NAME  "Auscultadores externos" // saída: auriculares
 
 typedef struct {

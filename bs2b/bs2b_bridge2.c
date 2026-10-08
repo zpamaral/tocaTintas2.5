@@ -60,7 +60,7 @@
 // Nomes EXACTOS dos dispositivos CoreAudio. Atenção: ao contrário do PortAudio
 // do original, o CamillaDSP NÃO faz correspondência por substring; o nome tem
 // de ser exacto. Para os listar:  system_profiler SPAudioDataType
-#define IN_DEV_NAME   "BlackHole 2ch"           // captura (loopback do sistema)
+#define IN_DEV_NAME   "BlackHole 16ch"          // captura (loopback do sistema)
 #define OUT_DEV_NAME  "Auscultadores externos"  // saída: auriculares Sony
 
 #define SAMPLE_RATE   44100

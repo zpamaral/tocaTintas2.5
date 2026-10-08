@@ -107,3 +107,20 @@
 "prefs_cd_order_local_internet" = "Library, then MusicBrainz";
 "prefs_cd_order_internet_local" = "MusicBrainz, then library";
 "prefs_cd_note" = "ReplayGain always comes from the library when the album is there. MusicBrainz answers are cached, so each disc is only looked up once.";
+
+/* Preferences and warnings: recording */
+"prefs_tab_recording" = "Recording";
+"prefs_rec_explanation" = "The ⏺️ button records to a 32-bit floating-point WAV file in the tocaTintas folder in ~/Library/Application Support. You can record everything the Mac plays, or just the sound of the Music app.";
+"prefs_rec_source_label" = "Record:";
+"prefs_rec_source_loopback" = "What the Mac plays (BlackHole)";
+"prefs_rec_source_music" = "The Music app (binaural Dolby Atmos)";
+"prefs_rec_note" = "To record Dolby Atmos from Music, play it to your AirPods and, in the Sound menu in the menu bar, set Spatial Audio to “Fixed”. Music then renders the Atmos mix binaurally, and that is what gets recorded, in stereo at 48 kHz. With head tracking on, your movements would end up in the file; tocaTintas warns you if it notices. For other outputs, Music sends an ordinary stereo mix. On the first recording, macOS asks for permission to record Music’s audio and to read your AirPods’ motion.";
+"rec_music_absent_title" = "Music isn’t playing";
+"rec_music_absent_text" = "To record from Music, open it and start a track before pressing ⏺️.";
+"rec_music_failed_title" = "Couldn’t record Music";
+"rec_music_failed_text" = "macOS didn’t allow capturing Music’s audio. Check in System Settings → Privacy & Security, under system audio recording, that tocaTintas is allowed.";
+"rec_music_not_headphones_title" = "This isn’t binaural Dolby Atmos";
+"rec_music_not_headphones_text" = "Music is playing to “%@”. It only renders Atmos binaurally for AirPods; for this output, the ordinary stereo mix is recorded. Recording continues.";
+"rec_head_tracking_title" = "Head tracking is being recorded";
+"rec_head_tracking_text" = "The sound follows your head movements, and that’s how it will end up in the file. With Music playing to your AirPods, open the Sound menu in the menu bar, set Spatial Audio to “Fixed”, and record again.";
+"rec_warning_ok" = "OK";

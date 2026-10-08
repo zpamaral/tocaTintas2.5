@@ -780,7 +780,7 @@
 					/usr/local/include,
 					"$(inherited)",
 				);
-				INFOPLIST_FILE = "";
+				INFOPLIST_FILE = tocaTintas/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "This app requires access to the local network to discover and connect to AirPlay devices.";
@@ -832,7 +832,7 @@
 					/usr/local/include,
 					"$(inherited)",
 				);
-				INFOPLIST_FILE = "";
+				INFOPLIST_FILE = tocaTintas/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.music";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "This app requires access to the local network to discover and connect to AirPlay devices.";

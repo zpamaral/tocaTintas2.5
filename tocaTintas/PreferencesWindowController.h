@@ -83,6 +83,13 @@ extern NSString * const kCDMetadataOrderDefaultsKey;
 extern NSString * const kCDMetadataOrderChangedNotification;
 NSString *ZPCurrentCDMetadataOrder(void);
 
+/// De onde grava o botão ⏺️: "loopback" (o que o Mac toca, pelo BlackHole) ou
+/// "music" (o som do app Música, por captura de processo — o binaural do
+/// Dolby Atmos, quando o Música toca para os AirPods). Ausente vale como
+/// "loopback". Lida no início de cada gravação.
+extern NSString * const kRecordSourceDefaultsKey;
+NSString *ZPCurrentRecordSource(void);
+
 @interface PreferencesWindowController : NSWindowController
 
 @property (weak) IBOutlet NSButton *saveButton; // Button for saving
@@ -93,7 +100,7 @@ NSString *ZPCurrentCDMetadataOrder(void);
 - (void)reloadDirectoryPath; // Method to reload the directory path from user defaults
 
 /// Mostra a janela já no separador com este identificador («musica», «dsp»,
-/// «eq», «airplay», «emparelhar»).
+/// «eq», «airplay», «cd», «gravacao», «emparelhar»).
 - (void)mostrarSeparador:(NSString *)identificador;
 
 @end

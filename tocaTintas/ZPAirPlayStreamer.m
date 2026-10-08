@@ -1875,6 +1875,13 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
     // um maior, o bloco é descartado com aviso em vez de sair calado.
     const AVAudioFrameCount capacidadeTap = 4096 * 4;
     self.toFloatConverter = [[AVAudioConverter alloc] initFromFormat:inputFormat toFormat:floatFormat];
+    // O BlackHole de 16 canais apresenta-se com disposição discreta — canais
+    // numerados, sem nome de coluna. Sem mapa, o conversor procura «esquerdo» e
+    // «direito», não os encontra e entrega silêncio, sem erro nenhum. A música
+    // estéreo vem nos dois primeiros canais: é deles que se tira o par.
+    if (inputFormat.channelCount > 2) {
+        self.toFloatConverter.channelMap = @[@0, @1];
+    }
     self.floatBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:floatFormat frameCapacity:capacidadeTap];
     self.int16Buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:targetFormat frameCapacity:capacidadeTap];
 

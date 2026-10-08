@@ -27,12 +27,21 @@ BOOL ZPBindEngineInputToLoopback(AVAudioEngine *engine);
 /// volume, que é aplicado antes de tudo o resto.
 AudioDeviceID ZPLoopbackAudioDevice(void);
 
+/// Publicada no thread principal quando a gravação tem algo a dizer a quem a
+/// pediu: userInfo[@"titulo"] e userInfo[@"texto"], já traduzidos.
+extern NSString * const kZPAudioCaptureWarningNotification;
+
 @interface ZPAudioCapture : NSObject
 
-// Grava a entrada de áudio para um WAV de vírgula flutuante de 32 bits em
-// ~/Library/Application Support/tocaTintas. Quem trata do AirPlay é o
-// ZPAirPlayStreamer — esta classe só grava.
-- (void)startCapturingAudio;
+// Grava para um WAV de vírgula flutuante de 32 bits em
+// ~/Library/Application Support/tocaTintas. A fonte é a escolhida nas
+// preferências (ZPCurrentRecordSource): o BlackHole, ou o som do app Música por
+// captura de processo. Quem trata do AirPlay é o ZPAirPlayStreamer — esta
+// classe só grava.
+//
+// Devolve NO se a gravação não arrancou; o motivo chega antes, pela
+// kZPAudioCaptureWarningNotification.
+- (BOOL)startCapturingAudio;
 - (void)stopCapturingAudio;
 
 @end

@@ -1285,6 +1285,10 @@ CoreAudioPlaybackState playbackState;
     
     // Initialize ZPAudioCapture instance
     self.audioCapture = [[ZPAudioCapture alloc] init];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(avisoDaGravacao:)
+                                                 name:kZPAudioCaptureWarningNotification
+                                               object:nil];
 
     self.isStreaming = NO; // Initialize as not streaming
 }
@@ -1832,12 +1836,12 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
         #endif
         self.isRecording = NO;
     } else {
-        // Start recording
-        [self.audioCapture startCapturingAudio];
+        // Start recording. Se não arrancar, o porquê chega pelo aviso da
+        // captura, e o botão fica apagado.
+        self.isRecording = [self.audioCapture startCapturingAudio];
         #ifdef DEBUG
-        NSLog(@"[Audio recording] Audio recording started.");
+        NSLog(@"[Audio recording] Audio recording %@.", self.isRecording ? @"started" : @"did not start");
         #endif
-        self.isRecording = YES;
     }
     [self updateRecordButtonAppearance:self.isRecording];
 }
@@ -3090,6 +3094,23 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
         NSLog(@"Responder: %@", responder);
         #endif
         responder = [responder nextResponder];
+    }
+}
+
+// Avisos da gravação: o Música fechado, falta de permissão, a saída que não é
+// a dos AirPods, o seguimento da cabeça. Uma folha sobre a janela, sem
+// interromper nada — a gravação, se arrancou, continua.
+- (void)avisoDaGravacao:(NSNotification *)nota {
+    NSAlert *alerta = [[NSAlert alloc] init];
+    alerta.messageText = nota.userInfo[@"titulo"] ?: @"";
+    alerta.informativeText = nota.userInfo[@"texto"] ?: @"";
+    [alerta addButtonWithTitle:NSLocalizedString(@"rec_warning_ok", @"Fechar o aviso da gravação")];
+
+    NSWindow *janela = self.view.window;
+    if (janela && !janela.attachedSheet) {
+        [alerta beginSheetModalForWindow:janela completionHandler:nil];
+    } else if (!janela) {
+        [alerta runModal];
     }
 }
 
