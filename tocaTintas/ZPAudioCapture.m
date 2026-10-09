@@ -323,6 +323,8 @@ typedef struct {
         return YES;
     }
 
+    [self avisarSeASaidaNaoForOLoopback];
+
     // Start or update audio capture
     [self startAudioCapture];
     return YES;
@@ -541,6 +543,27 @@ static OSStatus ZPIOProcMusica(AudioObjectID dispositivo, const AudioTimeStamp *
         [eu vigiarAmostras:par.bytes tramas:tramas];
     });
     return noErr;
+}
+
+// A gravação pelo BlackHole só apanha o que o sistema lá põe. Com a saída do
+// sistema noutro sítio — os AirPods, típico de quem quer gravar o Música —, o
+// ficheiro sai em silêncio sem ninguém dar por isso até o abrir. Grava-se na
+// mesma (pode haver uma app a tocar para o BlackHole por escolha própria), mas
+// diz-se logo.
+- (void)avisarSeASaidaNaoForOLoopback {
+    AudioDeviceID loopback = ZPLoopbackAudioDevice();
+    AudioDeviceID saida = kAudioObjectUnknown;
+    UInt32 tamanho = sizeof(saida);
+    AudioObjectPropertyAddress endereco = { kAudioHardwarePropertyDefaultOutputDevice,
+                                            kAudioObjectPropertyScopeGlobal,
+                                            kAudioObjectPropertyElementMain };
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &endereco, 0, NULL, &tamanho, &saida) != noErr
+        || saida == kAudioObjectUnknown || saida == loopback) {
+        return;
+    }
+    ZPAvisar(NSLocalizedString(@"rec_loopback_silent_title", @"A gravação vai sair em silêncio"),
+             [NSString stringWithFormat:NSLocalizedString(@"rec_loopback_silent_text", @"A saída do sistema é «%@»"),
+              ZPNomeDoDispositivo(saida)]);
 }
 
 - (BOOL)iniciarCapturaDoMusica {

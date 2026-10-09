@@ -123,4 +123,6 @@
 "rec_music_not_headphones_text" = "Music is playing to “%@”. It only renders Atmos binaurally for AirPods; for this output, the ordinary stereo mix is recorded. Recording continues.";
 "rec_head_tracking_title" = "Head tracking is being recorded";
 "rec_head_tracking_text" = "The sound follows your head movements, and that’s how it will end up in the file. With Music playing to your AirPods, open the Sound menu in the menu bar, set Spatial Audio to “Fixed”, and record again.";
+"rec_loopback_silent_title" = "This recording will be silent";
+"rec_loopback_silent_text" = "The system output is “%@”, not BlackHole, so whatever plays there won’t be recorded. To record Music playing to your AirPods, choose “The Music app” as the source in the Recording tab of the preferences. Recording continues.";
 "rec_warning_ok" = "OK";

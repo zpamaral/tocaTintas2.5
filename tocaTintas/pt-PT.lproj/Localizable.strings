@@ -123,4 +123,6 @@
 "rec_music_not_headphones_text" = "O Música está a tocar para «%@». Só para os AirPods é que ele faz o binaural do Atmos; para esta saída, grava-se a mistura estéreo comum. A gravação continua.";
 "rec_head_tracking_title" = "O seguimento da cabeça está a ficar gravado";
 "rec_head_tracking_text" = "O som acompanha os movimentos da tua cabeça, e é assim que vai ficar no ficheiro. Com o Música a tocar para os AirPods, abre o menu do som da barra de menus, escolhe «Fixo» no áudio espacial e grava outra vez.";
+"rec_loopback_silent_title" = "A gravação vai sair em silêncio";
+"rec_loopback_silent_text" = "A saída do sistema é «%@», e não o BlackHole: o que lá tocar não entra na gravação. Para gravar o Música a tocar para os AirPods, escolhe a fonte «O app Música» no separador Gravação das preferências. A gravação continua.";
 "rec_warning_ok" = "OK";
