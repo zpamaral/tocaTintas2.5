@@ -825,6 +825,52 @@ static NSArray<NSURL *> *ZPFlacsDaPasta(NSURL *pasta) {
     return flacs;
 }
 
+// O número de uma pasta de disco («CD01», «CD 2»), pela mesma convenção da
+// ordenação da biblioteca (extractCDNumberFromString:); 0 se não for uma.
+static NSInteger ZPNumeroDaPastaDeDisco(NSString *nome) {
+    static NSRegularExpression *padrao = nil;
+    static dispatch_once_t umaVez;
+    dispatch_once(&umaVez, ^{
+        padrao = [NSRegularExpression regularExpressionWithPattern:@"^CD\\s*(\\d+)$"
+                                                           options:NSRegularExpressionCaseInsensitive error:nil];
+    });
+    NSTextCheckingResult *r = [padrao firstMatchInString:nome options:0 range:NSMakeRange(0, nome.length)];
+    return r ? [nome substringWithRange:[r rangeAtIndex:1]].integerValue : 0;
+}
+
+// As pastas de disco de um álbum de vários discos (Artista/Álbum/CD01, CD02…),
+// por ordem do número.
+static NSArray<NSURL *> *ZPPastasDeDiscoDoAlbum(NSURL *album) {
+    NSArray<NSURL *> *conteudo = [[NSFileManager defaultManager] contentsOfDirectoryAtURL:album
+                                                               includingPropertiesForKeys:@[NSURLIsDirectoryKey]
+                                                                                  options:NSDirectoryEnumerationSkipsHiddenFiles
+                                                                                    error:NULL];
+    NSMutableArray<NSURL *> *discos = [NSMutableArray array];
+    for (NSURL *item in conteudo) {
+        NSNumber *ehPasta = nil;
+        [item getResourceValue:&ehPasta forKey:NSURLIsDirectoryKey error:NULL];
+        if (ehPasta.boolValue && ZPNumeroDaPastaDeDisco(item.lastPathComponent) > 0) [discos addObject:item];
+    }
+    [discos sortUsingComparator:^NSComparisonResult(NSURL *a, NSURL *b) {
+        return [@(ZPNumeroDaPastaDeDisco(a.lastPathComponent)) compare:@(ZPNumeroDaPastaDeDisco(b.lastPathComponent))];
+    }];
+    return discos;
+}
+
+// A pasta onde estão as «numero» faixas do disco: a própria, se tiver esse
+// número de FLAC; num álbum de vários discos, a pasta do disco «disco» — o
+// MusicBrainz diz qual é —, ou, sem ele, a única com esse número de faixas.
+static NSURL *ZPPastaComFaixas(NSURL *pasta, NSInteger numero, NSInteger disco) {
+    if ((NSInteger)ZPFlacsDaPasta(pasta).count == numero) return pasta;
+    NSMutableArray<NSURL *> *candidatas = [NSMutableArray array];
+    for (NSURL *cd in ZPPastasDeDiscoDoAlbum(pasta)) {
+        if ((NSInteger)ZPFlacsDaPasta(cd).count != numero) continue;
+        if (disco > 0 && ZPNumeroDaPastaDeDisco(cd.lastPathComponent) == disco) return cd;
+        [candidatas addObject:cd];
+    }
+    return candidatas.count == 1 ? candidatas.firstObject : nil;
+}
+
 #pragma mark - Contagem de reproduções: a chave da música
 
 // A contagem é da música, não do ficheiro: o FLAC da fonoteca, o m4a convertido
@@ -3783,8 +3829,10 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
 
 // Índice «identificador freedb → pasta do álbum» da fonoteca, guardado no
 // Application Support. Constrói-se a partir do primeiro FLAC de cada álbum
-// (Artista/Álbum), que é onde o abcde deixa o CDDB=…; refaz-se quando a raiz da
-// fonoteca muda ou quando um disco não é lá encontrado.
+// (Artista/Álbum) e, nos álbuns de vários discos, de cada pasta de disco
+// (Artista/Álbum/CD01…), que é onde o abcde deixa o CDDB=…; refaz-se quando a
+// raiz da fonoteca muda, quando muda a versão do índice ou quando um disco não é
+// lá encontrado.
 - (NSURL *)ficheiroDoIndiceCDDB {
     NSURL *suporte = [[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory
                                                              inDomains:NSUserDomainMask] firstObject];
@@ -3813,22 +3861,30 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
         for (NSURL *disco in discos) {
             [disco getResourceValue:&ehPasta forKey:NSURLIsDirectoryKey error:NULL];
             if (!ehPasta.boolValue) continue;
-            NSURL *primeiro = ZPFlacsDaPasta(disco).firstObject;
-            if (!primeiro) continue;
-            NSDictionary<NSString *, NSString *> *etiquetas = ZPEtiquetasFlac(primeiro);
-            NSString *cddb = etiquetas[@"CDDB"].lowercaseString;
-            NSString *mbid = etiquetas[@"MUSICBRAINZ_ALBUMID"].lowercaseString;
-            if (cddb.length > 0) {
-                NSString *chave = [@"cddb:" stringByAppendingString:cddb];
-                if (!albuns[chave]) albuns[chave] = disco.path;
-            }
-            if (mbid.length > 0) {
-                NSString *chave = [@"mbid:" stringByAppendingString:mbid];
-                if (!albuns[chave]) albuns[chave] = disco.path;
+            // Num álbum de vários discos cada pasta CD01, CD02… tem o seu CDDB e
+            // aponta para si; o MBID é o da edição, comum aos discos, e aponta
+            // para a pasta do álbum — a pesquisa escolhe o disco.
+            NSMutableArray<NSURL *> *pastas = [NSMutableArray arrayWithObject:disco];
+            [pastas addObjectsFromArray:ZPPastasDeDiscoDoAlbum(disco)];
+            for (NSURL *pasta in pastas) {
+                NSURL *primeiro = ZPFlacsDaPasta(pasta).firstObject;
+                if (!primeiro) continue;
+                NSDictionary<NSString *, NSString *> *etiquetas = ZPEtiquetasFlac(primeiro);
+                NSString *cddb = etiquetas[@"CDDB"].lowercaseString;
+                NSString *mbid = etiquetas[@"MUSICBRAINZ_ALBUMID"].lowercaseString;
+                if (cddb.length > 0) {
+                    NSString *chave = [@"cddb:" stringByAppendingString:cddb];
+                    if (!albuns[chave]) albuns[chave] = pasta.path;
+                }
+                if (mbid.length > 0) {
+                    NSString *chave = [@"mbid:" stringByAppendingString:mbid];
+                    if (!albuns[chave]) albuns[chave] = disco.path;
+                }
             }
         }
     }
-    NSDictionary *indice = @{ @"versao": @2, @"raiz": raiz, @"albuns": albuns };
+    // Versão 3: com as pastas de disco. Um índice de versão anterior refaz-se.
+    NSDictionary *indice = @{ @"versao": @3, @"raiz": raiz, @"albuns": albuns };
     [indice writeToURL:[self ficheiroDoIndiceCDDB] atomically:YES];
     #ifdef DEBUG
     NSLog(@"[CD] Índice da fonoteca refeito: %lu chaves.", (unsigned long)albuns.count);
@@ -3839,19 +3895,20 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
 // A pasta do álbum com esta chave («cddb:…» ou «mbid:…») e este número de
 // faixas, ou nil. O número de FLAC tem de bater com o de faixas do disco: os
 // identificadores freedb podem repetir-se entre discos diferentes, e um MBID de
-// edição com vários discos não diz qual deles é.
-- (nullable NSURL *)pastaDoAlbumComChave:(NSString *)chave faixas:(NSInteger)numero {
+// edição com vários discos não diz qual deles é — para isso serve «disco», o
+// número do disco na edição (0 se não se souber), que escolhe a pasta CD01, CD02…
+- (nullable NSURL *)pastaDoAlbumComChave:(NSString *)chave faixas:(NSInteger)numero disco:(NSInteger)disco {
     NSString *raiz = [self loadSongsDirectoryPath];
     NSDictionary *indice = [NSDictionary dictionaryWithContentsOfURL:[self ficheiroDoIndiceCDDB]];
-    BOOL serve = [indice[@"versao"] integerValue] == 2 && [indice[@"raiz"] isEqualToString:raiz];
+    BOOL serve = [indice[@"versao"] integerValue] == 3 && [indice[@"raiz"] isEqualToString:raiz];
     NSDictionary<NSString *, NSString *> *albuns = serve ? indice[@"albuns"] : nil;
 
     for (int tentativa = 0; tentativa < 2; tentativa++) {
         if (!albuns) albuns = [self construirIndiceCDDBEm:raiz];
         NSString *caminho = albuns[chave.lowercaseString];
         if (caminho) {
-            NSURL *pasta = [NSURL fileURLWithPath:caminho isDirectory:YES];
-            if ((NSInteger)ZPFlacsDaPasta(pasta).count == numero) return pasta;
+            NSURL *pasta = ZPPastaComFaixas([NSURL fileURLWithPath:caminho isDirectory:YES], numero, disco);
+            if (pasta) return pasta;
         }
         if (tentativa == 0 && !serve) break;   // acabou de ser feito: refazê-lo não muda nada
         albuns = nil;
@@ -3988,7 +4045,7 @@ static void ZPEsperarVezNoMusicBrainz(void) {
         NSInteger numero = 0;
         NSString *cddb = nenhuma ? nil : ZPIdentificadorFreedbDoCD(volume, &numero);
         NSURL *pasta = (cddb && numero == (NSInteger)faixas.count)
-            ? [self pastaDoAlbumComChave:[@"cddb:" stringByAppendingString:cddb] faixas:numero] : nil;
+            ? [self pastaDoAlbumComChave:[@"cddb:" stringByAppendingString:cddb] faixas:numero disco:0] : nil;
 
         // O MusicBrainz: sempre que vem primeiro; senão, só se a fonoteca não
         // reconheceu o disco.
@@ -3999,7 +4056,8 @@ static void ZPEsperarVezNoMusicBrainz(void) {
         // Segunda oportunidade na fonoteca: o álbum com o MBID que o MusicBrainz
         // deu, para os discos sem CDDB. Dá o ganho e, por omissão, nomes e capa.
         if (!pasta && [internet[@"mbid"] length] > 0) {
-            pasta = [self pastaDoAlbumComChave:[@"mbid:" stringByAppendingString:internet[@"mbid"]] faixas:(NSInteger)faixas.count];
+            pasta = [self pastaDoAlbumComChave:[@"mbid:" stringByAppendingString:internet[@"mbid"]]
+                                        faixas:(NSInteger)faixas.count disco:[internet[@"disco"] integerValue]];
         }
 
         // Faixas do álbum na fonoteca, pelo número de faixa (ou pela ordem).
