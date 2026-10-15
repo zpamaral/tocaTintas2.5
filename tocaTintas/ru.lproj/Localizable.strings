@@ -109,12 +109,14 @@
 
 /* Настройки: аудио-CD */
 "prefs_tab_cd" = "CD";
-"prefs_cd_explanation" = "Когда вы вставляете аудио-CD, tocaTintas ищет названия дорожек и обложку в вашей фонотеке (по идентификатору CDDB или MusicBrainz ваших FLAC) и в MusicBrainz.";
+"prefs_cd_explanation" = "Когда вы вставляете аудио-CD, tocaTintas ищет названия дорожек и обложку в вашей фонотеке (по идентификатору CDDB или MusicBrainz ваших FLAC) и в интернете: сначала в MusicBrainz, а для дисков, которых там нет, — в gnudb (бывший freedb).";
 "prefs_cd_order_label" = "Порядок источников:";
 "prefs_cd_order_none" = "Никакой (только «Дорожка 1», «Дорожка 2»…)";
-"prefs_cd_order_local_internet" = "Фонотека, затем MusicBrainz";
-"prefs_cd_order_internet_local" = "MusicBrainz, затем фонотека";
-"prefs_cd_note" = "ReplayGain всегда берётся из фонотеки, если альбом там есть. Ответы MusicBrainz сохраняются, поэтому каждый диск запрашивается только один раз.";
+"prefs_cd_order_local_internet" = "Фонотека, затем интернет";
+"prefs_cd_order_internet_local" = "Интернет, затем фонотека";
+"prefs_cd_note" = "ReplayGain всегда берётся из фонотеки, если альбом там есть. Ответы из интернета сохраняются, поэтому каждый диск запрашивается только один раз. В gnudb нет обложек.";
+"prefs_cd_gnudb_email_label" = "Email для gnudb (без него gnudb не используется):";
+"prefs_cd_gnudb_email_placeholder" = "vy@primer.ru";
 
 /* Настройки и предупреждения: запись */
 "prefs_tab_recording" = "Запись";

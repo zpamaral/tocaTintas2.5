@@ -75,13 +75,19 @@ NSURL *ZPHeadphoneEqFolder(void);
 NSString *ZPCurrentBS2BEq(void);
 
 /// De onde vêm os nomes e a capa de um CD de áudio: "none" (de lado nenhum —
-/// «Faixa N» e a imagem genérica), "local_internet" (a fonoteca, e o MusicBrainz
-/// para o que lá não estiver) ou "internet_local" (o MusicBrainz, e a fonoteca se
-/// ele falhar). Ausente vale como "local_internet". O ganho vem sempre da
+/// «Faixa N» e a imagem genérica), "local_internet" (a fonoteca, e a internet
+/// para o que lá não estiver) ou "internet_local" (a internet, e a fonoteca se
+/// ela falhar). A internet é o MusicBrainz e, para o que ele não conhece, o gnudb. Ausente vale como "local_internet". O ganho vem sempre da
 /// fonoteca quando o disco lá está, menos com "none".
 extern NSString * const kCDMetadataOrderDefaultsKey;
 extern NSString * const kCDMetadataOrderChangedNotification;
 NSString *ZPCurrentCDMetadataOrder(void);
+
+/// O email que vai no «hello» dos pedidos ao gnudb, que o exige
+/// (gnudb.org/howtognudb.php). nil enquanto não houver um com ar de email: sem
+/// ele o gnudb não é consultado.
+extern NSString * const kGnudbEmailDefaultsKey;
+NSString *ZPCurrentGnudbEmail(void);
 
 /// De onde grava o botão ⏺️: "loopback" (o que o Mac toca, pelo BlackHole) ou
 /// "music" (o som do app Música, por captura de processo — o binaural do

@@ -105,6 +105,18 @@ NSString *ZPCurrentCDMetadataOrder(void) {
     return @"local_internet";
 }
 
+NSString * const kGnudbEmailDefaultsKey = @"gnudbEmail";
+
+NSString *ZPCurrentGnudbEmail(void) {
+    NSString *email = [[[NSUserDefaults standardUserDefaults] stringForKey:kGnudbEmailDefaultsKey]
+                       stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSRange arroba = [email rangeOfString:@"@"];
+    if (arroba.location == NSNotFound || arroba.location == 0) return nil;
+    NSString *dominio = [email substringFromIndex:NSMaxRange(arroba)];
+    if ([dominio rangeOfString:@"."].location == NSNotFound || [dominio rangeOfString:@"@"].location != NSNotFound) return nil;
+    return email;
+}
+
 NSString * const kRecordSourceDefaultsKey = @"recordSource";
 
 // A ordem é a do menu.
@@ -200,7 +212,7 @@ NSString *ZPCurrentBS2BProfile(void) {
     return @"cmoy";   // o de sempre, para quem nunca abriu as preferências
 }
 
-@interface PreferencesWindowController ()
+@interface PreferencesWindowController () <NSTextFieldDelegate>
 @property (strong, nonatomic) NSPopUpButton *dspPopUp;
 @property (strong, nonatomic) NSPopUpButton *normPopUp;
 @property (strong, nonatomic) NSButton *compensarVolume;
@@ -211,6 +223,7 @@ NSString *ZPCurrentBS2BProfile(void) {
 // barata, e evita que as preferências dependam da janela principal.
 @property (strong, nonatomic) NSTabView *separadores;
 @property (strong, nonatomic) NSPopUpButton *cdOrdemPopUp;
+@property (strong, nonatomic) NSTextField *gnudbEmailCampo;
 @property (strong, nonatomic) NSPopUpButton *gravacaoFontePopUp;
 @property (strong, nonatomic) ZPAirPlay *descobertaEmparelhamento;
 @property (strong, nonatomic) NSPopUpButton *emparelharPopUp;
@@ -700,10 +713,29 @@ NSString *ZPCurrentBS2BProfile(void) {
         }
     }
 
+    [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 17, 330, 17)
+               texto:NSLocalizedString(@"prefs_cd_gnudb_email_label", @"Etiqueta do campo do email para o gnudb")
+             pequena:NO];
+    topo -= 17 + 6;
+
+    self.gnudbEmailCampo = [[NSTextField alloc] initWithFrame:NSMakeRect(margem, topo - 22, 330, 22)];
+    self.gnudbEmailCampo.placeholderString = NSLocalizedString(@"prefs_cd_gnudb_email_placeholder", @"Exemplo de email");
+    self.gnudbEmailCampo.stringValue = [[NSUserDefaults standardUserDefaults] stringForKey:kGnudbEmailDefaultsKey] ?: @"";
+    self.gnudbEmailCampo.delegate = self;
+    [vista addSubview:self.gnudbEmailCampo];
+    topo -= 22 + 20;
+
     [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 160, largura, 160)
                texto:NSLocalizedString(@"prefs_cd_note", @"Nota sobre o ganho, a rede e a cache")
              pequena:YES];
     return vista;
+}
+
+// O email guarda-se a cada tecla: não há botão, e fechar a janela a meio da
+// edição não o deve perder.
+- (void)controlTextDidChange:(NSNotification *)aviso {
+    if (aviso.object != self.gnudbEmailCampo) return;
+    [[NSUserDefaults standardUserDefaults] setObject:self.gnudbEmailCampo.stringValue forKey:kGnudbEmailDefaultsKey];
 }
 
 - (void)cdOrdemMudou:(id)sender {

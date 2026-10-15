@@ -101,12 +101,14 @@
 
 /* Preferências: CD de áudio */
 "prefs_tab_cd" = "CD";
-"prefs_cd_explanation" = "Quando metes um CD de áudio, o tocaTintas procura os nomes das faixas e a capa na tua fonoteca (pelo identificador CDDB ou MusicBrainz dos teus FLAC) e no MusicBrainz.";
+"prefs_cd_explanation" = "Quando metes um CD de áudio, o tocaTintas procura os nomes das faixas e a capa na tua fonoteca (pelo identificador CDDB ou MusicBrainz dos teus FLAC) e na internet: primeiro no MusicBrainz e, para os discos que ele não conhece, no gnudb (o antigo freedb).";
 "prefs_cd_order_label" = "Ordem das fontes:";
 "prefs_cd_order_none" = "Nenhuma (só «Faixa 1», «Faixa 2»…)";
-"prefs_cd_order_local_internet" = "Fonoteca, depois MusicBrainz";
-"prefs_cd_order_internet_local" = "MusicBrainz, depois fonoteca";
-"prefs_cd_note" = "O ganho ReplayGain vem sempre da fonoteca, quando o álbum lá está. As respostas do MusicBrainz ficam guardadas, por isso cada disco só é pedido uma vez.";
+"prefs_cd_order_local_internet" = "Fonoteca, depois internet";
+"prefs_cd_order_internet_local" = "Internet, depois fonoteca";
+"prefs_cd_note" = "O ganho ReplayGain vem sempre da fonoteca, quando o álbum lá está. As respostas da internet ficam guardadas, por isso cada disco só é pedido uma vez. O gnudb não tem capas.";
+"prefs_cd_gnudb_email_label" = "Email para o gnudb (sem ele não se usa):";
+"prefs_cd_gnudb_email_placeholder" = "tu@exemplo.pt";
 
 /* Preferências e avisos: gravação */
 "prefs_tab_recording" = "Gravação";

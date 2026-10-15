@@ -4029,9 +4029,198 @@ static void ZPEsperarVezNoMusicBrainz(void) {
     return resultado;
 }
 
+#pragma mark CD de áudio: gnudb
+
+// O gnudb é o sucessor do freedb, o mesmo servidor CDDB que o abcde usa. Serve
+// os discos que o MusicBrainz não conhece. As regras (gnudb.org/howtognudb.php):
+// o «hello» leva um email válido, que vem das preferências, e o nome e a versão
+// do próprio programa; a aplicação regista-se por email em info@gnudb.org. Uma
+// não registada recebe «500 Unknown application» — fica no registo e não se
+// guarda nada, para se tentar outra vez quando o registo existir.
+static NSString * const kGnudbEndereco = @"https://gnudb.gnudb.org/~cddb/cddb.cgi";
+
+- (NSURL *)pastaDaCacheGnudb {
+    NSURL *pasta = [[[self ficheiroDoIndiceCDDB] URLByDeletingLastPathComponent]
+                    URLByAppendingPathComponent:@"gnudb" isDirectory:YES];
+    [[NSFileManager defaultManager] createDirectoryAtURL:pasta withIntermediateDirectories:YES attributes:nil error:NULL];
+    return pasta;
+}
+
+// Os argumentos da consulta CDDB depois do identificador: número de faixas, o
+// deslocamento de cada uma em blocos (os do .TOC.plist já contam os 150 do
+// pré-intervalo) e a duração do disco em segundos, até ao leadout.
+static NSString *ZPArgumentosCDDBDoCD(NSURL *volume) {
+    NSData *dados = [NSData dataWithContentsOfURL:[volume URLByAppendingPathComponent:@".TOC.plist"]];
+    if (!dados) return nil;
+    NSDictionary *toc = [NSPropertyListSerialization propertyListWithData:dados options:0 format:NULL error:NULL];
+    NSDictionary *sessao = [toc[@"Sessions"] isKindOfClass:[NSArray class]] ? [toc[@"Sessions"] firstObject] : nil;
+    NSArray *faixas = sessao[@"Track Array"];
+    long leadout = [sessao[@"Leadout Block"] longValue];
+    if (![faixas isKindOfClass:[NSArray class]] || leadout <= 0) return nil;
+
+    NSMutableArray<NSString *> *deslocamentos = [NSMutableArray array];
+    for (NSDictionary *faixa in faixas) {
+        if ([faixa[@"Data"] boolValue]) continue;   // como no ZPIdentificadorFreedbDoCD
+        [deslocamentos addObject:[faixa[@"Start Block"] description]];
+    }
+    if (deslocamentos.count == 0) return nil;
+    return [NSString stringWithFormat:@"%lu+%@+%ld", (unsigned long)deslocamentos.count,
+            [deslocamentos componentsJoinedByString:@"+"], leadout / 75];
+}
+
+// Um comando ao cddb.cgi. Devolve as linhas da resposta, a primeira com o código.
+// O protocolo 6 responde em UTF-8; uma entrada antiga que não o seja lê-se como
+// Latin-1, que é o que o freedb guardava.
+// O email vai no «hello» como o abcde o põe: o utilizador e o domínio nos dois
+// primeiros campos, «zp+gmail.com+tocaTintas+2.5».
+static NSArray<NSString *> *ZPComandoGnudb(NSString *comando, NSString *email) {
+    NSString *versao = [NSBundle mainBundle].infoDictionary[@"CFBundleShortVersionString"] ?: @"0";
+    NSRange arroba = [email rangeOfString:@"@"];
+    NSMutableCharacterSet *permitidos = [NSCharacterSet.URLQueryAllowedCharacterSet mutableCopy];
+    [permitidos removeCharactersInString:@"+&=?#"];
+    NSString *utilizador = [[email substringToIndex:arroba.location] stringByAddingPercentEncodingWithAllowedCharacters:permitidos];
+    NSString *dominio = [[email substringFromIndex:NSMaxRange(arroba)] stringByAddingPercentEncodingWithAllowedCharacters:permitidos];
+    NSString *endereco = [NSString stringWithFormat:@"%@?cmd=%@&hello=%@+%@+tocaTintas+%@&proto=6",
+                          kGnudbEndereco, comando, utilizador, dominio, versao];
+    NSInteger estado = 0;
+    NSData *corpo = ZPPedidoHTTP([NSURL URLWithString:endereco], &estado);
+    if (!corpo || estado != 200) return nil;
+    NSString *texto = [[NSString alloc] initWithData:corpo encoding:NSUTF8StringEncoding]
+                   ?: [[NSString alloc] initWithData:corpo encoding:NSISOLatin1StringEncoding];
+    NSMutableArray<NSString *> *linhas = [NSMutableArray array];
+    for (NSString *l in [texto componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
+        if ([l isEqualToString:@"."]) break;   // fim da resposta
+        if (l.length) [linhas addObject:l];
+    }
+    return linhas.count ? linhas : nil;
+}
+
+// Os escapes do formato xmcd: \n, \t e \\.
+static NSString *ZPDesescaparXmcd(NSString *s) {
+    NSMutableString *r = [NSMutableString stringWithCapacity:s.length];
+    for (NSUInteger i = 0; i < s.length; i++) {
+        unichar c = [s characterAtIndex:i];
+        if (c == '\\' && i + 1 < s.length) {
+            unichar d = [s characterAtIndex:++i];
+            [r appendString:d == 'n' ? @"\n" : d == 't' ? @"\t" : [NSString stringWithCharacters:&d length:1]];
+        } else {
+            [r appendFormat:@"%C", c];
+        }
+    }
+    return r;
+}
+
+// Nomes de um disco pelo gnudb, no mesmo formato do MusicBrainz mas sem mbid nem
+// capa — o gnudb não tem capas. Cache no Application Support, com o «não
+// encontrado» guardado por uma semana, como no MusicBrainz. Fora do thread
+// principal.
+- (nullable NSDictionary *)metadadosGnudbDoCD:(NSURL *)volume {
+    NSString *email = ZPCurrentGnudbEmail();
+    if (!email) {
+        NSLog(@"[CD] Sem email nas preferências: o gnudb não é consultado.");
+        return nil;
+    }
+    NSInteger numero = 0;
+    NSString *cddb = ZPIdentificadorFreedbDoCD(volume, &numero);
+    NSString *argumentos = ZPArgumentosCDDBDoCD(volume);
+    if (!cddb || !argumentos) return nil;
+    // O identificador freedb repete-se entre discos; com o número de faixas no
+    // nome, dois discos com o mesmo identificador e faixas diferentes não se
+    // confundem na cache.
+    NSString *nome = [NSString stringWithFormat:@"%@-%ld.plist", cddb, (long)numero];
+    NSURL *cache = [[self pastaDaCacheGnudb] URLByAppendingPathComponent:nome];
+
+    NSDictionary *guardado = [NSDictionary dictionaryWithContentsOfURL:cache];
+    if (guardado[@"naoEncontrado"]) {
+        if ([guardado[@"quando"] timeIntervalSinceNow] > -7 * 24 * 3600) return nil;
+    } else if (guardado) {
+        return guardado;
+    }
+
+    // A consulta: 200 é uma correspondência exacta; 210 várias exactas e 211
+    // várias aproximadas, uma por linha («categoria id título»); 202 nenhuma.
+    // A leitura usa o identificador que a consulta devolve e não o freedb, como
+    // o gnudb pede: lido pelo freedb, pode vir outro disco.
+    NSArray<NSString *> *resposta = ZPComandoGnudb([NSString stringWithFormat:@"cddb+query+%@+%@", cddb, argumentos], email);
+    if (!resposta) {
+        NSLog(@"[CD] gnudb sem resposta para %@.", cddb);
+        return nil;
+    }
+    NSInteger codigo = resposta[0].integerValue;
+    NSMutableArray<NSArray<NSString *> *> *candidatos = [NSMutableArray array];   // [categoria, id]
+    if (codigo == 200) {
+        NSArray<NSString *> *p = [resposta[0] componentsSeparatedByString:@" "];
+        if (p.count >= 3) [candidatos addObject:@[p[1], p[2]]];
+    } else if (codigo == 210 || codigo == 211) {
+        for (NSUInteger i = 1; i < resposta.count; i++) {
+            NSArray<NSString *> *p = [resposta[i] componentsSeparatedByString:@" "];
+            if (p.count >= 2) [candidatos addObject:@[p[0], p[1]]];
+        }
+    } else if (codigo != 202) {
+        // 500 «Unknown application» (o tocaTintas por registar) ou outro erro do
+        // servidor: nada se guarda.
+        NSLog(@"[CD] gnudb recusou a consulta de %@: %@", cddb, resposta[0]);
+        return nil;
+    }
+
+    // A primeira entrada com tantas faixas como o disco. Numa aproximada (211) é
+    // essa a única garantia de que se trata do mesmo disco.
+    NSDictionary *resultado = nil;
+    for (NSArray<NSString *> *c in candidatos) {
+        NSArray<NSString *> *entrada = ZPComandoGnudb([NSString stringWithFormat:@"cddb+read+%@+%@", c[0], c[1]], email);
+        if (entrada.count == 0 || entrada[0].integerValue != 210) continue;
+
+        // Um campo comprido vem partido em várias linhas com a mesma chave, a
+        // juntar pela ordem.
+        NSMutableDictionary<NSString *, NSMutableString *> *campos = [NSMutableDictionary dictionary];
+        for (NSUInteger i = 1; i < entrada.count; i++) {
+            NSString *l = entrada[i];
+            if ([l hasPrefix:@"#"]) continue;
+            NSRange igual = [l rangeOfString:@"="];
+            if (igual.location == NSNotFound) continue;
+            NSString *chave = [l substringToIndex:igual.location];
+            if (!campos[chave]) campos[chave] = [NSMutableString string];
+            [campos[chave] appendString:[l substringFromIndex:NSMaxRange(igual)]];
+        }
+        NSMutableDictionary<NSString *, NSString *> *faixas = [NSMutableDictionary dictionary];
+        for (NSInteger n = 0; campos[[NSString stringWithFormat:@"TTITLE%ld", (long)n]]; n++) {
+            NSString *titulo = ZPDesescaparXmcd(campos[[NSString stringWithFormat:@"TTITLE%ld", (long)n]]);
+            titulo = [titulo stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+            if (titulo.length) faixas[[@(n + 1) description]] = titulo;
+        }
+        if ((NSInteger)faixas.count != numero) continue;
+
+        // DTITLE é «Artista / Álbum»; sem a barra, o mesmo nos dois.
+        NSString *dtitle = ZPDesescaparXmcd(campos[@"DTITLE"] ?: @"");
+        NSRange barra = [dtitle rangeOfString:@" / "];
+        NSString *artista = barra.location == NSNotFound ? dtitle : [dtitle substringToIndex:barra.location];
+        NSString *album = barra.location == NSNotFound ? dtitle : [dtitle substringFromIndex:NSMaxRange(barra)];
+        NSCharacterSet *espacos = NSCharacterSet.whitespaceCharacterSet;
+        resultado = @{ @"fonte": @"gnudb",
+                       @"artista": [artista stringByTrimmingCharactersInSet:espacos],
+                       @"album": [album stringByTrimmingCharactersInSet:espacos],
+                       @"disco": @1,
+                       @"faixas": faixas };
+        break;
+    }
+
+    if (!resultado) {
+        [@{ @"naoEncontrado": @YES, @"quando": [NSDate date] } writeToURL:cache atomically:YES];
+        NSLog(@"[CD] O gnudb não conhece o disco %@ (%ld faixas).", cddb, (long)numero);
+        return nil;
+    }
+    [resultado writeToURL:cache atomically:YES];
+    #ifdef DEBUG
+    NSLog(@"[CD] gnudb: %@ — %@, %lu faixas.", resultado[@"artista"], resultado[@"album"],
+          (unsigned long)[resultado[@"faixas"] count]);
+    #endif
+    return resultado;
+}
+
 #pragma mark CD de áudio: identificação
 
-// Lê o disco, a fonoteca e o MusicBrainz, pela ordem das preferências, e
+// Lê o disco, a fonoteca e a internet (o MusicBrainz e, se ele não souber, o
+// gnudb), pela ordem das preferências, e
 // prepara o que se mostra de cada faixa. Fora do thread principal; o resultado
 // vai para as propriedades no principal.
 - (void)identificarCD:(NSURL *)volume perguntar:(BOOL)perguntar {
@@ -4052,6 +4241,8 @@ static void ZPEsperarVezNoMusicBrainz(void) {
         NSData *capaInternet = nil;
         NSDictionary *internet = (!nenhuma && (internetPrimeiro || !pasta))
             ? [self metadadosMusicBrainzDoCD:volume capa:&capaInternet] : nil;
+        // O gnudb, nas mesmas condições, para o que o MusicBrainz não conhece.
+        if (!internet && !nenhuma && (internetPrimeiro || !pasta)) internet = [self metadadosGnudbDoCD:volume];
 
         // Segunda oportunidade na fonoteca: o álbum com o MBID que o MusicBrainz
         // deu, para os discos sem CDDB. Dá o ganho e, por omissão, nomes e capa.
@@ -4141,10 +4332,12 @@ static void ZPEsperarVezNoMusicBrainz(void) {
             self.cdDescricao = descricao;
             [self acertarControlosDoCD];
             #ifdef DEBUG
-            NSLog(@"[CD] %@: freedb %@, %ld faixas, ordem %@; fonoteca: %@; MusicBrainz: %@; nomes de %@.",
+            NSString *fonte = internet[@"fonte"] ?: @"MusicBrainz";
+            NSLog(@"[CD] %@: freedb %@, %ld faixas, ordem %@; fonoteca: %@; internet: %@; nomes de %@.",
                   volume.lastPathComponent, cddb ?: @"?", (long)faixas.count, ordem,
-                  pasta ? pasta.path : @"não", internet ? internet[@"mbid"] : @"não",
-                  nomesDaInternet ? @"MusicBrainz" : (locais.count ? @"fonoteca" : @"lado nenhum"));
+                  pasta ? pasta.path : @"não",
+                  internet ? [NSString stringWithFormat:@"%@ %@", fonte, internet[@"mbid"] ?: @""] : @"não",
+                  nomesDaInternet ? fonte : (locais.count ? @"fonoteca" : @"lado nenhum"));
             #endif
 
             // Uma nova identificação (a biblioteca mudou) com o CD já a tocar: o

@@ -101,12 +101,14 @@
 
 /* Preferences: audio CD */
 "prefs_tab_cd" = "CD";
-"prefs_cd_explanation" = "When you insert an audio CD, tocaTintas looks up the track names and cover art in your library (by the CDDB or MusicBrainz ID of your FLAC files) and on MusicBrainz.";
+"prefs_cd_explanation" = "When you insert an audio CD, tocaTintas looks up the track names and cover art in your library (by the CDDB or MusicBrainz ID of your FLAC files) and on the internet: MusicBrainz first, then gnudb (the former freedb) for discs MusicBrainz doesn’t know.";
 "prefs_cd_order_label" = "Source order:";
 "prefs_cd_order_none" = "None (just “Track 1”, “Track 2”…)";
-"prefs_cd_order_local_internet" = "Library, then MusicBrainz";
-"prefs_cd_order_internet_local" = "MusicBrainz, then library";
-"prefs_cd_note" = "ReplayGain always comes from the library when the album is there. MusicBrainz answers are cached, so each disc is only looked up once.";
+"prefs_cd_order_local_internet" = "Library, then internet";
+"prefs_cd_order_internet_local" = "Internet, then library";
+"prefs_cd_note" = "ReplayGain always comes from the library when the album is there. Internet answers are cached, so each disc is only looked up once. gnudb has no cover art.";
+"prefs_cd_gnudb_email_label" = "Email for gnudb (required to use it):";
+"prefs_cd_gnudb_email_placeholder" = "you@example.com";
 
 /* Preferences and warnings: recording */
 "prefs_tab_recording" = "Recording";
