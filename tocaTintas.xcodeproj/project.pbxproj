@@ -50,6 +50,7 @@
 		1FC9EE632E47D3E7006E3B2D /* libwavpack.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F651EE52C88B91D00CA223D /* libwavpack.a */; };
 		1FC9EE652E4809FC006E3B2D /* CoreSpotlight.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FC9EE642E4809FC006E3B2D /* CoreSpotlight.framework */; };
 		1FE43C2E307304AF0030BCFC /* libc++.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FE43C2D307304AF0030BCFC /* libc++.tbd */; };
+		9E858D35D0E211A8D8570530 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A97E0AAEB647324D9ADEB740 /* libsqlite3.tbd */; };
 		1FE43C30307305B50030BCFC /* libMAC.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FE43C2F307305B50030BCFC /* libMAC.a */; };
 		1FE43C333073B7A20030BCFC /* ZPEtiquetaDeslizante.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FE43C323073B7A20030BCFC /* ZPEtiquetaDeslizante.m */; };
 		1FE94C532C7CDAE700C3EF4E /* HistogramView.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FE94C522C7CDAE700C3EF4E /* HistogramView.m */; };
@@ -156,6 +157,7 @@
 		1FC9EE5C2E47CD4E006E3B2D /* ZPSpotLightwv.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ZPSpotLightwv.entitlements; sourceTree = "<group>"; };
 		1FC9EE642E4809FC006E3B2D /* CoreSpotlight.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreSpotlight.framework; path = System/Library/Frameworks/CoreSpotlight.framework; sourceTree = SDKROOT; };
 		1FE43C2D307304AF0030BCFC /* libc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.tbd"; path = "usr/lib/libc++.tbd"; sourceTree = SDKROOT; };
+		A97E0AAEB647324D9ADEB740 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		1FE43C2F307305B50030BCFC /* libMAC.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libMAC.a; path = tocaTintas.xcodeproj/Frameworks/libMAC.a; sourceTree = "<group>"; };
 		1FE43C313073B78A0030BCFC /* ZPEtiquetaDeslizante.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPEtiquetaDeslizante.h; sourceTree = "<group>"; };
 		1FE43C323073B7A20030BCFC /* ZPEtiquetaDeslizante.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPEtiquetaDeslizante.m; sourceTree = "<group>"; };
@@ -177,6 +179,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1FE43C2E307304AF0030BCFC /* libc++.tbd in Frameworks */,
+				9E858D35D0E211A8D8570530 /* libsqlite3.tbd in Frameworks */,
 				1F7D75262C9642000046E0AC /* libopus.a in Frameworks */,
 				1F7D75272C9642000046E0AC /* libopusfile.a in Frameworks */,
 				1FE43C30307305B50030BCFC /* libMAC.a in Frameworks */,
@@ -294,6 +297,7 @@
 			children = (
 				1FE43C2F307305B50030BCFC /* libMAC.a */,
 				1FE43C2D307304AF0030BCFC /* libc++.tbd */,
+				A97E0AAEB647324D9ADEB740 /* libsqlite3.tbd */,
 				1F2FB2BC2E494C00008CD88C /* UniformTypeIdentifiers.framework */,
 				1F2FB2BA2E494BE7008CD88C /* Foundation.framework */,
 				1FC9EE642E4809FC006E3B2D /* CoreSpotlight.framework */,

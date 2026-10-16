@@ -36,6 +36,7 @@ SOFTWARE.
 #include <fcntl.h>       // open/read: o aquecimento do leitor de CD
 #include <unistd.h>
 #include <CommonCrypto/CommonDigest.h>   // SHA-1 do identificador de disco do MusicBrainz
+#include <sqlite3.h>     // a base da fonoteca (CDs/.fonoteca.sqlite)
 
 #import <TPCircularBuffer/TPCircularBuffer.h>
 
@@ -237,6 +238,8 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSTextField *playCountLabel;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *trackPlayCounts;   // chave da música → reproduções
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *chavesDeContagem;   // caminho → chave da música (thread principal)
+@property (nonatomic, assign) sqlite3 *fonoteca;                  // CDs/.fonoteca.sqlite, ou NULL (só na filaDaFonoteca)
+@property (nonatomic, strong) dispatch_queue_t filaDaFonoteca;    // todo o acesso à base passa por aqui
 
 - (void)loadTrackPlayCounts;
 - (void)saveTrackPlayCounts;
@@ -871,6 +874,51 @@ static NSURL *ZPPastaComFaixas(NSURL *pasta, NSInteger numero, NSInteger disco) 
     return candidatas.count == 1 ? candidatas.firstObject : nil;
 }
 
+#pragma mark - Fonoteca: SQLite
+
+// Liga os argumentos (NSString, NSNumber inteiro, NSNull) a ?1, ?2…
+static BOOL ZPFonotecaPreparar(sqlite3 *db, const char *sql, NSArray *args, sqlite3_stmt **st) {
+    if (sqlite3_prepare_v2(db, sql, -1, st, NULL) != SQLITE_OK) {
+        NSLog(@"[Fonoteca] %s: %s", sql, sqlite3_errmsg(db));
+        return NO;
+    }
+    for (NSUInteger i = 0; i < args.count; i++) {
+        id a = args[i];
+        int k = (int)i + 1;
+        if ([a isKindOfClass:[NSString class]]) sqlite3_bind_text(*st, k, [a UTF8String], -1, SQLITE_TRANSIENT);
+        else if ([a isKindOfClass:[NSNumber class]]) sqlite3_bind_int64(*st, k, [a longLongValue]);
+        else sqlite3_bind_null(*st, k);
+    }
+    return YES;
+}
+
+// Executa até ao fim; NO se falhar.
+static BOOL ZPFonotecaExecutar(sqlite3 *db, const char *sql, NSArray *args) {
+    sqlite3_stmt *st = NULL;
+    BOOL ok = ZPFonotecaPreparar(db, sql, args, &st);
+    if (ok) {
+        int r;
+        while ((r = sqlite3_step(st)) == SQLITE_ROW) {}
+        ok = r == SQLITE_DONE;
+        if (!ok) NSLog(@"[Fonoteca] %s: %s", sql, sqlite3_errmsg(db));
+    }
+    sqlite3_finalize(st);
+    return ok;
+}
+
+// A primeira coluna da primeira linha: NSString para texto, NSNumber para
+// inteiros; nil se não houver linha.
+static id ZPFonotecaValor(sqlite3 *db, const char *sql, NSArray *args) {
+    sqlite3_stmt *st = NULL;
+    id valor = nil;
+    if (ZPFonotecaPreparar(db, sql, args, &st) && sqlite3_step(st) == SQLITE_ROW) {
+        if (sqlite3_column_type(st, 0) == SQLITE_INTEGER) valor = @(sqlite3_column_int64(st, 0));
+        else if (sqlite3_column_type(st, 0) == SQLITE_TEXT) valor = @((const char *)sqlite3_column_text(st, 0));
+    }
+    sqlite3_finalize(st);
+    return valor;
+}
+
 #pragma mark - Contagem de reproduções: a chave da música
 
 // A contagem é da música, não do ficheiro: o FLAC da fonoteca, o m4a convertido
@@ -882,6 +930,12 @@ static NSURL *ZPPastaComFaixas(NSURL *pasta, NSInteger numero, NSInteger disco) 
 // dos dois CD do «Live in Boston 1970»). Sem
 // etiquetas que cheguem fica o caminho, como dantes — um caminho começa por «/»
 // e não se confunde com «musica:» nem «cd:».
+//
+// Acima de todas está a chave «fonoteca:<uuid>»: o UUID que a base da fonoteca
+// dá a cada música, gravado na etiqueta FONOTECA_ID dos ficheiros e ligado, na
+// base, à faixa do CD de onde veio. Não depende de nomes nem de caminhos: corrigir
+// um título ou mudar uma pasta já não perde contagens. Essas contam na base, uma
+// linha por audição (ver «Fonoteca: contagens pelo UUID da música»).
 
 // Maiúsculas, acentos, larguras, tipografia e espaços não distinguem músicas: o
 // replaceSingleQuoteAndSmartQuotes troca ' por ’, e um ficheiro pode vir com uma
@@ -924,27 +978,44 @@ static NSString *ZPChaveDaMusica(NSString *artista, NSString *album, NSInteger d
     return [NSString stringWithFormat:@"musica:%@|%@|%@|%@", a, b, n, t];
 }
 
+static NSString * const kZPPrefixoFonoteca = @"fonoteca:";
+
+// «fonoteca:<uuid>», com o UUID em minúsculas; nil se não for um UUID.
+static NSString *ZPChaveDaFonoteca(NSString *uuid) {
+    NSString *u = [uuid stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].lowercaseString;
+    return (u.length && [[NSUUID alloc] initWithUUIDString:u]) ? [kZPPrefixoFonoteca stringByAppendingString:u] : nil;
+}
+
+// O UUID de uma chave «fonoteca:»; nil para as outras.
+static NSString *ZPUUIDDaChave(NSString *chave) {
+    return [chave hasPrefix:kZPPrefixoFonoteca] ? [chave substringFromIndex:kZPPrefixoFonoteca.length] : nil;
+}
+
 static NSString *ZPTextoUTF8(const char *texto) {
     return texto ? [NSString stringWithUTF8String:texto] : nil;
 }
 
 // A chave a partir das etiquetas do ficheiro, conforme o formato. Lê só as
 // etiquetas, nunca o áudio; corre fora do thread principal (disco externo).
-static NSString *ZPChaveDeContagemDoFicheiro(NSURL *url) {
+// Com FONOTECA_ID a chave é a da fonoteca, e em `antiga` fica a que as outras
+// etiquetas dariam — a que serve se a base não estiver à mão.
+static NSString *ZPChaveDeContagemDoFicheiro(NSURL *url, NSString **antiga) {
     NSString *ext = url.pathExtension.lowercaseString;
-    NSString *artista = nil, *album = nil, *titulo = nil;
+    NSString *artista = nil, *album = nil, *titulo = nil, *fonotecaId = nil;
     NSInteger disco = 0, faixa = 0;
     if ([ext isEqualToString:@"flac"]) {
         NSDictionary<NSString *, NSString *> *e = ZPEtiquetasFlac(url);
         artista = e[@"ARTIST"]; album = e[@"ALBUM"]; titulo = e[@"TITLE"];
         disco = ZPNumeroDaEtiquetaDeFaixa(e[@"DISCNUMBER"]);
         faixa = ZPNumeroDaEtiquetaDeFaixa(e[@"TRACKNUMBER"]);
+        fonotecaId = e[@"FONOTECA_ID"];
     } else if ([ext isEqualToString:@"ape"] || [ext isEqualToString:@"wv"]) {
         // O WavPack guarda as etiquetas no mesmo APEv2 do fim do ficheiro.
         NSDictionary<NSString *, NSData *> *e = ZPLerEtiquetasAPEv2(url);
         artista = ZPTextoAPEv2(e, @"artist"); album = ZPTextoAPEv2(e, @"album"); titulo = ZPTextoAPEv2(e, @"title");
         disco = ZPNumeroDaEtiquetaDeFaixa(ZPTextoAPEv2(e, @"disc"));
         faixa = ZPNumeroDaEtiquetaDeFaixa(ZPTextoAPEv2(e, @"track"));
+        fonotecaId = ZPTextoAPEv2(e, @"fonoteca_id");
     } else if ([ext isEqualToString:@"opus"]) {
         int erro = 0;
         OggOpusFile *of = op_open_file(url.path.fileSystemRepresentation, &erro);
@@ -956,6 +1027,7 @@ static NSString *ZPChaveDeContagemDoFicheiro(NSURL *url) {
                 titulo = ZPTextoUTF8(opus_tags_query(tags, "TITLE", 0));
                 disco = ZPNumeroDaEtiquetaDeFaixa(ZPTextoUTF8(opus_tags_query(tags, "DISCNUMBER", 0)));
                 faixa = ZPNumeroDaEtiquetaDeFaixa(ZPTextoUTF8(opus_tags_query(tags, "TRACKNUMBER", 0)));
+                fonotecaId = ZPTextoUTF8(opus_tags_query(tags, "FONOTECA_ID", 0));
             }
             op_free(of);
         }
@@ -988,11 +1060,19 @@ static NSString *ZPChaveDeContagemDoFicheiro(NSURL *url) {
                     faixa = ZPNumeroDaEtiquetaDeFaixa(item.stringValue);
                 } else if ([id_ isEqualToString:@"id3/TPOS"]) {
                     disco = ZPNumeroDaEtiquetaDeFaixa(item.stringValue);
+                } else if ([id_ isEqualToString:@"itlk/com.apple.iTunes.FONOTECA_ID"]
+                           || ([id_ isEqualToString:@"id3/TXXX"]
+                               && [item.extraAttributes[AVMetadataExtraAttributeInfoKey] isEqual:@"FONOTECA_ID"])) {
+                    // MP4: o átomo «----» do iTunes; ID3 (mp3, aiff): o TXXX com essa descrição.
+                    fonotecaId = item.stringValue;
                 }
             }
         }
     }
-    return ZPChaveDaMusica(artista, album, disco, faixa, titulo);
+    NSString *pelasEtiquetas = ZPChaveDaMusica(artista, album, disco, faixa, titulo);
+    NSString *daFonoteca = ZPChaveDaFonoteca(fonotecaId);
+    if (antiga) *antiga = daFonoteca ? pelasEtiquetas : nil;
+    return daFonoteca ?: pelasEtiquetas;
 }
 
 // Um CD que não se identificou: o disco (freedb) e o número da faixa. O caminho
@@ -3414,8 +3494,21 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
 
     // Conta na música, não no ficheiro. Normalmente a chave já se sabe: começou
     // a ser resolvida quando a faixa começou a tocar.
+    NSURL *volumeDoCD = [self caminhoEhDoCD:trackPath] ? self.cdVolumeURL : nil;
     [self resolverChaveDeContagemPara:trackPath depois:^(NSString *chave) {
         self.trackPlayCounts[chave] = @(self.trackPlayCounts[chave].integerValue + 1);
+
+        // Uma música da fonoteca conta na base, uma linha por audição; as outras,
+        // no contagens.json.
+        NSString *uuid = ZPUUIDDaChave(chave);
+        if (uuid) {
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                NSString *cddb = volumeDoCD ? ZPIdentificadorFreedbDoCD(volumeDoCD, NULL) : nil;
+                if (![self registarAudicaoNaFonoteca:uuid doCD:volumeDoCD != nil cddb:cddb]) {
+                    NSLog(@"[Fonoteca] A audição de %@ não ficou registada.", trackPath);
+                }
+            });
+        }
 
         // Save play count changes
         [self saveTrackPlayCounts];
@@ -3455,11 +3548,27 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
     NSURL *volumeDoCD = [self caminhoEhDoCD:caminho] ? self.cdVolumeURL : nil;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSURL *url = [NSURL fileURLWithPath:caminho];
-        NSString *chave = volumeDoCD
-            ? ZPChaveDeContagemDoCD(ZPIdentificadorFreedbDoCD(volumeDoCD, NULL), ZPNumeroDaFaixaDoCD(url))
-            : ZPChaveDeContagemDoFicheiro(url);
+        NSString *chave = nil, *antiga = nil;
+        if (volumeDoCD) {
+            // O disco e a faixa dão o UUID na fonoteca — que o cria, se o disco
+            // for novo; sem base, contam pelo disco e pelo número.
+            NSInteger total = 0, n = ZPNumeroDaFaixaDoCD(url);
+            NSString *cddb = ZPIdentificadorFreedbDoCD(volumeDoCD, &total);
+            NSString *uuid = [self musicaDaFaixa:n doCD:cddb faixas:total uuidDoFlac:nil titulo:nil artista:nil album:nil];
+            chave = ZPChaveDaFonoteca(uuid) ?: ZPChaveDeContagemDoCD(cddb, n);
+        } else {
+            chave = ZPChaveDeContagemDoFicheiro(url, &antiga);
+        }
+        // A contagem de uma música da fonoteca vem da base. Sem base, fica a
+        // chave das etiquetas, a do contagens.json.
+        NSNumber *contagem = nil;
+        if (ZPUUIDDaChave(chave)) {
+            contagem = [self contagemNaFonoteca:ZPUUIDDaChave(chave)];
+            if (!contagem && !volumeDoCD) chave = antiga;
+        }
         dispatch_async(dispatch_get_main_queue(), ^{
             NSString *resolvida = chave ?: caminho;
+            if (contagem) self.trackPlayCounts[resolvida] = contagem;
             self.chavesDeContagem[caminho] = resolvida;
             if (depois) depois([self chaveDeContagemConhecidaPara:caminho] ?: resolvida);
         });
@@ -3609,6 +3718,7 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
 - (void)loadTrackPlayCounts {
     if (self.trackPlayCounts) return;
     self.chavesDeContagem = [NSMutableDictionary dictionary];
+    self.filaDaFonoteca = dispatch_queue_create("tocaTintas.fonoteca", DISPATCH_QUEUE_SERIAL);
 
     NSData *data = [NSData dataWithContentsOfFile:[self ficheiroDasContagens]];
     NSDictionary *guardado = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
@@ -3618,7 +3728,12 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
 
 - (void)saveTrackPlayCounts {
     NSString *filePath = [self ficheiroDasContagens];
-    NSDictionary *guardar = @{ @"versao": @1, @"contagens": self.trackPlayCounts ?: @{} };
+    // As músicas da fonoteca contam na base, não aqui.
+    NSMutableDictionary *contagens = [NSMutableDictionary dictionary];
+    [self.trackPlayCounts enumerateKeysAndObjectsUsingBlock:^(NSString *chave, NSNumber *n, BOOL *parar) {
+        if (!ZPUUIDDaChave(chave)) contagens[chave] = n;
+    }];
+    NSDictionary *guardar = @{ @"versao": @1, @"contagens": contagens };
     NSError *error = nil;
     NSData *data = [NSJSONSerialization dataWithJSONObject:guardar
                                                    options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
@@ -3628,6 +3743,114 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
     } else if (![data writeToFile:filePath atomically:YES]) {
         NSLog(@"[Contagens] Não foi possível gravar %@", filePath);
     }
+}
+
+#pragma mark - Fonoteca: contagens pelo UUID da música
+
+// A base da fonoteca (CDs/.fonoteca.sqlite) é mantida pelo verificar_md5IV.sh
+// e pelo fonoteca.py: cada música tem um UUID, o mesmo na etiqueta FONOTECA_ID
+// dos ficheiros e na faixa do CD de onde veio (tabelas discos e faixas_cd). Aqui
+// só se acrescenta: audições, e os discos tocados antes de serem ripados.
+// Todo o acesso passa pela filaDaFonoteca; os métodos chamam-se de fora dela e
+// fora do thread principal (o disco da fonoteca pode estar a dormir).
+
+// Abre a base na primeira vez que for precisa. Se não existir, tenta-se de novo
+// da vez seguinte — o disco pode ainda não estar montado. Na fila.
+- (BOOL)abrirFonoteca {
+    if (self.fonoteca) return YES;
+    NSString *caminho = [[self loadSongsDirectoryPath] stringByAppendingPathComponent:@".fonoteca.sqlite"];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:caminho]) return NO;
+    sqlite3 *db = NULL;
+    if (sqlite3_open_v2(caminho.fileSystemRepresentation, &db, SQLITE_OPEN_READWRITE, NULL) != SQLITE_OK) {
+        NSLog(@"[Fonoteca] Não abri %@: %s", caminho, db ? sqlite3_errmsg(db) : "sem memória");
+        sqlite3_close(db);
+        return NO;
+    }
+    // O verificar_md5IV.sh pode estar a escrever ao mesmo tempo.
+    sqlite3_busy_timeout(db, 10000);
+    ZPFonotecaExecutar(db, "PRAGMA foreign_keys = ON", nil);
+    self.fonoteca = db;
+    #ifdef DEBUG
+    NSLog(@"[Fonoteca] Base aberta: %@", caminho);
+    #endif
+    return YES;
+}
+
+// As reproduções de uma música: as que vieram do contagens.json mais as
+// audições. nil sem base.
+- (nullable NSNumber *)contagemNaFonoteca:(NSString *)uuid {
+    __block NSNumber *n = nil;
+    dispatch_sync(self.filaDaFonoteca, ^{
+        if (![self abrirFonoteca]) return;
+        n = ZPFonotecaValor(self.fonoteca,
+                            "SELECT COALESCE((SELECT n FROM contagens_importadas WHERE musica = ?1), 0)"
+                            " + (SELECT COUNT(*) FROM audicoes WHERE musica = ?1)", @[uuid]);
+    });
+    return n;
+}
+
+// Uma audição. Se a música ainda não estiver na base (um ficheiro com
+// FONOTECA_ID que o verificar_md5IV.sh ainda não viu), fica uma linha só com o
+// id, que o fonoteca.py completa quando o vir.
+- (BOOL)registarAudicaoNaFonoteca:(NSString *)uuid doCD:(BOOL)doCD cddb:(nullable NSString *)cddb {
+    __block BOOL ok = NO;
+    dispatch_sync(self.filaDaFonoteca, ^{
+        if (![self abrirFonoteca]) return;
+        sqlite3 *db = self.fonoteca;
+        if (!ZPFonotecaExecutar(db, "BEGIN IMMEDIATE", nil)) return;
+        ok = ZPFonotecaExecutar(db, "INSERT OR IGNORE INTO musicas (id) VALUES (?1)", @[uuid])
+          && ZPFonotecaExecutar(db, "INSERT INTO audicoes (musica, quando, origem, disco)"
+                                    " VALUES (?1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), ?2,"
+                                    " (SELECT id FROM discos WHERE cddb = ?3 ORDER BY id LIMIT 1))",
+                                @[uuid, doCD ? @"cd" : @"ficheiro", cddb ?: [NSNull null]]);
+        ZPFonotecaExecutar(db, ok ? "COMMIT" : "ROLLBACK", nil);
+    });
+    return ok;
+}
+
+// O UUID da faixa n de um CD. Um disco ou uma faixa que a base ainda não
+// conhece entram agora, com os nomes que houver: um CD tocado antes de ser
+// ripado já conta, e o FLAC que vier dele herda o UUID (o fonoteca.py procura-o
+// pelo CDDB e pela faixa). uuidDoFlac é o FONOTECA_ID do FLAC correspondente,
+// quando a fonoteca tem o álbum — mesmo sem CDDB nas etiquetas, fica a ligação
+// ao disco para a vez seguinte. nil sem base ou sem CDDB.
+- (nullable NSString *)musicaDaFaixa:(NSInteger)n doCD:(nullable NSString *)cddb faixas:(NSInteger)total
+                         uuidDoFlac:(nullable NSString *)uuidDoFlac titulo:(nullable NSString *)titulo
+                            artista:(nullable NSString *)artista album:(nullable NSString *)album {
+    if (cddb.length == 0 || n <= 0) return nil;
+    NSString *doFlac = ZPUUIDDaChave(ZPChaveDaFonoteca(uuidDoFlac));
+    __block NSString *uuid = nil;
+    dispatch_sync(self.filaDaFonoteca, ^{
+        if (![self abrirFonoteca]) return;
+        sqlite3 *db = self.fonoteca;
+        if (!ZPFonotecaExecutar(db, "BEGIN IMMEDIATE", nil)) return;
+        BOOL ok = YES;
+        NSNumber *disco = ZPFonotecaValor(db, "SELECT id FROM discos WHERE cddb = ?1 ORDER BY toc IS NULL, id LIMIT 1", @[cddb]);
+        if (!disco) {
+            ok = ZPFonotecaExecutar(db, "INSERT INTO discos (cddb, faixas) VALUES (?1, ?2)", @[cddb, @(total)]);
+            disco = ok ? @(sqlite3_last_insert_rowid(db)) : nil;
+        }
+        NSString *existente = disco ? ZPFonotecaValor(db, "SELECT musica FROM faixas_cd WHERE disco = ?1 AND faixa = ?2", @[disco, @(n)]) : nil;
+        if (ok && disco && !existente) {
+            NSString *novo = doFlac ?: [NSUUID UUID].UUIDString.lowercaseString;
+            ok = ZPFonotecaExecutar(db, "INSERT OR IGNORE INTO musicas (id, faixa) VALUES (?1, ?2)", @[novo, @(n)])
+              && ZPFonotecaExecutar(db, "INSERT INTO faixas_cd (disco, faixa, musica) VALUES (?1, ?2, ?3)", @[disco, @(n), novo]);
+            existente = ok ? novo : nil;
+        } else if (existente && doFlac && ![existente isEqualToString:doFlac]) {
+            NSLog(@"[Fonoteca] O CD %@, faixa %ld, é %@ na base, mas o FLAC diz %@; conta a base.",
+                  cddb, (long)n, existente, doFlac);
+        }
+        // Os nomes só preenchem o que falta: os do ficheiro, quando houver, mandam.
+        if (ok && existente && (titulo.length || artista.length || album.length)) {
+            ok = ZPFonotecaExecutar(db, "UPDATE musicas SET titulo = COALESCE(titulo, ?2), artista = COALESCE(artista, ?3),"
+                                        " album = COALESCE(album, ?4) WHERE id = ?1",
+                                    @[existente, titulo.length ? titulo : [NSNull null],
+                                      artista.length ? artista : [NSNull null], album.length ? album : [NSNull null]]);
+        }
+        ZPFonotecaExecutar(db, ok ? "COMMIT" : "ROLLBACK", nil);
+        if (ok) uuid = existente;
+    });
+    return uuid;
 }
 
 // M3U Support
@@ -4270,6 +4493,7 @@ static NSString *ZPDesescaparXmcd(NSString *s) {
         NSMutableDictionary<NSString *, NSDictionary *> *porFaixa = [NSMutableDictionary dictionary];
         // O freedb também dá a chave de contagem dos discos que ninguém conhece.
         NSString *cddbDoDisco = cddb ?: ZPIdentificadorFreedbDoCD(volume, NULL);
+        NSMutableDictionary<NSString *, NSNumber *> *contagensDaFonoteca = [NSMutableDictionary dictionary];
         NSString *artista = nil, *album = nil;
         for (NSURL *faixa in faixas) {
             NSInteger n = ZPNumeroDaFaixaDoCD(faixa);
@@ -4288,6 +4512,7 @@ static NSString *ZPDesescaparXmcd(NSString *s) {
             if (titulo) titulo = [self replaceSingleQuoteAndSmartQuotes:titulo];
             if (artistaDaFaixa) artistaDaFaixa = [self replaceSingleQuoteAndSmartQuotes:artistaDaFaixa];
             if (albumDaFaixa) albumDaFaixa = [self replaceSingleQuoteAndSmartQuotes:albumDaFaixa];
+            NSString *tituloConhecido = titulo;   // antes do «Faixa n» de recurso
             titulo = titulo ?: [NSString stringWithFormat:NSLocalizedString(@"cd_track_title", @"Faixa %ld"), (long)n];
             artista = artistaDaFaixa.length ? artistaDaFaixa : artista;
             album = albumDaFaixa.length ? albumDaFaixa : album;
@@ -4297,13 +4522,21 @@ static NSString *ZPDesescaparXmcd(NSString *s) {
             // O ganho vem sempre do FLAC, quando o disco está na fonoteca.
             if (local[@"FLAC"]) info[@"flac"] = local[@"FLAC"];
 
-            // A contagem: a do FLAC, se o disco está na fonoteca (a mesma chave que
-            // o FLAC daria a tocar); senão os nomes do MusicBrainz; senão o disco.
-            NSString *chave = nil;
-            if (local[@"FLAC"]) {
+            // A contagem: primeiro o UUID da base da fonoteca, pelo disco e pela
+            // faixa — o mesmo que o FLAC tem na etiqueta FONOTECA_ID; um disco que a
+            // base não conhecia entra agora. Sem base, a do FLAC, se o disco está na
+            // fonoteca (a mesma chave que o FLAC daria a tocar); senão os nomes do
+            // MusicBrainz; senão o disco.
+            NSString *uuid = [self musicaDaFaixa:n doCD:cddbDoDisco faixas:(NSInteger)faixas.count
+                                      uuidDoFlac:local[@"FONOTECA_ID"] titulo:tituloConhecido
+                                         artista:artistaDaFaixa album:albumDaFaixa];
+            NSString *chave = ZPChaveDaFonoteca(uuid);
+            NSNumber *contagem = uuid ? [self contagemNaFonoteca:uuid] : nil;
+            if (contagem) contagensDaFonoteca[chave] = contagem;
+            if (!chave && local[@"FLAC"]) {
                 chave = ZPChaveDaMusica(local[@"ARTIST"], local[@"ALBUM"], ZPNumeroDaEtiquetaDeFaixa(local[@"DISCNUMBER"]),
                                         ZPNumeroDaEtiquetaDeFaixa(local[@"TRACKNUMBER"]), local[@"TITLE"]) ?: [local[@"FLAC"] path];
-            } else if (internet[@"faixas"][[@(n) description]]) {
+            } else if (!chave && internet[@"faixas"][[@(n) description]]) {
                 chave = ZPChaveDaMusica(internet[@"artista"], internet[@"album"], [internet[@"disco"] integerValue], n,
                                         internet[@"faixas"][[@(n) description]]);
             }
@@ -4328,6 +4561,7 @@ static NSString *ZPDesescaparXmcd(NSString *s) {
             // O disco pode ter saído entretanto.
             if (![self.cdVolumeURL isEqual:volume]) return;
             self.cdFaixas = porFaixa;
+            [self.trackPlayCounts addEntriesFromDictionary:contagensDaFonoteca];
             self.cdCapa = capa;
             self.cdDescricao = descricao;
             [self acertarControlosDoCD];
