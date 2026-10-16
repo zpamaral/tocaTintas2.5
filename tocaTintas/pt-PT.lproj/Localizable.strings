@@ -89,7 +89,7 @@
 "airplay_pairing_required_open" = "Emparelhar…";
 "airplay_pairing_required_later" = "Agora não";
 "cd_play_title" = "Tocar o CD «%@»?";
-"cd_play_text" = "As faixas do disco passam a ser a lista em reprodução; a biblioteca fica onde estava e volta com «Sair do modo de lista». Os nomes, a capa e o ganho vêm do mesmo álbum na fonoteca, quando lá estiver.";
+"cd_play_text" = "As faixas do disco passam a ser a lista em reprodução; a biblioteca fica onde estava e volta com «Sair do modo corrente». Os nomes, a capa e o ganho vêm do mesmo álbum na fonoteca, quando lá estiver.";
 "cd_play_button" = "Tocar";
 "cd_play_later" = "Agora não";
 "cd_menu_item" = "Tocar o CD «%@»";

@@ -405,6 +405,6 @@
 "Jrh-8P-F8U.title" = "Choose";
 
 /* Class = "NSMenuItem"; title = "Exit playlist mode"; ObjectID = "TkM-Ex-PlM"; */
-"TkM-Ko-RZO.title" = "Exit playlist mode";
+"TkM-Ko-RZO.title" = "Exit current mode";
 
 "new_label_key" = "Short localized text.";

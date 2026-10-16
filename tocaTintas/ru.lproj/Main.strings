@@ -482,7 +482,7 @@
  "Jrh-8P-F8U.title" = "Выбрать";
 
 /* Class = "NSMenuItem"; title = "Exit playlist mode"; ObjectID = "TkM-Ex-PlM"; */
-"TkM-Ko-RZO.title" = "Выйти из режима плейлиста";
+"TkM-Ko-RZO.title" = "Выйти из текущего режима";
 
 /* Custom key for the new label */
 "new_label_key" = "Короткий локализованный текст.";

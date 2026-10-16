@@ -788,6 +788,39 @@ static NSString *ZPDiscIDMusicBrainzDoCD(NSURL *volume) {
     return [b64 stringByReplacingOccurrencesOfString:@"=" withString:@"-"];
 }
 
+// O que a fonoteca guarda de um disco, tirado do .TOC.plist: o TOC — os
+// deslocamentos das faixas áudio em blocos (já com os 150 do pré-intervalo) e o
+// leadout no fim, separados por espaços, como nas etiquetas iTunes_CDDB_1 —, o
+// identificador do MusicBrainz e a duração de cada faixa em segundos, pelo
+// número: até ao início da seguinte, ou até ao leadout.
+static NSDictionary *ZPDadosDoDiscoParaFonoteca(NSURL *volume) {
+    NSData *dados = [NSData dataWithContentsOfURL:[volume URLByAppendingPathComponent:@".TOC.plist"]];
+    if (!dados) return nil;
+    NSDictionary *toc = [NSPropertyListSerialization propertyListWithData:dados options:0 format:NULL error:NULL];
+    NSDictionary *sessao = [toc[@"Sessions"] isKindOfClass:[NSArray class]] ? [toc[@"Sessions"] firstObject] : nil;
+    NSArray *faixas = sessao[@"Track Array"];
+    long leadout = [sessao[@"Leadout Block"] longValue];
+    if (![faixas isKindOfClass:[NSArray class]] || leadout <= 0) return nil;
+
+    NSMutableArray<NSString *> *partes = [NSMutableArray array];
+    NSMutableDictionary<NSNumber *, NSNumber *> *duracoes = [NSMutableDictionary dictionary];
+    for (NSUInteger i = 0; i < faixas.count; i++) {
+        NSDictionary *faixa = faixas[i];
+        if ([faixa[@"Data"] boolValue]) continue;   // como no ZPIdentificadorFreedbDoCD
+        long inicio = [faixa[@"Start Block"] longValue];
+        long fim = i + 1 < faixas.count ? [faixas[i + 1][@"Start Block"] longValue] : leadout;
+        [partes addObject:[NSString stringWithFormat:@"%ld", inicio]];
+        long n = [faixa[@"Point"] longValue];
+        if (n > 0 && fim > inicio) duracoes[@(n)] = @((double)(fim - inicio) / 75.0);
+    }
+    if (partes.count == 0) return nil;
+    [partes addObject:[NSString stringWithFormat:@"%ld", leadout]];
+    NSMutableDictionary *resultado = [@{ @"toc": [partes componentsJoinedByString:@" "], @"duracoes": duracoes } mutableCopy];
+    NSString *discid = ZPDiscIDMusicBrainzDoCD(volume);
+    if (discid) resultado[@"mb_discid"] = discid;
+    return resultado;
+}
+
 // Um GET síncrono, para correr só fora do thread principal. O MusicBrainz exige
 // um User-Agent que identifique a aplicação e não pede autenticação para ler.
 static NSData *ZPPedidoHTTP(NSURL *url, NSInteger *estado) {
@@ -876,7 +909,7 @@ static NSURL *ZPPastaComFaixas(NSURL *pasta, NSInteger numero, NSInteger disco) 
 
 #pragma mark - Fonoteca: SQLite
 
-// Liga os argumentos (NSString, NSNumber inteiro, NSNull) a ?1, ?2…
+// Liga os argumentos (NSString, NSNumber inteiro ou real, NSNull) a ?1, ?2…
 static BOOL ZPFonotecaPreparar(sqlite3 *db, const char *sql, NSArray *args, sqlite3_stmt **st) {
     if (sqlite3_prepare_v2(db, sql, -1, st, NULL) != SQLITE_OK) {
         NSLog(@"[Fonoteca] %s: %s", sql, sqlite3_errmsg(db));
@@ -886,7 +919,11 @@ static BOOL ZPFonotecaPreparar(sqlite3 *db, const char *sql, NSArray *args, sqli
         id a = args[i];
         int k = (int)i + 1;
         if ([a isKindOfClass:[NSString class]]) sqlite3_bind_text(*st, k, [a UTF8String], -1, SQLITE_TRANSIENT);
-        else if ([a isKindOfClass:[NSNumber class]]) sqlite3_bind_int64(*st, k, [a longLongValue]);
+        else if ([a isKindOfClass:[NSNumber class]]) {
+            const char *tipo = [a objCType];
+            if (strcmp(tipo, @encode(double)) == 0 || strcmp(tipo, @encode(float)) == 0) sqlite3_bind_double(*st, k, [a doubleValue]);
+            else sqlite3_bind_int64(*st, k, [a longLongValue]);
+        }
         else sqlite3_bind_null(*st, k);
     }
     return YES;
@@ -3554,7 +3591,8 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
             // for novo; sem base, contam pelo disco e pelo número.
             NSInteger total = 0, n = ZPNumeroDaFaixaDoCD(url);
             NSString *cddb = ZPIdentificadorFreedbDoCD(volumeDoCD, &total);
-            NSString *uuid = [self musicaDaFaixa:n doCD:cddb faixas:total uuidDoFlac:nil titulo:nil artista:nil album:nil];
+            NSString *uuid = [self musicaDaFaixa:n doCD:cddb faixas:total uuidDoFlac:nil titulo:nil artista:nil album:nil
+                                           extra:ZPExtraDaFaixaParaFonoteca(ZPDadosDoDiscoParaFonoteca(volumeDoCD), n, nil)];
             chave = ZPChaveDaFonoteca(uuid) ?: ZPChaveDeContagemDoCD(cddb, n);
         } else {
             chave = ZPChaveDeContagemDoFicheiro(url, &antiga);
@@ -3789,6 +3827,23 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
     return n;
 }
 
+// O extra de musicaDaFaixa: do disco (ZPDadosDoDiscoParaFonoteca) o TOC, o disc
+// ID e a duração da faixa n; do MusicBrainz, quando respondeu, a gravação, a
+// edição e qual dos discos da caixa.
+static NSDictionary *ZPExtraDaFaixaParaFonoteca(NSDictionary *disco, NSInteger n, NSDictionary *internet) {
+    NSMutableDictionary *extra = [NSMutableDictionary dictionary];
+    if (disco[@"toc"]) extra[@"toc"] = disco[@"toc"];
+    if (disco[@"mb_discid"]) extra[@"mb_discid"] = disco[@"mb_discid"];
+    if (disco[@"duracoes"][@(n)]) extra[@"duracao"] = disco[@"duracoes"][@(n)];
+    NSString *gravacao = internet[@"gravacoes"][[@(n) description]];
+    if (gravacao.length) extra[@"mb_gravacao"] = gravacao;
+    if ([internet[@"mbid"] length]) {   // o gnudb não tem mbid
+        extra[@"mb_lancamento"] = internet[@"mbid"];
+        if (internet[@"disco"]) extra[@"disco"] = @([internet[@"disco"] integerValue]);
+    }
+    return extra;
+}
+
 // Uma audição. Se a música ainda não estiver na base (um ficheiro com
 // FONOTECA_ID que o verificar_md5IV.sh ainda não viu), fica uma linha só com o
 // id, que o fonoteca.py completa quando o vir.
@@ -3801,7 +3856,8 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
         ok = ZPFonotecaExecutar(db, "INSERT OR IGNORE INTO musicas (id) VALUES (?1)", @[uuid])
           && ZPFonotecaExecutar(db, "INSERT INTO audicoes (musica, quando, origem, disco)"
                                     " VALUES (?1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), ?2,"
-                                    " (SELECT id FROM discos WHERE cddb = ?3 ORDER BY id LIMIT 1))",
+                                    " (SELECT fc.disco FROM faixas_cd fc JOIN discos d ON d.id = fc.disco"
+                                    "  WHERE fc.musica = ?1 AND d.cddb = ?3 ORDER BY fc.disco LIMIT 1))",
                                 @[uuid, doCD ? @"cd" : @"ficheiro", cddb ?: [NSNull null]]);
         ZPFonotecaExecutar(db, ok ? "COMMIT" : "ROLLBACK", nil);
     });
@@ -3813,10 +3869,13 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
 // ripado já conta, e o FLAC que vier dele herda o UUID (o fonoteca.py procura-o
 // pelo CDDB e pela faixa). uuidDoFlac é o FONOTECA_ID do FLAC correspondente,
 // quando a fonoteca tem o álbum — mesmo sem CDDB nas etiquetas, fica a ligação
-// ao disco para a vez seguinte. nil sem base ou sem CDDB.
+// ao disco para a vez seguinte. extra traz o que se souber além dos nomes
+// (ZPExtraDaFaixaParaFonoteca): o TOC e o disc ID do disco, a duração da faixa,
+// os IDs do MusicBrainz; tudo só preenche o que falta. nil sem base ou sem CDDB.
 - (nullable NSString *)musicaDaFaixa:(NSInteger)n doCD:(nullable NSString *)cddb faixas:(NSInteger)total
                          uuidDoFlac:(nullable NSString *)uuidDoFlac titulo:(nullable NSString *)titulo
-                            artista:(nullable NSString *)artista album:(nullable NSString *)album {
+                            artista:(nullable NSString *)artista album:(nullable NSString *)album
+                              extra:(nullable NSDictionary *)extra {
     if (cddb.length == 0 || n <= 0) return nil;
     NSString *doFlac = ZPUUIDDaChave(ZPChaveDaFonoteca(uuidDoFlac));
     __block NSString *uuid = nil;
@@ -3825,10 +3884,20 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
         sqlite3 *db = self.fonoteca;
         if (!ZPFonotecaExecutar(db, "BEGIN IMMEDIATE", nil)) return;
         BOOL ok = YES;
-        NSNumber *disco = ZPFonotecaValor(db, "SELECT id FROM discos WHERE cddb = ?1 ORDER BY toc IS NULL, id LIMIT 1", @[cddb]);
+        id nulo = [NSNull null];
+        NSString *toc = extra[@"toc"], *discid = extra[@"mb_discid"];
+        // O disco com este TOC; senão um ainda sem TOC, que fica com este; senão
+        // qualquer um com o mesmo CDDB (outra prensagem do mesmo álbum, quase
+        // sempre: o TOC só desempata quando há mais de um).
+        NSNumber *disco = toc ? ZPFonotecaValor(db, "SELECT id FROM discos WHERE cddb = ?1 AND toc = ?2", @[cddb, toc]) : nil;
+        if (!disco) disco = ZPFonotecaValor(db, "SELECT id FROM discos WHERE cddb = ?1 ORDER BY toc IS NOT NULL, id LIMIT 1", @[cddb]);
         if (!disco) {
-            ok = ZPFonotecaExecutar(db, "INSERT INTO discos (cddb, faixas) VALUES (?1, ?2)", @[cddb, @(total)]);
+            ok = ZPFonotecaExecutar(db, "INSERT INTO discos (cddb, faixas, toc, mb_discid) VALUES (?1, ?2, ?3, ?4)",
+                                    @[cddb, @(total), toc ?: nulo, discid ?: nulo]);
             disco = ok ? @(sqlite3_last_insert_rowid(db)) : nil;
+        } else if (toc || discid) {
+            ok = ZPFonotecaExecutar(db, "UPDATE discos SET toc = COALESCE(toc, ?2), mb_discid = COALESCE(mb_discid, ?3) WHERE id = ?1",
+                                    @[disco, toc ?: nulo, discid ?: nulo]);
         }
         NSString *existente = disco ? ZPFonotecaValor(db, "SELECT musica FROM faixas_cd WHERE disco = ?1 AND faixa = ?2", @[disco, @(n)]) : nil;
         if (ok && disco && !existente) {
@@ -3840,12 +3909,16 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
             NSLog(@"[Fonoteca] O CD %@, faixa %ld, é %@ na base, mas o FLAC diz %@; conta a base.",
                   cddb, (long)n, existente, doFlac);
         }
-        // Os nomes só preenchem o que falta: os do ficheiro, quando houver, mandam.
-        if (ok && existente && (titulo.length || artista.length || album.length)) {
+        // Os nomes e o resto só preenchem o que falta: os do ficheiro, quando
+        // houver, mandam.
+        if (ok && existente) {
             ok = ZPFonotecaExecutar(db, "UPDATE musicas SET titulo = COALESCE(titulo, ?2), artista = COALESCE(artista, ?3),"
-                                        " album = COALESCE(album, ?4) WHERE id = ?1",
-                                    @[existente, titulo.length ? titulo : [NSNull null],
-                                      artista.length ? artista : [NSNull null], album.length ? album : [NSNull null]]);
+                                        " album = COALESCE(album, ?4), disco = COALESCE(disco, ?5), duracao = COALESCE(duracao, ?6),"
+                                        " mb_gravacao = COALESCE(mb_gravacao, ?7), mb_lancamento = COALESCE(mb_lancamento, ?8)"
+                                        " WHERE id = ?1",
+                                    @[existente, titulo.length ? titulo : nulo, artista.length ? artista : nulo,
+                                      album.length ? album : nulo, extra[@"disco"] ?: nulo, extra[@"duracao"] ?: nulo,
+                                      extra[@"mb_gravacao"] ?: nulo, extra[@"mb_lancamento"] ?: nulo]);
         }
         ZPFonotecaExecutar(db, ok ? "COMMIT" : "ROLLBACK", nil);
         if (ok) uuid = existente;
@@ -4171,10 +4244,13 @@ static void ZPEsperarVezNoMusicBrainz(void) {
     NSURL *cache = [[self pastaDaCacheMusicBrainz] URLByAppendingPathComponent:[discid stringByAppendingPathExtension:@"plist"]];
     NSURL *cacheCapa = [[self pastaDaCacheMusicBrainz] URLByAppendingPathComponent:[discid stringByAppendingPathExtension:@"img"]];
 
+    // Uma resposta guardada antes de haver «gravacoes» pede-se outra vez, uma
+    // vez só, para a fonoteca ter os IDs das gravações; sem rede, serve a velha.
     NSDictionary *guardado = [NSDictionary dictionaryWithContentsOfURL:cache];
     if (guardado[@"naoEncontrado"]) {
         if ([guardado[@"quando"] timeIntervalSinceNow] > -7 * 24 * 3600) return nil;
-    } else if (guardado) {
+        guardado = nil;
+    } else if (guardado[@"gravacoes"]) {
         if (capaSaida) *capaSaida = [NSData dataWithContentsOfURL:cacheCapa];
         return guardado;
     }
@@ -4186,7 +4262,8 @@ static void ZPEsperarVezNoMusicBrainz(void) {
     if (!corpo) {
         // Sem rede ou sem resposta: não se guarda nada, tenta-se da próxima vez.
         NSLog(@"[CD] MusicBrainz sem resposta para %@ (HTTP %ld).", discid, (long)estado);
-        return nil;
+        if (guardado && capaSaida) *capaSaida = [NSData dataWithContentsOfURL:cacheCapa];
+        return guardado;
     }
     NSDictionary *json = [NSJSONSerialization JSONObjectWithData:corpo options:0 error:NULL];
     NSArray *edicoes = [json isKindOfClass:[NSDictionary class]] ? json[@"releases"] : nil;
@@ -4220,15 +4297,19 @@ static void ZPEsperarVezNoMusicBrainz(void) {
         [artista appendFormat:@"%@%@", credito[@"name"] ?: @"", credito[@"joinphrase"] ?: @""];
     }
     NSMutableDictionary<NSString *, NSString *> *faixas = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString *, NSString *> *gravacoes = [NSMutableDictionary dictionary];
     for (NSDictionary *faixa in meio[@"tracks"]) {
         NSString *titulo = faixa[@"title"] ?: faixa[@"recording"][@"title"];
         if (titulo && faixa[@"position"]) faixas[[faixa[@"position"] description]] = titulo;
+        NSString *gravacao = faixa[@"recording"][@"id"];
+        if ([gravacao isKindOfClass:[NSString class]] && faixa[@"position"]) gravacoes[[faixa[@"position"] description]] = gravacao;
     }
     NSDictionary *resultado = @{ @"mbid": escolhida[@"id"] ?: @"",
                                  @"artista": artista,
                                  @"album": escolhida[@"title"] ?: @"",
                                  @"disco": meio[@"position"] ?: @1,   // numa caixa, qual dos discos
-                                 @"faixas": faixas };
+                                 @"faixas": faixas,
+                                 @"gravacoes": gravacoes };          // MUSICBRAINZ_TRACKID, pela posição
     [resultado writeToURL:cache atomically:YES];
 
     // A capa: a da edição escolhida, ou a de outra edição do mesmo disco.
@@ -4494,6 +4575,7 @@ static NSString *ZPDesescaparXmcd(NSString *s) {
         // O freedb também dá a chave de contagem dos discos que ninguém conhece.
         NSString *cddbDoDisco = cddb ?: ZPIdentificadorFreedbDoCD(volume, NULL);
         NSMutableDictionary<NSString *, NSNumber *> *contagensDaFonoteca = [NSMutableDictionary dictionary];
+        NSDictionary *dadosDoDisco = cddbDoDisco ? ZPDadosDoDiscoParaFonoteca(volume) : nil;
         NSString *artista = nil, *album = nil;
         for (NSURL *faixa in faixas) {
             NSInteger n = ZPNumeroDaFaixaDoCD(faixa);
@@ -4529,7 +4611,8 @@ static NSString *ZPDesescaparXmcd(NSString *s) {
             // MusicBrainz; senão o disco.
             NSString *uuid = [self musicaDaFaixa:n doCD:cddbDoDisco faixas:(NSInteger)faixas.count
                                       uuidDoFlac:local[@"FONOTECA_ID"] titulo:tituloConhecido
-                                         artista:artistaDaFaixa album:albumDaFaixa];
+                                         artista:artistaDaFaixa album:albumDaFaixa
+                                           extra:ZPExtraDaFaixaParaFonoteca(dadosDoDisco, n, internet)];
             NSString *chave = ZPChaveDaFonoteca(uuid);
             NSNumber *contagem = uuid ? [self contagemNaFonoteca:uuid] : nil;
             if (contagem) contagensDaFonoteca[chave] = contagem;

@@ -81,7 +81,7 @@
                                                 <binding destination="n2X-mK-Fty" name="value" keyPath="values.openRecentMenuItem" id="EWn-qz-IC3"/>
                                             </connections>
                                         </menuItem>
-                                        <menuItem title="Exit playlist mode" keyEquivalent="P" id="TkM-Ko-RZO">
+                                        <menuItem title="Exit current mode" keyEquivalent="P" id="TkM-Ko-RZO">
                                             <connections>
                                                 <action selector="exitPlaylistModeAction:" target="Ady-hI-5gd" id="YHv-oX-AJP"/>
                                             </connections>

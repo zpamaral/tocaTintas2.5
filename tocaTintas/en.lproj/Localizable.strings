@@ -89,7 +89,7 @@
 "airplay_pairing_required_open" = "Pair…";
 "airplay_pairing_required_later" = "Not Now";
 "cd_play_title" = "Play the CD “%@”?";
-"cd_play_text" = "The disc’s tracks become the playing list; the library stays where it was and comes back with “Exit playlist mode”. Titles, cover and gain come from the same album in the library, when it is there.";
+"cd_play_text" = "The disc’s tracks become the playing list; the library stays where it was and comes back with “Exit current mode”. Titles, cover and gain come from the same album in the library, when it is there.";
 "cd_play_button" = "Play";
 "cd_play_later" = "Not Now";
 "cd_menu_item" = "Play the CD “%@”";
