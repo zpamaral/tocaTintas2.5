@@ -3541,7 +3541,8 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
         if (uuid) {
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
                 NSString *cddb = volumeDoCD ? ZPIdentificadorFreedbDoCD(volumeDoCD, NULL) : nil;
-                if (![self registarAudicaoNaFonoteca:uuid doCD:volumeDoCD != nil cddb:cddb]) {
+                if (![self registarAudicaoNaFonoteca:uuid doCD:volumeDoCD != nil cddb:cddb
+                                             caminho:volumeDoCD ? nil : trackPath]) {
                     NSLog(@"[Fonoteca] A audição de %@ não ficou registada.", trackPath);
                 }
             });
@@ -3846,19 +3847,26 @@ static NSDictionary *ZPExtraDaFaixaParaFonoteca(NSDictionary *disco, NSInteger n
 
 // Uma audição. Se a música ainda não estiver na base (um ficheiro com
 // FONOTECA_ID que o verificar_md5IV.sh ainda não viu), fica uma linha só com o
-// id, que o fonoteca.py completa quando o vir.
-- (BOOL)registarAudicaoNaFonoteca:(NSString *)uuid doCD:(BOOL)doCD cddb:(nullable NSString *)cddb {
+// id, que o fonoteca.py completa quando o vir. caminho é o do ficheiro tocado
+// (nil num CD): liga a audição à cópia que tocou, se a base a conhecer por esse
+// caminho (absoluto e em NFC, como o fonoteca.py o guarda); fora da fonoteca, ou
+// ainda por verificar, fica NULL.
+- (BOOL)registarAudicaoNaFonoteca:(NSString *)uuid doCD:(BOOL)doCD cddb:(nullable NSString *)cddb
+                          caminho:(nullable NSString *)caminho {
+    NSString *caminhoNFC = caminho.stringByStandardizingPath.precomposedStringWithCanonicalMapping;
     __block BOOL ok = NO;
     dispatch_sync(self.filaDaFonoteca, ^{
         if (![self abrirFonoteca]) return;
         sqlite3 *db = self.fonoteca;
         if (!ZPFonotecaExecutar(db, "BEGIN IMMEDIATE", nil)) return;
         ok = ZPFonotecaExecutar(db, "INSERT OR IGNORE INTO musicas (id) VALUES (?1)", @[uuid])
-          && ZPFonotecaExecutar(db, "INSERT INTO audicoes (musica, quando, origem, disco)"
+          && ZPFonotecaExecutar(db, "INSERT INTO audicoes (musica, quando, origem, disco, ficheiro)"
                                     " VALUES (?1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), ?2,"
                                     " (SELECT fc.disco FROM faixas_cd fc JOIN discos d ON d.id = fc.disco"
-                                    "  WHERE fc.musica = ?1 AND d.cddb = ?3 ORDER BY fc.disco LIMIT 1))",
-                                @[uuid, doCD ? @"cd" : @"ficheiro", cddb ?: [NSNull null]]);
+                                    "  WHERE fc.musica = ?1 AND d.cddb = ?3 ORDER BY fc.disco LIMIT 1),"
+                                    " (SELECT f.id FROM ficheiros f WHERE f.caminho = ?4 AND f.musica = ?1))",
+                                @[uuid, doCD ? @"cd" : @"ficheiro", cddb ?: [NSNull null],
+                                  caminhoNFC ?: [NSNull null]]);
         ZPFonotecaExecutar(db, ok ? "COMMIT" : "ROLLBACK", nil);
     });
     return ok;
@@ -4922,9 +4930,18 @@ static NSString *ZPDesescaparXmcd(NSString *s) {
                     usingBlock:^(NSNotification *nota) {
         [fraco volumeVaiDesmontar:nota.userInfo[NSWorkspaceVolumeURLKey]];
     }];
+    // Todos os CDs de áudio montam em «Audio CD», e o ripper desmonta e volta a
+    // montar o disco para o ler. Um aviso de desmontagem que chegue atrasado, com
+    // o caminho já montado de novo, é de um disco que já lá não está: o que lá
+    // está fica (e, se um «vai desmontar» atrasado o tiver apagado, volta).
     [centro addObserverForName:NSWorkspaceDidUnmountNotification object:nil queue:[NSOperationQueue mainQueue]
                     usingBlock:^(NSNotification *nota) {
-        [fraco volumeVaiDesmontar:nota.userInfo[NSWorkspaceVolumeURLKey]];
+        NSURL *volume = nota.userInfo[NSWorkspaceVolumeURLKey];
+        if (ZPEhCDDeAudio(volume)) {
+            if (!fraco.cdVolumeURL) [fraco volumeMontado:volume perguntar:NO];
+            return;
+        }
+        [fraco volumeVaiDesmontar:volume];
     }];
 
     // Mudar a ordem das fontes nas preferências volta a identificar o disco.
