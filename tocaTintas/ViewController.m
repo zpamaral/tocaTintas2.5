@@ -240,6 +240,7 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *chavesDeContagem;   // caminho → chave da música (thread principal)
 @property (nonatomic, assign) sqlite3 *fonoteca;                  // CDs/.fonoteca.sqlite, ou NULL (só na filaDaFonoteca)
 @property (nonatomic, strong) dispatch_queue_t filaDaFonoteca;    // todo o acesso à base passa por aqui
+@property (nonatomic, copy) NSDictionary<NSString *, NSString *> *codecsDaFonoteca;   // caminho NFC → aac/alac (thread principal)
 
 - (void)loadTrackPlayCounts;
 - (void)saveTrackPlayCounts;
@@ -3813,6 +3814,28 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
     NSLog(@"[Fonoteca] Base aberta: %@", caminho);
     #endif
     return YES;
+}
+
+// O codec dos .m4a, que a extensão não diz: a base guarda «aac» ou «alac» no
+// formato. Lê-se fora do thread principal e, se mudou, refaz-se a lista.
+- (void)carregarCodecsDaFonoteca {
+    dispatch_async(self.filaDaFonoteca, ^{
+        if (![self abrirFonoteca]) return;
+        NSMutableDictionary<NSString *, NSString *> *codecs = [NSMutableDictionary dictionary];
+        sqlite3_stmt *st = NULL;
+        if (ZPFonotecaPreparar(self.fonoteca, "SELECT caminho, formato FROM ficheiros"
+                               " WHERE caminho IS NOT NULL AND formato IN ('aac', 'alac')", nil, &st)) {
+            while (sqlite3_step(st) == SQLITE_ROW) {
+                codecs[@((const char *)sqlite3_column_text(st, 0))] = @((const char *)sqlite3_column_text(st, 1));
+            }
+        }
+        sqlite3_finalize(st);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if ([codecs isEqualToDictionary:self.codecsDaFonoteca ?: @{}]) return;
+            self.codecsDaFonoteca = codecs;
+            [self createComboBox];
+        });
+    });
 }
 
 // As reproduções de uma música: as que vieram do contagens.json mais as
@@ -7738,6 +7761,10 @@ static NSScrollView *ZPScrollViewComTabela(NSView *vista) {
         // Extract the song name and extension
         NSString *songName = [fileName stringByDeletingPathExtension];
         NSString *extension = [fileName pathExtension];
+        if ([extension.lowercaseString isEqualToString:@"m4a"]) {
+            NSString *caminhoNFC = fileURL.path.stringByStandardizingPath.precomposedStringWithCanonicalMapping;
+            extension = self.codecsDaFonoteca[caminhoNFC] ?: extension;
+        }
 
         // Remove leading digits and special characters from the song name
         NSString *cleanedSongName = [regex stringByReplacingMatchesInString:songName
@@ -8660,6 +8687,7 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
         // Refresh the combo box and update selection
         dispatch_async(dispatch_get_main_queue(), ^{
             [self createComboBox];
+            [self carregarCodecsDaFonoteca];
 
             if (currentTrackExists) {
                 [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
