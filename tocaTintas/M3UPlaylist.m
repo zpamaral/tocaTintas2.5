@@ -31,16 +31,39 @@ SOFTWARE.
 @implementation M3UPlaylist
 
 // Load an M3U playlist from a file
+//
+// O .m3u8 é UTF-8 por definição; o .m3u não tem codificação definida, e os
+// antigos vêm em Windows-1252 ou Latin-1. Tenta-se o UTF-8 primeiro — um
+// ficheiro em Windows-1252 com acentos quase nunca é UTF-8 válido, pelo que a
+// ordem não troca um pelo outro — e só depois os dois de oito bits.
+//
+// Os caminhos relativos resolvem-se a partir da pasta da lista, que é o que
+// todos os outros leitores fazem; os absolutos ficam como estão. Linhas
+// «file://» passam a caminhos.
 + (NSArray<NSString *> *)loadFromFile:(NSString *)filePath {
-    NSError *error = nil;
-    NSString *fileContents = [NSString stringWithContentsOfFile:filePath encoding:NSUTF8StringEncoding error:&error];
-
-    if (error) {
+    NSData *data = [NSData dataWithContentsOfFile:filePath];
+    if (!data) {
         #ifdef DEBUG
-        NSLog(@"Error loading M3U file: %@", error.localizedDescription);
+        NSLog(@"Error loading M3U file: %@", filePath);
         #endif
         return nil;
     }
+
+    NSString *fileContents = nil;
+    for (NSNumber *codificacao in @[@(NSUTF8StringEncoding), @(NSWindowsCP1252StringEncoding), @(NSISOLatin1StringEncoding)]) {
+        fileContents = [[NSString alloc] initWithData:data encoding:codificacao.unsignedIntegerValue];
+        if (fileContents) break;
+    }
+    if (!fileContents) {
+        #ifdef DEBUG
+        NSLog(@"Error decoding M3U file: %@", filePath);
+        #endif
+        return nil;
+    }
+    // A marca de ordem dos octetos que alguns programas põem à cabeça do UTF-8.
+    if ([fileContents hasPrefix:@"﻿"]) fileContents = [fileContents substringFromIndex:1];
+
+    NSString *pastaDaLista = filePath.stringByDeletingLastPathComponent;
 
     // Split the file contents into lines
     NSArray<NSString *> *lines = [fileContents componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
@@ -57,7 +80,15 @@ SOFTWARE.
             continue;
         }
 
-        [audioFilePaths addObject:line];
+        if ([line.lowercaseString hasPrefix:@"file://"]) {
+            NSString *caminho = [NSURL URLWithString:line].path;
+            if (!caminho) continue;
+            line = caminho;
+        } else if (![line hasPrefix:@"/"] && ![line hasPrefix:@"~"]) {
+            line = [pastaDaLista stringByAppendingPathComponent:line];
+        }
+
+        [audioFilePaths addObject:line.stringByStandardizingPath];
     }
 
     return [audioFilePaths copy];
