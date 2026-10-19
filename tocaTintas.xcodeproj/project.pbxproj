@@ -50,12 +50,12 @@
 		1FC9EE632E47D3E7006E3B2D /* libwavpack.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F651EE52C88B91D00CA223D /* libwavpack.a */; };
 		1FC9EE652E4809FC006E3B2D /* CoreSpotlight.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FC9EE642E4809FC006E3B2D /* CoreSpotlight.framework */; };
 		1FE43C2E307304AF0030BCFC /* libc++.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FE43C2D307304AF0030BCFC /* libc++.tbd */; };
-		9E858D35D0E211A8D8570530 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A97E0AAEB647324D9ADEB740 /* libsqlite3.tbd */; };
 		1FE43C30307305B50030BCFC /* libMAC.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FE43C2F307305B50030BCFC /* libMAC.a */; };
 		1FE43C333073B7A20030BCFC /* ZPEtiquetaDeslizante.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FE43C323073B7A20030BCFC /* ZPEtiquetaDeslizante.m */; };
 		1FE94C532C7CDAE700C3EF4E /* HistogramView.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FE94C522C7CDAE700C3EF4E /* HistogramView.m */; };
 		1FF2BD3F2CEF75CE009726BF /* ListAudioDevices in Resources */ = {isa = PBXBuildFile; fileRef = 1FF2BD3E2CEF75CE009726BF /* ListAudioDevices */; };
 		9E7D6D52EBF61BE8A212D080 /* libPods-tocaTintas.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 17E8DA888F4D64ACE9A45A1E /* libPods-tocaTintas.a */; };
+		9E858D35D0E211A8D8570530 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = A97E0AAEB647324D9ADEB740 /* libsqlite3.tbd */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -157,7 +157,6 @@
 		1FC9EE5C2E47CD4E006E3B2D /* ZPSpotLightwv.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ZPSpotLightwv.entitlements; sourceTree = "<group>"; };
 		1FC9EE642E4809FC006E3B2D /* CoreSpotlight.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreSpotlight.framework; path = System/Library/Frameworks/CoreSpotlight.framework; sourceTree = SDKROOT; };
 		1FE43C2D307304AF0030BCFC /* libc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.tbd"; path = "usr/lib/libc++.tbd"; sourceTree = SDKROOT; };
-		A97E0AAEB647324D9ADEB740 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		1FE43C2F307305B50030BCFC /* libMAC.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libMAC.a; path = tocaTintas.xcodeproj/Frameworks/libMAC.a; sourceTree = "<group>"; };
 		1FE43C313073B78A0030BCFC /* ZPEtiquetaDeslizante.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPEtiquetaDeslizante.h; sourceTree = "<group>"; };
 		1FE43C323073B7A20030BCFC /* ZPEtiquetaDeslizante.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPEtiquetaDeslizante.m; sourceTree = "<group>"; };
@@ -169,6 +168,7 @@
 		1FF2BC7C2E358EA900133BF3 /* QuickLook.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuickLook.framework; path = System/Library/Frameworks/QuickLook.framework; sourceTree = SDKROOT; };
 		1FF2BC7E2E358EF200133BF3 /* QuickLookUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuickLookUI.framework; path = System/Library/Frameworks/QuickLookUI.framework; sourceTree = SDKROOT; };
 		1FF2BD3E2CEF75CE009726BF /* ListAudioDevices */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = ListAudioDevices; sourceTree = "<group>"; };
+		A97E0AAEB647324D9ADEB740 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		BB9A1BD9A7E59D78853E2EE8 /* Pods-tocaTintas.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-tocaTintas.release.xcconfig"; path = "Target Support Files/Pods-tocaTintas/Pods-tocaTintas.release.xcconfig"; sourceTree = "<group>"; };
 		F444ADD308D793289E02B933 /* Pods-tocaTintas.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-tocaTintas.debug.xcconfig"; path = "Target Support Files/Pods-tocaTintas/Pods-tocaTintas.debug.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -374,6 +374,7 @@
 				1F12F29F2C7C85480064C694 /* Frameworks */,
 				1F12F2A02C7C85480064C694 /* Resources */,
 				1F3D98622E32E766002CA3B2 /* Embed Foundation Extensions */,
+				1F10D08A3085FBFF005ADBA1 /* ShellScript */,
 			);
 			buildRules = (
 			);
@@ -529,6 +530,23 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		1F10D08A3085FBFF005ADBA1 /* ShellScript */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Sistema de adição automática das versões git.\nhash=$(git -C \"$SRCROOT\" rev-parse --short HEAD 2>/dev/null) || exit 0\ngit -C \"$SRCROOT\" diff --quiet HEAD -- || hash=\"$hash+\"\nplist=\"$TARGET_BUILD_DIR/$INFOPLIST_PATH\"\n/usr/libexec/PlistBuddy -c \"Set :ZPCommitGit $hash\" \"$plist\" 2>/dev/null || /usr/libexec/PlistBuddy -c \"Add :ZPCommitGit string $hash\" \"$plist\"\n";
+		};
 		CF141D18F8A9F39AD0FCDB9E /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -680,7 +698,7 @@
 				DEVELOPMENT_TEAM = FJ238DJ67E;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -745,7 +763,7 @@
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_OPTIMIZATION_LEVEL = fast;
