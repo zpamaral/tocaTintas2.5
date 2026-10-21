@@ -59,6 +59,8 @@ SOFTWARE.
 @property (nonatomic, strong) AVAudioConverter *toFloatConverter;
 @property (nonatomic, strong) AVAudioPCMBuffer *floatBuffer;
 @property (nonatomic, strong) AVAudioPCMBuffer *int16Buffer;
+// O BlackHole não está a 44,1 kHz e o conversor tem de reamostrar (ver -installAudioTap).
+@property (nonatomic, assign) BOOL reamostrar;
 
 // Circular buffer
 @property (nonatomic, assign) TPCircularBuffer circularBuffer;
@@ -1882,6 +1884,21 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
     if (inputFormat.channelCount > 2) {
         self.toFloatConverter.channelMap = @[@0, @1];
     }
+    // O raop_play só aceita 44,1 kHz, mas o BlackHole fica à frequência que lá
+    // se puser — 48 kHz, para gravar sem reamostragem um álbum a 48 kHz. O
+    // -convertToBuffer:fromBuffer:error: não converte frequências: com o
+    // BlackHole a 48 kHz falhava em todos os blocos, e a aparelhagem calava-se
+    // sem aviso nenhum fora do DEBUG. Com frequências diferentes usa-se a
+    // variante com bloco de entrada, que reamostra e guarda o estado do filtro
+    // de um bloco para o seguinte, sem costuras nas fronteiras.
+    self.reamostrar = (inputFormat.sampleRate != floatFormat.sampleRate);
+    if (self.reamostrar) {
+        self.toFloatConverter.sampleRateConverterQuality = AVAudioQualityMax;
+        #ifdef DEBUG
+        NSLog(@"[Streaming] BlackHole a %.0f Hz: a reamostrar para %.0f Hz.",
+              inputFormat.sampleRate, floatFormat.sampleRate);
+        #endif
+    }
     self.floatBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:floatFormat frameCapacity:capacidadeTap];
     self.int16Buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:targetFormat frameCapacity:capacidadeTap];
 
@@ -1911,7 +1928,11 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
         AVAudioPCMBuffer *convertedBuffer = strongSelf.int16Buffer;
         if (!floatBuffer || !convertedBuffer) return;
 
-        if (buffer.frameLength > floatBuffer.frameCapacity) {
+        // A reamostrar, o que sai tem outro número de tramas: é esse que tem de
+        // caber (mais uma folga para o que o filtro tenha retido do bloco anterior).
+        const double razao = floatBuffer.format.sampleRate / buffer.format.sampleRate;
+        const AVAudioFrameCount tramasDeSaida = (AVAudioFrameCount)ceil(buffer.frameLength * razao) + 64;
+        if (tramasDeSaida > floatBuffer.frameCapacity) {
             #ifdef DEBUG
             NSLog(@"[Streaming] Tampão do tap com %u tramas, acima da capacidade de %u — bloco descartado.",
                   buffer.frameLength, floatBuffer.frameCapacity);
@@ -1919,15 +1940,40 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
             return;
         }
 
-        // Passo 1: converter para float 32 bits
+        // Passo 1: converter para float 32 bits (e para 44,1 kHz, se for preciso)
         NSError *error = nil;
-        [strongSelf.toFloatConverter convertToBuffer:floatBuffer fromBuffer:buffer error:&error];
+        if (strongSelf.reamostrar) {
+            // Entrega-se o bloco do tap uma vez; à segunda pergunta diz-se que
+            // por agora não há mais, e o conversor devolve o que já tem pronto
+            // sem dar o fluxo por acabado.
+            __block BOOL entregue = NO;
+            AVAudioConverterOutputStatus estado =
+                [strongSelf.toFloatConverter convertToBuffer:floatBuffer
+                                                       error:&error
+                                          withInputFromBlock:^AVAudioBuffer *(AVAudioPacketCount pacotes,
+                                                                              AVAudioConverterInputStatus *estadoDaEntrada) {
+                if (entregue) {
+                    *estadoDaEntrada = AVAudioConverterInputStatus_NoDataNow;
+                    return nil;
+                }
+                entregue = YES;
+                *estadoDaEntrada = AVAudioConverterInputStatus_HaveData;
+                return buffer;
+            }];
+            if (estado == AVAudioConverterOutputStatus_Error && !error) {
+                error = [NSError errorWithDomain:NSOSStatusErrorDomain code:kAudioConverterErr_UnspecifiedError userInfo:nil];
+            }
+        } else {
+            [strongSelf.toFloatConverter convertToBuffer:floatBuffer fromBuffer:buffer error:&error];
+        }
         if (error) {
             #ifdef DEBUG
             NSLog(@"[Streaming] Error converting to float: %@", error.localizedDescription);
             #endif
             return;
         }
+        // No arranque, o filtro de reamostragem retém as primeiras tramas.
+        if (floatBuffer.frameLength == 0) return;
 
         // Passos 2 e 3 num só varrimento: ganho, limitação e conversão para
         // int16 com a intercalação L/R sob controlo nosso.

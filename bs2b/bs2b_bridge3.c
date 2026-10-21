@@ -71,8 +71,9 @@
 //   4) reenvia os sinais de paragem ao CamillaDSP e apaga o ficheiro
 //      temporário à saída.
 //
-// Não depende de PortAudio nem de libbs2b. Compila sem bibliotecas externas:
-//   cc -O2 -Wall -Wextra -o bs2b_bridge bs2b_bridge3.c
+// Não depende de PortAudio nem de libbs2b. Compila sem bibliotecas externas
+// (o CoreAudio é só para ler a frequência do BlackHole):
+//   cc -O2 -Wall -Wextra -o bs2b_bridge bs2b_bridge3.c -framework CoreAudio -framework CoreFoundation
 //
 // Equivalência perfil bs2b -> nível de crossfeed. Os coeficientes são os do
 // projecto camilladsp-crossfeed (níveis cx4, cx3, cx2), validados por resposta
@@ -89,6 +90,7 @@
 #include <errno.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <CoreAudio/CoreAudio.h>
 
 // --------------------------------------------------------------------------
 // Parâmetros ajustáveis
@@ -105,8 +107,8 @@
 #define IN_DEV_NAME   "BlackHole 16ch"          // captura (loopback do sistema)
 #define OUT_DEV_NAME  "Auscultadores externos"  // saída pré-definida: auriculares Sony
 
-#define SAMPLE_RATE   44100
-#define CHUNK_SIZE    1024    // atraso da ponte ~= chunksize; ver nota no topo
+#define SAMPLE_RATE   44100   // só quando não se consegue ler a do BlackHole
+#define CHUNK_SIZE   1024    // atraso da ponte ~= chunksize; ver nota no topo
 #define SAMPLE_FORMAT "F32"   // o que o binario 4.1.3 aceita (S16/S24/S32/F32).
                               // NB: a documentacao do 4.1.3 diz "F32_LE" e mente;
                               // v3 chamava-lhe "FLOAT32LE".
@@ -194,6 +196,52 @@ static const char *g_eq_origem = NULL;   // texto para as mensagens
 // ser exacto (o CamillaDSP não faz correspondência por substring).
 static const char *g_saida = OUT_DEV_NAME;
 
+// Frequência de trabalho: a que o BlackHole tiver quando a ponte arranca. O
+// CamillaDSP põe a captura à frequência do «samplerate» da configuração; com
+// 44100 fixo, pôr o BlackHole a 48 kHz (para gravar sem reamostragem um álbum
+// a 48 kHz) matava o CamillaDSP, o programa de música relançava a ponte e a
+// ponte nova repunha os 44,1 kHz — de seis em seis segundos, sem fim. Seguindo
+// o BlackHole, a ponte relançada arranca à frequência nova e fica.
+static int g_frequencia = SAMPLE_RATE;
+
+static int frequencia_do_dispositivo(const char *nome) {
+    AudioObjectPropertyAddress endereco = { kAudioHardwarePropertyDevices,
+                                            kAudioObjectPropertyScopeGlobal,
+                                            kAudioObjectPropertyElementMain };
+    UInt32 tamanho = 0;
+    if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &endereco, 0, NULL, &tamanho) != noErr)
+        return 0;
+    AudioObjectID *ids = malloc(tamanho);
+    if (!ids)
+        return 0;
+    int frequencia = 0;
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &endereco, 0, NULL, &tamanho, ids) == noErr) {
+        for (UInt32 i = 0; i < tamanho / sizeof(AudioObjectID) && !frequencia; i++) {
+            AudioObjectPropertyAddress nomeEnd = { kAudioObjectPropertyName,
+                                                   kAudioObjectPropertyScopeGlobal,
+                                                   kAudioObjectPropertyElementMain };
+            CFStringRef cf = NULL;
+            UInt32 t = sizeof cf;
+            char c[256] = "";
+            if (AudioObjectGetPropertyData(ids[i], &nomeEnd, 0, NULL, &t, &cf) != noErr || !cf)
+                continue;
+            CFStringGetCString(cf, c, sizeof c, kCFStringEncodingUTF8);
+            CFRelease(cf);
+            if (strcmp(c, nome) != 0)   // nome exacto, como o CamillaDSP o pede
+                continue;
+            AudioObjectPropertyAddress freqEnd = { kAudioDevicePropertyNominalSampleRate,
+                                                   kAudioObjectPropertyScopeGlobal,
+                                                   kAudioObjectPropertyElementMain };
+            Float64 f = 0.0;
+            t = sizeof f;
+            if (AudioObjectGetPropertyData(ids[i], &freqEnd, 0, NULL, &t, &f) == noErr && f > 0.0)
+                frequencia = (int)(f + 0.5);
+        }
+    }
+    free(ids);
+    return frequencia;
+}
+
 // Passagem limpa COM O MESMO NÍVEL do processamento. Não é o mesmo que o
 // perfil «nenhum»: aqui as opções de processamento continuam a ser lidas, só
 // que em vez de serem aplicadas servem para calcular quanto é que elas baixavam
@@ -242,7 +290,7 @@ static void imprimir_uso(const char *nome_prog) {
         "                   não há nada a compensar\n"
         "  --nivel-alvo N   Nível-alvo do tampão, em tramas (pré-definido: o\n"
         "                   chunksize, %d). Mais do que um bloco dá folga contra\n"
-        "                   os estalidos de arranque, ao custo de N/44100 s de atraso\n"
+        "                   os estalidos de arranque, ao custo de N/frequência s de atraso\n"
         "  --sem-processamento   Passagem limpa, mas ao MESMO NÍVEL que o\n"
         "                   processamento teria dado: não aplica crossfeed nem\n"
         "                   equalização, e atenua o que elas atenuariam. Serve\n"
@@ -366,7 +414,7 @@ static void gerar_config(FILE *f, const Perfil *p) {
         "devices:\n"
         "  samplerate: %d\n"
         "  chunksize: %d\n",
-        p->nome, SAMPLE_RATE, CHUNK_SIZE);
+        p->nome, g_frequencia, CHUNK_SIZE);
 
     const int sem_crossfeed = (strcmp(p->nome, PERFIL_NENHUM) == 0) || g_sem_processamento;
     const int aplicar_eq    = (g_num_eq > 0) && !g_sem_processamento;
@@ -712,6 +760,13 @@ int main(int argc, char *argv[]) {
                 "       sem --volume o fader fica a 0 dB.\n");
     }
 
+    int frequencia = frequencia_do_dispositivo(IN_DEV_NAME);
+    if (frequencia > 0)
+        g_frequencia = frequencia;
+    else
+        fprintf(stderr, "Aviso: não consegui ler a frequência de «%s»; fica %d Hz.\n",
+                IN_DEV_NAME, g_frequencia);
+
     // --------------------------------------------------
     // 1) Modo de inspecção: só escreve o YAML e sai
     // --------------------------------------------------
@@ -761,7 +816,7 @@ int main(int argc, char *argv[]) {
 
     LOGF("Entrada : «%s»\n", IN_DEV_NAME);
     LOGF("Saída   : «%s»\n", OUT_DEV_NAME);
-    LOGF("Frequência: %d Hz\n", SAMPLE_RATE);
+    LOGF("Frequência: %d Hz (a do BlackHole)\n", g_frequencia);
     LOGF("Perfil bs2b: %s (%s)\n", perfil->nome, perfil->descricao);
     LOGF("Equalização: %s\n", g_num_eq > 0 ? g_eq_origem : "nenhuma");
     if (g_num_eq > 0)
