@@ -10613,7 +10613,12 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
         self.playCountLabel.stringValue = @"";
         NSData *dados = ZPMusicCurrentArtworkData();
         NSImage *capa = dados ? [[NSImage alloc] initWithData:dados] : nil;
-        self.coverArtView.image = capa.size.width > 0 ? capa : [NSImage imageNamed:@"placeholder"];
+        if (capa.size.width > 0) {
+            self.coverArtView.image = capa;
+        } else {
+            self.coverArtView.image = [NSImage imageNamed:@"placeholder"];
+            [self procurarCapaDoMusicaNoCatalogo:m[@"artista"] album:m[@"album"] faixa:chave];
+        }
     }
 
     self.aMostrarOMusica = YES;
@@ -10644,6 +10649,48 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     double agora = self.musicaPosicao;
     if (self.musicaATocar) agora += -[self.musicaQuando timeIntervalSinceNow];
     [self.progressBar setDoubleValue:MIN(agora / self.musicaDuracao, 1.0) * 100.0];
+}
+
+// Há faixas em streaming — sobretudo as da reprodução automática, que não vêm
+// de um álbum aberto — de que o Música não dá capa nenhuma: «count of
+// artworks» é 0, por mais que se espere (visto em 2026-10, num Trifonov). Vai-se
+// então buscá-la ao catálogo da Apple pela pesquisa pública do iTunes, pelo
+// artista e pelo álbum, a 600 px. Chega mais tarde: só se põe se a faixa à
+// vista ainda for a mesma.
+- (void)procurarCapaDoMusicaNoCatalogo:(NSString *)artista album:(NSString *)album faixa:(NSString *)chave {
+    if (album.length == 0) return;
+    // O artista do Música é muitas vezes uma lista («Sumi Jo, Suyoen Kim &
+    // …»): o primeiro nome basta para a pesquisa.
+    NSString *primeiro = [[artista componentsSeparatedByCharactersInSet:
+                           [NSCharacterSet characterSetWithCharactersInString:@",&"]].firstObject
+                          stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet] ?: @"";
+    NSURLComponents *c = [NSURLComponents componentsWithString:@"https://itunes.apple.com/search"];
+    c.queryItems = @[ [NSURLQueryItem queryItemWithName:@"term" value:[NSString stringWithFormat:@"%@ %@", primeiro, album]],
+                      [NSURLQueryItem queryItemWithName:@"entity" value:@"album"],
+                      [NSURLQueryItem queryItemWithName:@"limit" value:@"5"] ];
+    __weak typeof(self) fraco = self;
+    [[[NSURLSession sharedSession] dataTaskWithURL:c.URL completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+        if (!d) return;
+        NSArray *res = [NSJSONSerialization JSONObjectWithData:d options:0 error:NULL][@"results"];
+        if (![res isKindOfClass:[NSArray class]] || res.count == 0) return;
+        // O que tiver exactamente o mesmo nome de álbum; senão, o primeiro.
+        NSDictionary *escolhido = res.firstObject;
+        for (NSDictionary *a in res) {
+            if ([a[@"collectionName"] caseInsensitiveCompare:album] == NSOrderedSame) { escolhido = a; break; }
+        }
+        NSString *url = [escolhido[@"artworkUrl100"] stringByReplacingOccurrencesOfString:@"100x100bb"
+                                                                               withString:@"600x600bb"];
+        if (!url) return;
+        NSData *img = [NSData dataWithContentsOfURL:[NSURL URLWithString:url]];
+        NSImage *capa = img ? [[NSImage alloc] initWithData:img] : nil;
+        if (capa.size.width <= 0) return;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(fraco) forte = fraco;
+            if (forte.aMostrarOMusica && [forte.musicaFaixaMostrada isEqualToString:chave]) {
+                forte.coverArtView.image = capa;
+            }
+        });
+    }] resume];
 }
 
 // Não apaga o que está à vista: quem vier a seguir (o tocaTintas a tocar, ou o
