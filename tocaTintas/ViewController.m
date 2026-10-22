@@ -7926,7 +7926,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     NSLog(@"comboBox:completedString: called with input string: %@", string);
     #endif
 
-    NSString *lowercaseInput = [string lowercaseString];
+    NSString *lowercaseInput = string.precomposedStringWithCanonicalMapping.lowercaseString;
 
     // Corrected regular expression to remove leading numbers and specific special characters
     NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9-]+\\s*"
@@ -8204,7 +8204,10 @@ static NSScrollView *ZPScrollViewComTabela(NSView *vista) {
         NSLog(@"Display Name: %@", displayName);
         #endif
 
-        [displayNames addObject:displayName];
+        // Em NFC: o HFS+ guarda os nomes decompostos («E» + acento), e o que
+        // se escreve no teclado vem composto («É») — sem isto o completar
+        // falhava em tudo o que tivesse um acento antes do ponto de escrita.
+        [displayNames addObject:displayName.precomposedStringWithCanonicalMapping];
     }
 
     // Store display names and full file names for delegate methods
