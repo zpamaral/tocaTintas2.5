@@ -225,6 +225,41 @@ BOOL ZPMusicCommand(NSString *comando) {
     return ZPDizerAoMusica(comando) != nil;
 }
 
+// Pedido a cada faixa nova e de cinco em cinco segundos: compila-se uma vez e
+// guarda-se. Tudo no thread principal (o NSAppleScript não é para mais nenhum).
+NSDictionary *ZPMusicNowPlaying(void) {
+    if ([NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.apple.Music"].count == 0) {
+        return nil;
+    }
+    static NSAppleScript *pergunta;
+    if (!pergunta) {
+        pergunta = [[NSAppleScript alloc] initWithSource:
+            @"tell application id \"com.apple.Music\"\n"
+             "  set e to player state as string\n"
+             "  if e is \"stopped\" then return {e}\n"
+             "  set t to current track\n"
+             "  return {e, player position, name of t, artist of t, album of t, duration of t, track number of t}\n"
+             "end tell"];
+    }
+    NSDictionary *erro = nil;
+    NSAppleEventDescriptor *r = [pergunta executeAndReturnError:&erro];
+    if (!r || r.numberOfItems < 1) return nil;
+    NSString *estado = [r descriptorAtIndex:1].stringValue ?: @"stopped";
+    if (r.numberOfItems < 7) return @{ @"estado": estado };
+    return @{ @"estado":  estado,
+              @"posicao": @([r descriptorAtIndex:2].doubleValue),
+              @"titulo":  [r descriptorAtIndex:3].stringValue ?: @"",
+              @"artista": [r descriptorAtIndex:4].stringValue ?: @"",
+              @"album":   [r descriptorAtIndex:5].stringValue ?: @"",
+              @"duracao": @([r descriptorAtIndex:6].doubleValue),
+              @"faixa":   @([r descriptorAtIndex:7].int32Value) };
+}
+
+NSData *ZPMusicCurrentArtworkData(void) {
+    // Com faixas em streaming também há capa: o Música vai buscá-la ao catálogo.
+    return [ZPDizerAoMusica(@"get raw data of artwork 1 of current track") data];
+}
+
 BOOL ZPBindEngineInputToLoopback(AVAudioEngine *engine) {
     if (!engine) {
         return NO;

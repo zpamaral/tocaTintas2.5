@@ -131,6 +131,13 @@ NSString *ZPCurrentRecordSource(void) {
     return @"loopback";   // a gravação de sempre
 }
 
+NSString * const kRecordStopAtAlbumEndDefaultsKey = @"recordStopAtAlbumEnd";
+
+BOOL ZPRecordStopsAtAlbumEnd(void) {
+    NSNumber *guardado = [[NSUserDefaults standardUserDefaults] objectForKey:kRecordStopAtAlbumEndDefaultsKey];
+    return !guardado || guardado.boolValue;
+}
+
 NSString * const kBS2BEqDefaultsKey        = @"bs2bEq";
 NSString * const kBS2BEqChangedNotification = @"BS2BEqChanged";
 
@@ -752,6 +759,10 @@ NSString *ZPCurrentBS2BProfile(void) {
     NSView *vista = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 480, A)];
     CGFloat topo = A - margem;
 
+    // A vista não pode passar dos 390 pt dos outros separadores: a janela tem
+    // altura fixa, e uma vista mais alta empurra o topo para debaixo da barra
+    // dos separadores. A caixa de parar no fim do álbum cabe no espaço que a
+    // nota de baixo deixava livre.
     NSTextField *t = [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 200, largura, 200)
                                 texto:NSLocalizedString(@"prefs_rec_explanation", @"O que o botão de gravar grava")
                               pequena:NO];
@@ -781,6 +792,16 @@ NSString *ZPCurrentBS2BProfile(void) {
         }
     }
 
+    NSButton *pararNoFim = [[NSButton alloc] initWithFrame:NSMakeRect(margem, topo - 20, largura, 20)];
+    [pararNoFim setButtonType:NSButtonTypeSwitch];
+    pararNoFim.title = NSLocalizedString(@"prefs_rec_stop_album_end", @"Parar a gravação no fim do álbum");
+    pararNoFim.toolTip = NSLocalizedString(@"prefs_rec_stop_album_end_tip", @"Porquê parar no fim do álbum");
+    pararNoFim.state = ZPRecordStopsAtAlbumEnd() ? NSControlStateValueOn : NSControlStateValueOff;
+    pararNoFim.target = self;
+    pararNoFim.action = @selector(pararNoFimDoAlbumMudou:);
+    [vista addSubview:pararNoFim];
+    topo -= 20 + 14;
+
     [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 200, largura, 200)
                texto:NSLocalizedString(@"prefs_rec_note", @"Como gravar o Dolby Atmos com os AirPods")
              pequena:YES];
@@ -793,6 +814,12 @@ NSString *ZPCurrentBS2BProfile(void) {
     NSString *fonte = self.gravacaoFontePopUp.selectedItem.representedObject;
     if (!fonte) return;
     [[NSUserDefaults standardUserDefaults] setObject:fonte forKey:kRecordSourceDefaultsKey];
+}
+
+// Lida a cada faixa nova do Música, por isso vale já para a gravação em curso.
+- (void)pararNoFimDoAlbumMudou:(NSButton *)sender {
+    [[NSUserDefaults standardUserDefaults] setBool:(sender.state == NSControlStateValueOn)
+                                            forKey:kRecordStopAtAlbumEndDefaultsKey];
 }
 
 #pragma mark - Emparelhamento AirPlay

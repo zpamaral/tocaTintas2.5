@@ -131,4 +131,9 @@
 "rec_off_grid_text" = "The samples don’t fall on the 16- or 24-bit steps, so the sound is being recalculated before it reaches BlackHole (now at %.1f kHz). Common causes: Music’s volume below maximum, or the equalizer, Sound Check or crossfade turned on. Recording continues.";
 "rec_rate_failed_title" = "Couldn’t change BlackHole’s sample rate";
 "rec_rate_failed_text" = "Music plays this track at %.1f kHz, but BlackHole stayed at %.1f kHz, so the recording will be resampled. You can change it in Audio MIDI Setup and record again.";
+"rec_rate_restore_failed_title" = "BlackHole didn’t go back to its previous sample rate";
+"rec_rate_restore_failed_text" = "It stayed at %.1f kHz instead of %.1f kHz. tocaTintas will try again next time it starts; you can also change it in Audio MIDI Setup.";
+"rec_album_end_title" = "Recording finished: end of the album";
+"prefs_rec_stop_album_end" = "Stop recording at the end of the album";
+"prefs_rec_stop_album_end_tip" = "When Music moves on to a track from another album, or stops, recording stops by itself and BlackHole goes back to its previous sample rate. Turn this off to record a playlist with tracks from several albums.";
 "rec_warning_ok" = "OK";

@@ -131,4 +131,9 @@
 "rec_off_grid_text" = "As amostras não caem nos degraus de 16 nem de 24 bits: o som está a ser recalculado antes de chegar ao BlackHole (agora a %.1f kHz). Causas habituais: o volume do Música abaixo do máximo, ou o equalizador, o Sound Check ou o crossfade ligados. A gravação continua.";
 "rec_rate_failed_title" = "Não foi possível mudar a frequência do BlackHole";
 "rec_rate_failed_text" = "O Música toca esta faixa a %.1f kHz, mas o BlackHole ficou a %.1f kHz: a gravação vai sair reamostrada. Podes mudá-la na Configuração de Áudio MIDI e gravar outra vez.";
+"rec_rate_restore_failed_title" = "O BlackHole não voltou à frequência de antes";
+"rec_rate_restore_failed_text" = "Ficou a %.1f kHz em vez de %.1f kHz. O tocaTintas volta a tentar no próximo arranque; também se pode mudar na Configuração de Áudio MIDI.";
+"rec_album_end_title" = "Gravação terminada: fim do álbum";
+"prefs_rec_stop_album_end" = "Parar a gravação no fim do álbum";
+"prefs_rec_stop_album_end_tip" = "Quando o Música passa a uma faixa de outro álbum, ou pára, a gravação pára sozinha e o BlackHole volta à frequência de antes. Desliga-se para gravar uma lista com faixas de vários álbuns.";
 "rec_warning_ok" = "OK";

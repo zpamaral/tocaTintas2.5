@@ -71,6 +71,31 @@ static NSString * const kBS2BHeadphonesNameSubstring = @"Auscultadores externos"
 // é reposta e apagada.
 static NSString * const kZPFrequenciaAReporKey = @"ZPLoopbackSampleRateToRestore";
 
+// Uma linha, com a data, em ~/Library/Application Support/tocaTintas/frequencia.log
+// por cada mudança de frequência do BlackHole que o tocaTintas faz ou tenta.
+// O registo do sistema não guarda as mensagens do NSLog desta app, e sem isto
+// uma reposição falhada não deixava rasto nenhum.
+static void ZPRegistarFrequencia(NSString *texto) {
+    NSURL *pasta = [[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory
+                                                           inDomains:NSUserDomainMask].firstObject
+                    URLByAppendingPathComponent:@"tocaTintas" isDirectory:YES];
+    NSURL *ficheiro = [pasta URLByAppendingPathComponent:@"frequencia.log"];
+    NSDateFormatter *formato = [[NSDateFormatter alloc] init];
+    formato.dateFormat = @"yyyy-MM-dd HH:mm:ss";
+    NSString *linha = [NSString stringWithFormat:@"%@  %@\n", [formato stringFromDate:[NSDate date]], texto];
+    NSData *dados = [linha dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSFileHandle *f = [NSFileHandle fileHandleForWritingToURL:ficheiro error:NULL];
+    if (!f) {
+        [[NSFileManager defaultManager] createDirectoryAtURL:pasta withIntermediateDirectories:YES attributes:nil error:NULL];
+        [dados writeToURL:ficheiro atomically:NO];
+        return;
+    }
+    [f seekToEndOfFile];
+    [f writeData:dados];
+    [f closeFile];
+}
+
 #pragma mark - Salto automático de silêncios longos (constantes e utilitários)
 
 // Só saltamos silêncios com mais do que esta duração
@@ -378,6 +403,19 @@ static WavpackStreamReader memoryReader = {
 @property (strong, nonatomic) id observadorDoMusica;
 // O estado da grelha da gravação em curso, que dá a cor ao ⏺.
 @property (assign, nonatomic) ZPEstadoDaGrelha estadoDaGrelha;
+// O álbum que se está a gravar, para parar no fim dele (ver
+// -terminouOAlbumDaGravacao:).
+@property (copy, nonatomic) NSString *albumDaGravacao;
+// A janela a mostrar o que o Música toca (ver «O Música na janela»).
+@property (strong, nonatomic) id observadorDoMusicaNaJanela;
+@property (strong, nonatomic) NSTimer *relogioDoMusica;
+@property (assign, nonatomic) BOOL aMostrarOMusica;
+@property (assign, nonatomic) BOOL musicaATocar;
+@property (assign, nonatomic) double musicaPosicao;
+@property (assign, nonatomic) double musicaDuracao;
+@property (strong, nonatomic) NSDate *musicaQuando;
+@property (copy, nonatomic) NSString *musicaFaixaMostrada;
+@property (assign, nonatomic) NSUInteger musicaTiques;
 
 // AirPlay-related properties
 @property (strong) NSButton *airPlayButton;
@@ -1558,6 +1596,9 @@ CoreAudioPlaybackState playbackState;
     // app foi abaixo, ou o Xcode parou-a): repõe-se agora.
     [self reporFrequenciaDoLoopbackRelancandoAPonte:YES];
 
+    // Com o tocaTintas parado, a janela mostra o que o Música estiver a tocar.
+    [self comecarAMostrarOMusica];
+
     self.isStreaming = NO; // Initialize as not streaming
 }
 
@@ -2116,6 +2157,7 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
         // Start recording. Se não arrancar, o porquê chega pelo aviso da
         // captura, e o botão fica apagado.
         self.estadoDaGrelha = ZPEstadoDaGrelhaBitExacta;
+        self.albumDaGravacao = nil;
         self.isRecording = [self.audioCapture startCapturingAudio];
         #ifdef DEBUG
         NSLog(@"[Audio recording] Audio recording %@.", self.isRecording ? @"started" : @"did not start");
@@ -2153,6 +2195,8 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
     // a frequência nova e escreve-a na configuração.
     [self stopBs2bIfRunning];
     BOOL mudou = ZPSetLoopbackSampleRate(frequencia);
+    ZPRegistarFrequencia([NSString stringWithFormat:@"gravar: %.0f -> %.0f Hz (a do Música): %@",
+                          actual, frequencia, mudou ? @"mudou" : @"FALHOU"]);
     if (mudou) {
         // Só a primeira: numa segunda mudança na mesma gravação, a frequência
         // a repor continua a ser a de antes de tudo.
@@ -2161,6 +2205,7 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
             [preferencias setDouble:actual forKey:kZPFrequenciaAReporKey];
         }
         NSLog(@"[Audio recording] BlackHole de %.0f para %.0f Hz, a frequência do Música.", actual, frequencia);
+        [self reabrirAirPlayDepoisDeMudarAFrequencia];
     } else {
         NSAlert *alerta = [[NSAlert alloc] init];
         alerta.messageText = NSLocalizedString(@"rec_rate_failed_title", @"Não foi possível mudar a frequência do BlackHole");
@@ -2178,23 +2223,64 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
 
 // Volta a pôr a frequência que o BlackHole tinha antes da gravação, se uma
 // gravação a mudou. No fecho da app a ponte não se relança: está a ser parada.
+//
+// A frequência guardada só se apaga depois de o BlackHole a ter de facto. Antes
+// apagava-se à cabeça, e uma reposição que falhasse perdia-se sem rasto: em
+// 2026-10, ao parar uma gravação, o BlackHole ficou a 48 kHz e já não havia
+// nada a dizer que devia voltar a 44,1. Agora tenta-se três vezes, a um segundo
+// de intervalo; falhando, avisa-se e a chave fica para o arranque seguinte.
 - (void)reporFrequenciaDoLoopbackRelancandoAPonte:(BOOL)relancar {
     NSUserDefaults *preferencias = [NSUserDefaults standardUserDefaults];
     double anterior = [preferencias doubleForKey:kZPFrequenciaAReporKey];
     if (anterior <= 0.0) {
         return;
     }
-    [preferencias removeObjectForKey:kZPFrequenciaAReporKey];
-    if (anterior == ZPLoopbackSampleRate()) {
+    double actual = ZPLoopbackSampleRate();
+    if (anterior == actual) {
+        [preferencias removeObjectForKey:kZPFrequenciaAReporKey];
+        ZPRegistarFrequencia([NSString stringWithFormat:@"repor: já estava a %.0f Hz", anterior]);
         return;
     }
+
     [self stopBs2bIfRunning];
-    if (ZPSetLoopbackSampleRate(anterior)) {
-        NSLog(@"[Audio recording] BlackHole reposto a %.0f Hz.", anterior);
+    BOOL reposto = NO;
+    for (int tentativa = 0; tentativa < 3 && !reposto; ++tentativa) {
+        if (tentativa > 0) usleep(1000 * 1000);
+        reposto = ZPSetLoopbackSampleRate(anterior);
     }
+    ZPRegistarFrequencia([NSString stringWithFormat:@"repor: %.0f -> %.0f Hz: %@",
+                          actual, anterior, reposto ? @"reposto" : @"FALHOU três vezes; fica para o próximo arranque"]);
+
+    if (reposto) {
+        [preferencias removeObjectForKey:kZPFrequenciaAReporKey];
+        NSLog(@"[Audio recording] BlackHole reposto a %.0f Hz.", anterior);
+    } else if (relancar) {
+        NSAlert *alerta = [[NSAlert alloc] init];
+        alerta.messageText = NSLocalizedString(@"rec_rate_restore_failed_title", @"O BlackHole não voltou à frequência de antes");
+        alerta.informativeText = [NSString stringWithFormat:
+            NSLocalizedString(@"rec_rate_restore_failed_text", @"Ficou a %.1f kHz em vez de %.1f kHz"),
+            ZPLoopbackSampleRate() / 1000.0, anterior / 1000.0];
+        [alerta addButtonWithTitle:NSLocalizedString(@"rec_warning_ok", @"Fechar o aviso da gravação")];
+        if (self.view.window && !self.view.window.attachedSheet) {
+            [alerta beginSheetModalForWindow:self.view.window completionHandler:nil];
+        }
+    }
+
     if (relancar) {
         [self applyBs2bConfiguration];
+        if (reposto) [self reabrirAirPlayDepoisDeMudarAFrequencia];
     }
+}
+
+// Com o AirPlay a transmitir, uma mudança de frequência do BlackHole obriga o
+// ZPAirPlayStreamer a reconfigurar a captura, e a transmissão pode ficar a
+// soluçar — visto em 2026-10, com duas mudanças seguidas. Reabre-se a sessão,
+// que é o que o ⌘-clique faz à mão.
+- (void)reabrirAirPlayDepoisDeMudarAFrequencia {
+    if (!self.airPlayStreamer) return;
+    ZPRegistarFrequencia(@"AirPlay: sessão reaberta depois da mudança");
+    [self.airPlayStreamer stopStreaming];
+    [self.airPlayStreamer startStreaming];
 }
 
 // O Música publica uma notificação distribuída sempre que começa a tocar,
@@ -2208,9 +2294,63 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
                     object:nil
                      queue:[NSOperationQueue mainQueue]
                 usingBlock:^(NSNotification *nota) {
-        if (![nota.userInfo[@"Player State"] isEqualToString:@"Playing"]) return;
-        [fraco acertarFrequenciaPeloMusica];
+        __strong typeof(fraco) forte = fraco;
+        if (!forte || !forte.isRecording) return;
+        NSString *estado = nota.userInfo[@"Player State"];
+        if ([forte terminouOAlbumDaGravacao:nota.userInfo]) return;
+        if ([estado isEqualToString:@"Playing"]) [forte acertarFrequenciaPeloMusica];
     }];
+}
+
+// A gravação pára no fim do álbum (preferência «Parar a gravação no fim do
+// álbum», ligada por omissão). Em 2026-10 o Música passou, ao acabar a Callas,
+// a uma obra ao acaso de outro álbum, a outra frequência, e a gravação seguiu
+// por ela dentro — reamostrada, com o ⏺ a laranja.
+//
+// O álbum da gravação é o da última faixa que começou a tocar antes de haver
+// som no ficheiro: escolher outro álbum antes de ele soar não o faz parar.
+// Depois disso, uma faixa de outro álbum ou o Música parado acabam a gravação,
+// com um segundo de folga para o fim do álbum chegar todo ao ficheiro. Pausa
+// não: pode ser só uma pausa. Devolve YES se a gravação vai parar.
+- (BOOL)terminouOAlbumDaGravacao:(NSDictionary *)info {
+    NSString *estado = info[@"Player State"];
+    NSString *album = info[@"Album"];
+    if (!self.audioCapture.gravouSom) {
+        if ([estado isEqualToString:@"Playing"] && album.length) self.albumDaGravacao = album;
+        return NO;
+    }
+    if (!ZPRecordStopsAtAlbumEnd() || !self.albumDaGravacao) return NO;
+
+    BOOL outroAlbum = [estado isEqualToString:@"Playing"] && album.length
+                      && ![album isEqualToString:self.albumDaGravacao];
+    BOOL parado = [estado isEqualToString:@"Stopped"];
+    if (!outroAlbum && !parado) return NO;
+
+    NSString *terminado = self.albumDaGravacao;
+    self.albumDaGravacao = nil;   // uma vez só
+    [self deixarDeVigiarOMusica];
+    NSLog(@"[Audio recording] Fim do álbum «%@»%@; a gravação pára.", terminado,
+          outroAlbum ? [NSString stringWithFormat:@" (o Música passou a «%@»)", album] : @" (o Música parou)");
+    __weak typeof(self) fraco = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(fraco) forte = fraco;
+        if (!forte || !forte.isRecording) return;
+        [forte recordAudio];   // como carregar no ⏺: fecha o ficheiro e repõe a frequência
+        [forte avisarFimDaGravacaoDoAlbum:terminado];
+    });
+    return YES;
+}
+
+// Uma notificação, e não um aviso na janela: a gravação acabou bem, não há
+// nada a decidir.
+- (void)avisarFimDaGravacaoDoAlbum:(NSString *)album {
+    UNMutableNotificationContent *conteudo = [[UNMutableNotificationContent alloc] init];
+    conteudo.title = NSLocalizedString(@"rec_album_end_title", @"Gravação terminada: fim do álbum");
+    conteudo.body = album ?: @"";
+    UNNotificationRequest *pedido = [UNNotificationRequest requestWithIdentifier:@"GravacaoTerminada"
+                                                                         content:conteudo
+                                                                         trigger:nil];
+    [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:pedido withCompletionHandler:nil];
 }
 
 - (void)deixarDeVigiarOMusica {
@@ -2241,6 +2381,8 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
     if (self.audioCapture.gravouSom) {
         NSLog(@"[Audio recording] A faixa nova está a %.0f Hz e a gravação já tem som a %.0f Hz; fica como está.",
               doMusica, ZPLoopbackSampleRate());
+        ZPRegistarFrequencia([NSString stringWithFormat:@"gravar: faixa nova a %.0f Hz com som já gravado a %.0f Hz; fica",
+                              doMusica, ZPLoopbackSampleRate()]);
         return;
     }
 
@@ -9789,6 +9931,8 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
 - (void)stopButtonPressed {
     [self stopAudio];
     [self discardPrefetchedTrack];
+    // Parado o tocaTintas, a janela fica livre para o Música, se ele tocar.
+    [self actualizarOMusicaNaJanela];
 }
 
 // Ensure the timer is invalidated if playback is stopped or a new track is played
@@ -10413,6 +10557,102 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     [self stopBs2bHeadphoneAutoStart];
     [self saveTrackPlayCounts];
     [self.airPlayManager stopDiscovery];
+}
+
+#pragma mark - O Música na janela
+
+// Com o tocaTintas parado — nem a tocar nem em pausa —, a janela mostra o que
+// o Música está a tocar: capa, artista, álbum, título (com ♫ à frente, para se
+// saber de onde vem) e a barra de progresso. É sobretudo para as gravações: vê-se
+// aqui o que está a entrar no ficheiro. Mal o tocaTintas toque alguma coisa sua,
+// a janela volta a ser dele, e quem a escreve é o caminho de sempre.
+//
+// O Música avisa cada faixa nova, pausa e paragem pela notificação distribuída
+// com.apple.Music.playerInfo; a ficha e a posição pedem-se-lhe nessa altura, a
+// capa só quando a faixa muda. Entre avisos, a barra anda por um relógio local
+// de um segundo, corrigido de cinco em cinco segundos pela posição verdadeira
+// (salta-se para a frente, pára-se no meio). As audições do Música não contam
+// para a base da fonoteca: não são ficheiros dela.
+
+- (void)comecarAMostrarOMusica {
+    if (self.observadorDoMusicaNaJanela) return;
+    __weak typeof(self) fraco = self;
+    self.observadorDoMusicaNaJanela = [[NSDistributedNotificationCenter defaultCenter]
+        addObserverForName:@"com.apple.Music.playerInfo"
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:^(NSNotification *nota) {
+        [fraco actualizarOMusicaNaJanela];
+    }];
+    [self actualizarOMusicaNaJanela];
+}
+
+- (void)actualizarOMusicaNaJanela {
+    if ([self isPlaybackEngaged]) {
+        [self deixarDeMostrarOMusica];
+        return;
+    }
+    NSDictionary *m = ZPMusicNowPlaying();
+    if (!m || [m[@"estado"] isEqualToString:@"stopped"] || !m[@"titulo"]) {
+        if (self.aMostrarOMusica) {
+            [self.progressBar setDoubleValue:0.0];
+            [self deixarDeMostrarOMusica];
+        }
+        return;
+    }
+
+    NSString *titulo = [m[@"faixa"] intValue] > 0
+        ? [NSString stringWithFormat:@"♫ %@. %@", m[@"faixa"], m[@"titulo"]]
+        : [NSString stringWithFormat:@"♫ %@", m[@"titulo"]];
+    NSString *chave = [NSString stringWithFormat:@"%@|%@|%@", m[@"artista"], m[@"album"], titulo];
+    if (!self.aMostrarOMusica || ![chave isEqualToString:self.musicaFaixaMostrada]) {
+        self.musicaFaixaMostrada = chave;
+        [self.artistLabel setStringValue:m[@"artista"]];
+        [self.albumLabel setStringValue:m[@"album"]];
+        [self.titleLabel setStringValue:titulo];
+        self.playCountLabel.stringValue = @"";
+        NSData *dados = ZPMusicCurrentArtworkData();
+        NSImage *capa = dados ? [[NSImage alloc] initWithData:dados] : nil;
+        self.coverArtView.image = capa.size.width > 0 ? capa : [NSImage imageNamed:@"placeholder"];
+    }
+
+    self.aMostrarOMusica = YES;
+    self.musicaATocar = [m[@"estado"] isEqualToString:@"playing"];
+    self.musicaPosicao = [m[@"posicao"] doubleValue];
+    self.musicaDuracao = [m[@"duracao"] doubleValue];
+    self.musicaQuando = [NSDate date];
+    self.musicaTiques = 0;
+    [self desenharProgressoDoMusica];
+
+    if (!self.relogioDoMusica) {
+        __weak typeof(self) fraco = self;
+        self.relogioDoMusica = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *t) {
+            __strong typeof(fraco) forte = fraco;
+            if (!forte) { [t invalidate]; return; }
+            if ([forte isPlaybackEngaged]) { [forte deixarDeMostrarOMusica]; return; }
+            if (++forte.musicaTiques >= 5) {
+                [forte actualizarOMusicaNaJanela];   // a posição verdadeira, de cinco em cinco segundos
+            } else {
+                [forte desenharProgressoDoMusica];
+            }
+        }];
+    }
+}
+
+- (void)desenharProgressoDoMusica {
+    if (!self.aMostrarOMusica || self.musicaDuracao <= 0.0) return;
+    double agora = self.musicaPosicao;
+    if (self.musicaATocar) agora += -[self.musicaQuando timeIntervalSinceNow];
+    [self.progressBar setDoubleValue:MIN(agora / self.musicaDuracao, 1.0) * 100.0];
+}
+
+// Não apaga o que está à vista: quem vier a seguir (o tocaTintas a tocar, ou o
+// Música outra vez) escreve por cima.
+- (void)deixarDeMostrarOMusica {
+    [self.relogioDoMusica invalidate];
+    self.relogioDoMusica = nil;
+    self.aMostrarOMusica = NO;
+    self.musicaFaixaMostrada = nil;
 }
 
 #pragma mark - AppleScript

@@ -96,6 +96,11 @@ NSString *ZPCurrentGnudbEmail(void);
 extern NSString * const kRecordSourceDefaultsKey;
 NSString *ZPCurrentRecordSource(void);
 
+/// Se a gravação pelo BlackHole pára sozinha quando o Música passa a uma faixa
+/// de outro álbum, ou pára. Ausente vale como sim.
+extern NSString * const kRecordStopAtAlbumEndDefaultsKey;
+BOOL ZPRecordStopsAtAlbumEnd(void);
+
 @interface PreferencesWindowController : NSWindowController
 
 @property (weak) IBOutlet NSButton *saveButton; // Button for saving

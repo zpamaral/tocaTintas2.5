@@ -45,6 +45,16 @@ double ZPMusicCurrentTrackSampleRate(void);
 /// position to 0»…), se estiver aberto. Devolve NO se não estiver ou se falhar.
 BOOL ZPMusicCommand(NSString *comando);
 
+/// O que o Música está a tocar: @"estado" («playing», «paused», «stopped») e,
+/// fora de «stopped», @"posicao" e @"duracao" (segundos), @"titulo",
+/// @"artista", @"album" e @"faixa" (número). nil se o Música não estiver aberto
+/// ou não responder. Só no thread principal.
+NSDictionary *ZPMusicNowPlaying(void);
+
+/// A capa da faixa que o Música está a tocar, tal como ele a tem (PNG ou JPEG),
+/// ou nil.
+NSData *ZPMusicCurrentArtworkData(void);
+
 /// Publicada no thread principal quando a gravação tem algo a dizer a quem a
 /// pediu: userInfo[@"titulo"] e userInfo[@"texto"], já traduzidos.
 extern NSString * const kZPAudioCaptureWarningNotification;
