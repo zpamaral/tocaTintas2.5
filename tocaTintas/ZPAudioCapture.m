@@ -125,6 +125,106 @@ AudioDeviceID ZPLoopbackAudioDevice(void) {
     return encontrado;
 }
 
+static AudioObjectPropertyAddress ZPEnderecoDaFrequencia(void) {
+    return (AudioObjectPropertyAddress) {
+        .mSelector = kAudioDevicePropertyNominalSampleRate,
+        .mScope    = kAudioObjectPropertyScopeGlobal,
+        .mElement  = kAudioObjectPropertyElementMain
+    };
+}
+
+double ZPLoopbackSampleRate(void) {
+    AudioDeviceID dispositivo = ZPLoopbackAudioDevice();
+    if (dispositivo == kAudioObjectUnknown) {
+        return 0.0;
+    }
+    Float64 frequencia = 0.0;
+    UInt32 tamanho = sizeof(frequencia);
+    AudioObjectPropertyAddress endereco = ZPEnderecoDaFrequencia();
+    if (AudioObjectGetPropertyData(dispositivo, &endereco, 0, NULL, &tamanho, &frequencia) != noErr) {
+        return 0.0;
+    }
+    return frequencia;
+}
+
+BOOL ZPSetLoopbackSampleRate(double frequencia) {
+    AudioDeviceID dispositivo = ZPLoopbackAudioDevice();
+    if (dispositivo == kAudioObjectUnknown || frequencia <= 0.0) {
+        return NO;
+    }
+
+    // Só as frequências que o dispositivo anuncia: pedir outra devolve erro em
+    // alguns controladores e noutros é aceite e ignorada sem aviso.
+    AudioObjectPropertyAddress disponiveis = {
+        .mSelector = kAudioDevicePropertyAvailableNominalSampleRates,
+        .mScope    = kAudioObjectPropertyScopeGlobal,
+        .mElement  = kAudioObjectPropertyElementMain
+    };
+    UInt32 tamanho = 0;
+    BOOL aceita = NO;
+    if (AudioObjectGetPropertyDataSize(dispositivo, &disponiveis, 0, NULL, &tamanho) == noErr && tamanho > 0) {
+        UInt32 n = tamanho / sizeof(AudioValueRange);
+        AudioValueRange gamas[n];
+        if (AudioObjectGetPropertyData(dispositivo, &disponiveis, 0, NULL, &tamanho, gamas) == noErr) {
+            for (UInt32 i = 0; i < n && !aceita; ++i) {
+                aceita = frequencia >= gamas[i].mMinimum && frequencia <= gamas[i].mMaximum;
+            }
+        }
+    }
+    if (!aceita) {
+        NSLog(@"[Audio Capture] O BlackHole não anuncia %.0f Hz.", frequencia);
+        return NO;
+    }
+
+    Float64 pedida = frequencia;
+    AudioObjectPropertyAddress endereco = ZPEnderecoDaFrequencia();
+    OSStatus estado = AudioObjectSetPropertyData(dispositivo, &endereco, 0, NULL, sizeof(pedida), &pedida);
+    if (estado != noErr) {
+        NSLog(@"[Audio Capture] Não consegui pôr o BlackHole a %.0f Hz (estado %d).", frequencia, (int)estado);
+        return NO;
+    }
+
+    // A mudança é assíncrona: o controlador reconfigura-se e só depois a
+    // propriedade passa a dizer o valor novo. Espera-se a dormir, como na
+    // paragem da ponte, para não deixar entrar o run loop pelo meio.
+    for (int i = 0; i < 100; ++i) {
+        if (ZPLoopbackSampleRate() == frequencia) {
+            return YES;
+        }
+        usleep(10 * 1000);
+    }
+    NSLog(@"[Audio Capture] O BlackHole não passou a %.0f Hz em um segundo.", frequencia);
+    return NO;
+}
+
+// Um comando ao Música, por AppleScript. Na primeira vez o macOS pede
+// autorização para o tocaTintas controlar o Música (NSAppleEventsUsageDescription
+// e a autorização de automação); se for recusada, a resposta é um erro e
+// grava-se como dantes, sem mudanças de frequência.
+static NSAppleEventDescriptor *ZPDizerAoMusica(NSString *comando) {
+    // «tell application» abriria o Música se estivesse fechado: só se fala com
+    // um Música que já esteja a correr.
+    if ([NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.apple.Music"].count == 0) {
+        return nil;
+    }
+    NSString *fonte = [NSString stringWithFormat:@"tell application id \"com.apple.Music\" to %@", comando];
+    NSDictionary *erro = nil;
+    NSAppleEventDescriptor *resposta = [[[NSAppleScript alloc] initWithSource:fonte] executeAndReturnError:&erro];
+    if (!resposta) {
+        NSLog(@"[Audio Capture] O Música não respondeu a «%@»: %@", comando,
+              erro[NSAppleScriptErrorMessage] ?: erro);
+    }
+    return resposta;
+}
+
+double ZPMusicCurrentTrackSampleRate(void) {
+    return (double)[ZPDizerAoMusica(@"get sample rate of current track") int32Value];
+}
+
+BOOL ZPMusicCommand(NSString *comando) {
+    return ZPDizerAoMusica(comando) != nil;
+}
+
 BOOL ZPBindEngineInputToLoopback(AVAudioEngine *engine) {
     if (!engine) {
         return NO;
@@ -174,6 +274,7 @@ BOOL ZPBindEngineInputToLoopback(AVAudioEngine *engine) {
 @property (assign, nonatomic) double recordSampleRate;
 @property (assign, nonatomic) NSUInteger recordChannels;
 @property (assign, nonatomic) BOOL isRecording;
+@property (atomic, readwrite) BOOL gravouSom;
 
 // Reutilizados entre callbacks (criados uma vez por tap)
 @property (strong, nonatomic) AVAudioConverter *recordConverter;
@@ -212,8 +313,19 @@ typedef struct {
     BOOL   avisado;
 } ZPVigiaCabeca;
 
+// Estado do vigia da grelha (ver -vigiarGrelha:tramas:). Só na ioQueue.
+typedef struct {
+    unsigned long long tramas;    // tramas com som na janela em curso
+    unsigned long long amostras;  // as amostras dessas tramas
+    unsigned long long fora16;    // fora dos degraus de 16 bits
+    unsigned long long fora24;    // fora dos degraus de 24 bits
+    BOOL registado;               // a primeira janela boa já foi para o registo
+    BOOL avisado;
+} ZPVigiaGrelha;
+
 @implementation ZPAudioCapture {
-    ZPVigiaCabeca _vigia;   // só na ioQueue
+    ZPVigiaCabeca _vigia;    // só na ioQueue
+    ZPVigiaGrelha _grelha;   // só na ioQueue
 }
 
 - (instancetype)init {
@@ -284,6 +396,10 @@ typedef struct {
     self.recordDataBytes = 0;
     self.recordSampleRate = 0.0;
     self.recordChannels = 2;
+    self.gravouSom = NO;
+    dispatch_sync(self.ioQueue, ^{
+        memset(&self->_grelha, 0, sizeof(self->_grelha));
+    });
 
     NSMutableData *reserva = [NSMutableData dataWithLength:kZPWavHeaderSize];
     if (![reserva writeToURL:outputFileURL atomically:NO]) {
@@ -357,6 +473,22 @@ typedef struct {
             [self finalizeRecordingFile];
         });
     }
+}
+
+- (void)abandonCapturingAudio {
+    if (!self.isRecording) {
+        return;
+    }
+    NSURL *ficheiro = self.recordFileURL;
+    [self stopRecording];
+    // Na mesma fila, atrás do fecho: quando isto corre o ficheiro já está
+    // fechado e não entra mais nada nele.
+    dispatch_sync(self.ioQueue, ^{
+        [[NSFileManager defaultManager] removeItemAtURL:ficheiro error:NULL];
+    });
+    #ifdef DEBUG
+    NSLog(@"[Audio Capture] Gravação abandonada antes de haver som: %@", ficheiro.lastPathComponent);
+    #endif
 }
 
 #pragma mark - Ficheiro WAV
@@ -805,6 +937,59 @@ static OSStatus ZPIOProcMusica(AudioObjectID dispositivo, const AudioTimeStamp *
              NSLocalizedString(@"rec_head_tracking_text", @"Pôr o áudio espacial em Fixo"));
 }
 
+#pragma mark - Vigia da grelha
+
+// O que o Música entrega ao BlackHole sem mexer no som são as amostras do
+// master, e essas caem todas nos degraus de 16 ou de 24 bits: em float,
+// multiplicar por 2^15 ou por 2^23 dá um inteiro exacto. Basta uma
+// reamostragem (a frequência do BlackHole diferente da do master), o volume
+// abaixo do máximo, o equalizador, o Sound Check ou o crossfade para as tirar
+// de lá — e o resultado ouve-se bem, só não é o master. Medido em 2026-10: a
+// 48 kHz com um master de 44,1, 92 % das amostras fora; com a frequência certa,
+// nenhuma.
+//
+// Por isso janelas de um segundo de som (os silêncios digitais não contam: zero
+// está em todas as grelhas), e um aviso, uma vez por gravação, se mais de
+// metade das amostras de uma janela estiver fora da grelha de 24 bits. A rampa
+// de entrada que o Música aplica ao começar a tocar (uns 20 ms fora da grelha)
+// fica muito abaixo disso. As janelas continuam até ao fim, para apanhar também
+// o que mude a meio.
+
+- (void)vigiarGrelha:(const float *)par tramas:(UInt32)tramas {
+    ZPVigiaGrelha *g = &_grelha;
+    if (g->avisado) return;
+
+    for (UInt32 i = 0; i < tramas; ++i) {
+        float e = par[2*i], d = par[2*i+1];
+        if (e == 0.0f && d == 0.0f) continue;
+        g->tramas++;
+        for (int c = 0; c < 2; ++c) {
+            float x = c ? d : e;
+            float x16 = x * 32768.0f, x24 = x * 8388608.0f;   // exactos: potências de 2
+            g->amostras++;
+            if (x16 != rintf(x16)) g->fora16++;
+            if (x24 != rintf(x24)) g->fora24++;
+        }
+    }
+    if (g->tramas > 0 && !self.gravouSom) self.gravouSom = YES;
+    if (g->tramas < (unsigned long long)self.recordSampleRate) return;
+
+    double fracao24 = (double)g->fora24 / g->amostras;
+    if (fracao24 > 0.5) {
+        g->avisado = YES;
+        NSLog(@"[Audio Capture] Gravação fora da grelha: %.0f %% das amostras fora dos degraus de 24 bits, a %.0f Hz.",
+              100.0 * fracao24, self.recordSampleRate);
+        ZPAvisar(NSLocalizedString(@"rec_off_grid_title", @"A gravação não é bit-exacta"),
+                 [NSString stringWithFormat:NSLocalizedString(@"rec_off_grid_text", @"O som está a ser recalculado (%.1f kHz)"),
+                  self.recordSampleRate / 1000.0]);
+    } else if (!g->registado) {
+        g->registado = YES;
+        int bits = g->fora16 * 100 < g->amostras ? 16 : 24;
+        NSLog(@"[Audio Capture] Gravação bit-exacta: %d bits, %.0f Hz.", bits, self.recordSampleRate);
+    }
+    g->tramas = g->amostras = g->fora16 = g->fora24 = 0;
+}
+
 #pragma mark - Audio Capture Management
 
 - (void)startAudioCapture {
@@ -967,6 +1152,8 @@ static OSStatus ZPIOProcMusica(AudioObjectID dispositivo, const AudioTimeStamp *
                 return;
             }
             strongSelf.recordDataBytes += floatData.length;
+            [strongSelf vigiarGrelha:floatData.bytes
+                              tramas:(UInt32)(floatData.length / (2 * sizeof(float)))];
         });
     }];
 

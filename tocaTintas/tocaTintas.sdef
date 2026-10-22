@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+<!--
+  Dicionário AppleScript do tocaTintas. Os comandos fazem o mesmo que os botões
+  da janela; quem os executa é o ZPComandoAppleScript, e as propriedades lêem-se
+  e escrevem-se no ViewController (ver «AppleScript» no ViewController.m).
+  Os códigos de quatro letras levam maiúsculas: os só de minúsculas são da Apple.
+-->
+<dictionary title="tocaTintas" xmlns:xi="http://www.w3.org/2001/XInclude">
+
+    <xi:include href="file:///System/Library/ScriptingDefinitions/CocoaStandard.sdef"
+                xpointer="xpointer(/dictionary/suite)"/>
+
+    <suite name="tocaTintas Suite" code="TtnS" description="Playback and recording in tocaTintas.">
+
+        <enumeration name="player states" code="TtPS">
+            <enumerator name="stopped" code="TtSs" description="Nothing is playing."/>
+            <enumerator name="playing" code="TtSp" description="A track is playing."/>
+            <enumerator name="paused"  code="TtSa" description="A track is paused."/>
+        </enumeration>
+
+        <command name="play" code="TtnSPlay" description="Play the selected track, or resume it if paused (the ▶️ button).">
+            <cocoa class="ZPComandoAppleScript"/>
+        </command>
+        <command name="pause" code="TtnSPaus" description="Pause playback. Does nothing if already paused.">
+            <cocoa class="ZPComandoAppleScript"/>
+        </command>
+        <command name="playpause" code="TtnSPlPs" description="Pause if playing, otherwise play.">
+            <cocoa class="ZPComandoAppleScript"/>
+        </command>
+        <command name="stop" code="TtnSStop" description="Stop playback (the ⏹️ button).">
+            <cocoa class="ZPComandoAppleScript"/>
+        </command>
+        <command name="next track" code="TtnSNext" description="Skip to the next track (the ⏭️ button).">
+            <cocoa class="ZPComandoAppleScript"/>
+        </command>
+        <command name="previous track" code="TtnSPrev" description="Go back to the previous track (the ⏮️ button).">
+            <cocoa class="ZPComandoAppleScript"/>
+        </command>
+        <command name="start recording" code="TtnSRecS" description="Start recording (the ⏺️ button). Does nothing if already recording.">
+            <cocoa class="ZPComandoAppleScript"/>
+        </command>
+        <command name="stop recording" code="TtnSRecE" description="Stop recording. Does nothing if not recording.">
+            <cocoa class="ZPComandoAppleScript"/>
+        </command>
+
+        <class-extension extends="application" description="tocaTintas’s playback state.">
+            <property name="player state" code="TtPs" type="player states" access="r"
+                      description="Whether a track is playing, paused or stopped.">
+                <cocoa key="scriptPlayerState"/>
+            </property>
+            <property name="player position" code="TtPp" type="real" access="r"
+                      description="Seconds into the current track (0 if none).">
+                <cocoa key="scriptPlayerPosition"/>
+            </property>
+            <property name="current duration" code="TtDu" type="real" access="r"
+                      description="Length of the current track, in seconds (0 if none).">
+                <cocoa key="scriptCurrentDuration"/>
+            </property>
+            <property name="current title" code="TtTn" type="text" access="r"
+                      description="Title of the current track, as shown in the window.">
+                <cocoa key="scriptCurrentTitle"/>
+            </property>
+            <property name="current artist" code="TtTa" type="text" access="r"
+                      description="Artist of the current track, as shown in the window.">
+                <cocoa key="scriptCurrentArtist"/>
+            </property>
+            <property name="current album" code="TtTb" type="text" access="r"
+                      description="Album of the current track, as shown in the window.">
+                <cocoa key="scriptCurrentAlbum"/>
+            </property>
+            <property name="current path" code="TtTf" type="text" access="r"
+                      description="POSIX path of the current track’s file (empty if none).">
+                <cocoa key="scriptCurrentPath"/>
+            </property>
+            <property name="shuffle enabled" code="TtSh" type="boolean"
+                      description="Shuffle (the 🔀 button).">
+                <cocoa key="scriptShuffleEnabled"/>
+            </property>
+            <property name="repeat enabled" code="TtRp" type="boolean"
+                      description="Repeat the current track when it ends (the 🔁 button).">
+                <cocoa key="scriptRepeatEnabled"/>
+            </property>
+            <property name="recording" code="TtRc" type="boolean"
+                      description="Whether tocaTintas is recording (the ⏺️ button).">
+                <cocoa key="scriptRecording"/>
+            </property>
+        </class-extension>
+
+    </suite>
+</dictionary>

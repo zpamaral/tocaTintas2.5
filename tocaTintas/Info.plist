@@ -2,9 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>This app asks Music for the sample rate of the track it plays, so that recordings are bit-exact, and pauses and restarts it when the rate has to change.</string>
+	<key>NSAppleScriptEnabled</key>
+	<true/>
 	<key>NSAudioCaptureUsageDescription</key>
 	<string>This app records the Music app’s audio when you choose it as the recording source.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>This app reads your AirPods’ head motion to warn you when head tracking is being recorded.</string>
+	<key>OSAScriptingDefinition</key>
+	<string>tocaTintas.sdef</string>
 </dict>
 </plist>

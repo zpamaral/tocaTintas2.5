@@ -27,6 +27,24 @@ BOOL ZPBindEngineInputToLoopback(AVAudioEngine *engine);
 /// volume, que é aplicado antes de tudo o resto.
 AudioDeviceID ZPLoopbackAudioDevice(void);
 
+/// A frequência nominal do BlackHole, em Hz, ou 0 se não houver BlackHole.
+double ZPLoopbackSampleRate(void);
+
+/// Põe o BlackHole a esta frequência e espera, até um segundo, que a mudança
+/// pegue. Devolve NO se o dispositivo não a aceitar. Quem a chama tem de parar
+/// antes a ponte do bs2b: o CamillaDSP força o BlackHole para a frequência da
+/// sua configuração, e desfazia a mudança.
+BOOL ZPSetLoopbackSampleRate(double frequencia);
+
+/// A frequência da faixa que o Música está a tocar (a do master, no Apple
+/// Music), ou 0 se o Música não estiver aberto, não tiver faixa, ou não deixar
+/// perguntar. Nunca abre o Música.
+double ZPMusicCurrentTrackSampleRate(void);
+
+/// Manda um comando AppleScript ao Música («pause», «play», «set player
+/// position to 0»…), se estiver aberto. Devolve NO se não estiver ou se falhar.
+BOOL ZPMusicCommand(NSString *comando);
+
 /// Publicada no thread principal quando a gravação tem algo a dizer a quem a
 /// pediu: userInfo[@"titulo"] e userInfo[@"texto"], já traduzidos.
 extern NSString * const kZPAudioCaptureWarningNotification;
@@ -43,6 +61,14 @@ extern NSString * const kZPAudioCaptureWarningNotification;
 // kZPAudioCaptureWarningNotification.
 - (BOOL)startCapturingAudio;
 - (void)stopCapturingAudio;
+
+// Pára e apaga o ficheiro, em vez de o fechar: para recomeçar a gravação
+// quando a frequência do BlackHole tem de mudar antes de haver música nela.
+- (void)abandonCapturingAudio;
+
+// Já entrou no ficheiro alguma amostra diferente de zero. Até lá, o que há é
+// o silêncio de antes de o Música tocar, e recomeçar não perde nada.
+@property (atomic, readonly) BOOL gravouSom;
 
 @end
 

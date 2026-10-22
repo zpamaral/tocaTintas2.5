@@ -65,6 +65,12 @@ SOFTWARE.
 
 static NSString * const kBS2BHeadphonesNameSubstring = @"Auscultadores externos";
 
+// A frequência que o BlackHole tinha antes de uma gravação a ter mudado. Fica
+// nas preferências enquanto a gravação dura, para que a reposição aconteça
+// também depois de a app ir abaixo: no arranque seguinte, se ainda lá estiver,
+// é reposta e apagada.
+static NSString * const kZPFrequenciaAReporKey = @"ZPLoopbackSampleRateToRestore";
+
 #pragma mark - Salto automático de silêncios longos (constantes e utilitários)
 
 // Só saltamos silêncios com mais do que esta duração
@@ -366,6 +372,10 @@ static WavpackStreamReader memoryReader = {
 
 @property (strong, nonatomic) ZPAudioCapture *audioCapture;
 @property (assign, nonatomic) BOOL isRecording;
+// Enquanto se grava pelo BlackHole: o observador das mudanças de faixa do
+// Música, que acerta a frequência do BlackHole pela do master (ver
+// -acertarFrequenciaPeloMusica).
+@property (strong, nonatomic) id observadorDoMusica;
 
 // AirPlay-related properties
 @property (strong) NSButton *airPlayButton;
@@ -1538,6 +1548,9 @@ CoreAudioPlaybackState playbackState;
                                              selector:@selector(avisoDaGravacao:)
                                                  name:kZPAudioCaptureWarningNotification
                                                object:nil];
+    // Uma gravação que mudou a frequência do BlackHole e não chegou ao fim (a
+    // app foi abaixo, ou o Xcode parou-a): repõe-se agora.
+    [self reporFrequenciaDoLoopbackRelancandoAPonte:YES];
 
     self.isStreaming = NO; // Initialize as not streaming
 }
@@ -2079,20 +2092,156 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
 - (void)recordAudio {
     if (self.isRecording) {
         // Stop recording
+        [self deixarDeVigiarOMusica];
         [self.audioCapture stopCapturingAudio];
         #ifdef DEBUG
         NSLog(@"[Audio recording] Audio recording stopped.");
         #endif
         self.isRecording = NO;
+        [self reporFrequenciaDoLoopbackRelancandoAPonte:YES];
     } else {
+        // Pelo BlackHole, a frequência acerta-se pela do Música: já agora, se
+        // houver faixa escolhida, e depois a cada faixa que comece a tocar.
+        // Pela captura do Música não há BlackHole nenhum a acertar.
+        BOOL peloLoopback = ![ZPCurrentRecordSource() isEqualToString:@"music"];
+        if (peloLoopback) {
+            [self acertarFrequenciaDoLoopbackPara:ZPMusicCurrentTrackSampleRate()];
+        }
         // Start recording. Se não arrancar, o porquê chega pelo aviso da
         // captura, e o botão fica apagado.
         self.isRecording = [self.audioCapture startCapturingAudio];
         #ifdef DEBUG
         NSLog(@"[Audio recording] Audio recording %@.", self.isRecording ? @"started" : @"did not start");
         #endif
+        if (self.isRecording && peloLoopback) {
+            [self comecarAVigiarOMusica];
+        } else if (!self.isRecording) {
+            [self reporFrequenciaDoLoopbackRelancandoAPonte:YES];
+        }
     }
     [self updateRecordButtonAppearance:self.isRecording];
+}
+
+#pragma mark - Frequência do BlackHole durante a gravação
+
+// Para a gravação ser bit-exacta, o BlackHole tem de estar à frequência do
+// master: se não estiver, o Música reamostra antes de lá pôr o som, e o que
+// fica gravado ouve-se bem mas já não é o master. A preferência de streaming
+// do Música só diz o máximo que ele aceita («até 24 bits/48 kHz»); a
+// frequência real de cada álbum só ele a sabe, e diz-a por AppleScript.
+//
+// Muda-se só para gravar. No fim volta a que estava, que é a que serve aos CDs
+// e ao resto do Mac.
+
+// Põe o BlackHole a esta frequência, se for outra, guardando a anterior.
+// Devolve YES se a mudou.
+- (BOOL)acertarFrequenciaDoLoopbackPara:(double)frequencia {
+    double actual = ZPLoopbackSampleRate();
+    if (frequencia <= 0.0 || actual <= 0.0 || frequencia == actual) {
+        return NO;
+    }
+
+    // A ponte primeiro: o CamillaDSP força o BlackHole para a frequência da sua
+    // configuração, e desfazia a mudança. Relançada a seguir, o bs2b_bridge lê
+    // a frequência nova e escreve-a na configuração.
+    [self stopBs2bIfRunning];
+    BOOL mudou = ZPSetLoopbackSampleRate(frequencia);
+    if (mudou) {
+        // Só a primeira: numa segunda mudança na mesma gravação, a frequência
+        // a repor continua a ser a de antes de tudo.
+        NSUserDefaults *preferencias = [NSUserDefaults standardUserDefaults];
+        if ([preferencias doubleForKey:kZPFrequenciaAReporKey] <= 0.0) {
+            [preferencias setDouble:actual forKey:kZPFrequenciaAReporKey];
+        }
+        NSLog(@"[Audio recording] BlackHole de %.0f para %.0f Hz, a frequência do Música.", actual, frequencia);
+    } else {
+        NSAlert *alerta = [[NSAlert alloc] init];
+        alerta.messageText = NSLocalizedString(@"rec_rate_failed_title", @"Não foi possível mudar a frequência do BlackHole");
+        alerta.informativeText = [NSString stringWithFormat:
+            NSLocalizedString(@"rec_rate_failed_text", @"O Música toca a %.1f kHz; o BlackHole ficou a %.1f kHz"),
+            frequencia / 1000.0, actual / 1000.0];
+        [alerta addButtonWithTitle:NSLocalizedString(@"rec_warning_ok", @"Fechar o aviso da gravação")];
+        if (self.view.window && !self.view.window.attachedSheet) {
+            [alerta beginSheetModalForWindow:self.view.window completionHandler:nil];
+        }
+    }
+    [self applyBs2bConfiguration];
+    return mudou;
+}
+
+// Volta a pôr a frequência que o BlackHole tinha antes da gravação, se uma
+// gravação a mudou. No fecho da app a ponte não se relança: está a ser parada.
+- (void)reporFrequenciaDoLoopbackRelancandoAPonte:(BOOL)relancar {
+    NSUserDefaults *preferencias = [NSUserDefaults standardUserDefaults];
+    double anterior = [preferencias doubleForKey:kZPFrequenciaAReporKey];
+    if (anterior <= 0.0) {
+        return;
+    }
+    [preferencias removeObjectForKey:kZPFrequenciaAReporKey];
+    if (anterior == ZPLoopbackSampleRate()) {
+        return;
+    }
+    [self stopBs2bIfRunning];
+    if (ZPSetLoopbackSampleRate(anterior)) {
+        NSLog(@"[Audio recording] BlackHole reposto a %.0f Hz.", anterior);
+    }
+    if (relancar) {
+        [self applyBs2bConfiguration];
+    }
+}
+
+// O Música publica uma notificação distribuída sempre que começa a tocar,
+// pára ou muda de faixa. É por ela que se sabe a frequência de uma faixa que só
+// começou a tocar depois de se carregar em gravar — o caso normal.
+- (void)comecarAVigiarOMusica {
+    [self deixarDeVigiarOMusica];
+    __weak typeof(self) fraco = self;
+    self.observadorDoMusica = [[NSDistributedNotificationCenter defaultCenter]
+        addObserverForName:@"com.apple.Music.playerInfo"
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:^(NSNotification *nota) {
+        if (![nota.userInfo[@"Player State"] isEqualToString:@"Playing"]) return;
+        [fraco acertarFrequenciaPeloMusica];
+    }];
+}
+
+- (void)deixarDeVigiarOMusica {
+    if (self.observadorDoMusica) {
+        [[NSDistributedNotificationCenter defaultCenter] removeObserver:self.observadorDoMusica];
+        self.observadorDoMusica = nil;
+    }
+}
+
+// O Música começou a tocar uma faixa. Se a frequência dela não é a do
+// BlackHole e ainda não entrou som na gravação, recomeça-se tudo à frequência
+// certa: o Música em pausa e de volta ao início da faixa, o BlackHole mudado,
+// a gravação recomeçada num ficheiro limpo, e o Música outra vez a tocar. Não
+// se perde nada — o que havia no ficheiro era o silêncio de antes. Com som já
+// gravado (um álbum com faixas a frequências diferentes) não se pode mudar a
+// meio, porque um WAV só tem uma frequência: o vigia da grelha avisa.
+- (void)acertarFrequenciaPeloMusica {
+    if (!self.isRecording) return;
+    double doMusica = ZPMusicCurrentTrackSampleRate();
+    if (doMusica <= 0.0 || doMusica == ZPLoopbackSampleRate()) return;
+    if (self.audioCapture.gravouSom) {
+        NSLog(@"[Audio recording] A faixa nova está a %.0f Hz e a gravação já tem som a %.0f Hz; fica como está.",
+              doMusica, ZPLoopbackSampleRate());
+        return;
+    }
+
+    ZPMusicCommand(@"pause");
+    ZPMusicCommand(@"set player position to 0");
+    [self.audioCapture abandonCapturingAudio];
+    [self acertarFrequenciaDoLoopbackPara:doMusica];
+    self.isRecording = [self.audioCapture startCapturingAudio];
+    [self updateRecordButtonAppearance:self.isRecording];
+    if (self.isRecording) {
+        ZPMusicCommand(@"play");
+    } else {
+        [self deixarDeVigiarOMusica];
+        [self reporFrequenciaDoLoopbackRelancandoAPonte:YES];
+    }
 }
 
 - (void)startCava {
@@ -10221,12 +10370,114 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
+    // Uma gravação a decorrer fecha-se como se se tivesse carregado no botão:
+    // o ficheiro fica com cabeçalho, e o BlackHole volta à frequência de antes.
+    if (self.isRecording) {
+        [self deixarDeVigiarOMusica];
+        [self.audioCapture stopCapturingAudio];
+        self.isRecording = NO;
+    }
+    [self reporFrequenciaDoLoopbackRelancandoAPonte:NO];
     [self stopCava];
     [self stopBs2bIfRunning];
     [self teardownBs2bHeadphoneMonitoring];
     [self stopBs2bHeadphoneAutoStart];
     [self saveTrackPlayCounts];
     [self.airPlayManager stopDiscovery];
+}
+
+#pragma mark - AppleScript
+
+// O dicionário está no tocaTintas.sdef. Os comandos chegam pelo
+// ZPComandoAppleScript (no fim deste ficheiro) e fazem exactamente o que os
+// botões fazem, pelos mesmos métodos; as propriedades da aplicação lêem-se e
+// escrevem-se aqui, porque o ViewController é o delegado da NSApplication.
+// Tudo corre no thread principal, como os cliques.
+
+static NSSet<NSString *> *ZPChavesAppleScript(void) {
+    static NSSet<NSString *> *chaves;
+    static dispatch_once_t uma;
+    dispatch_once(&uma, ^{
+        chaves = [NSSet setWithArray:@[ @"scriptPlayerState", @"scriptPlayerPosition", @"scriptCurrentDuration",
+                                        @"scriptCurrentTitle", @"scriptCurrentArtist", @"scriptCurrentAlbum",
+                                        @"scriptCurrentPath", @"scriptShuffleEnabled", @"scriptRepeatEnabled",
+                                        @"scriptRecording" ]];
+    });
+    return chaves;
+}
+
+- (BOOL)application:(NSApplication *)sender delegateHandlesKey:(NSString *)key {
+    return [ZPChavesAppleScript() containsObject:key];
+}
+
+// Os códigos são os da enumeração «player states» do dicionário.
+- (FourCharCode)scriptPlayerState {
+    if (playbackState.isPlaying || self.audioPlayer.isPlaying) return 'TtSp';
+    if (self.isPlaybackPaused) return 'TtSa';
+    return 'TtSs';
+}
+
+// Em pausa, os motores de AudioQueue não dão relógio: a posição volta a 0
+// até a reprodução retomar. É o mesmo limite que a barra de progresso tem.
+- (double)scriptPlayerPosition {
+    double agora = 0.0, duracao = 0.0;
+    return [self currentPlaybackTime:&agora duration:&duracao] ? agora : 0.0;
+}
+
+- (double)scriptCurrentDuration {
+    double agora = 0.0, duracao = 0.0;
+    return [self currentPlaybackTime:&agora duration:&duracao] ? duracao : 0.0;
+}
+
+- (NSString *)scriptCurrentTitle  { return self.titleLabel.stringValue ?: @""; }
+- (NSString *)scriptCurrentArtist { return self.artistLabel.stringValue ?: @""; }
+- (NSString *)scriptCurrentAlbum  { return self.albumLabel.stringValue ?: @""; }
+
+- (NSString *)scriptCurrentPath {
+    return ([self scriptPlayerState] != 'TtSs' && self.currentTrackURL.isFileURL) ? self.currentTrackURL.path : @"";
+}
+
+// Os três interruptores mudam-se pelos botões, para o aspecto deles
+// acompanhar; e só quando o valor pedido é outro, porque cada botão alterna.
+- (BOOL)scriptShuffleEnabled { return self.isShuffleModeActive; }
+- (void)setScriptShuffleEnabled:(BOOL)ligado {
+    if (ligado != self.isShuffleModeActive) [self shuffleTracks];
+}
+
+- (BOOL)scriptRepeatEnabled { return self.isRepeatModeActive; }
+- (void)setScriptRepeatEnabled:(BOOL)ligado {
+    if (ligado != self.isRepeatModeActive) [self repeatTracks];
+}
+
+- (BOOL)scriptRecording { return self.isRecording; }
+- (void)setScriptRecording:(BOOL)ligado {
+    if (ligado != self.isRecording) [self recordAudio];
+}
+
+// Os nomes são os dos comandos no dicionário.
+- (void)executarComandoAppleScript:(NSString *)nome {
+    FourCharCode estado = [self scriptPlayerState];
+    if ([nome isEqualToString:@"play"]) {
+        [self playButtonPressed];
+    } else if ([nome isEqualToString:@"pause"]) {
+        // O ⏸️ alterna: em pausa retomaria. O comando só pausa.
+        if (estado == 'TtSp') [self pauseAudio];
+    } else if ([nome isEqualToString:@"playpause"]) {
+        if (estado == 'TtSp') [self pauseAudio];
+        else [self playButtonPressed];
+    } else if ([nome isEqualToString:@"stop"]) {
+        [self stopButtonPressed];
+    } else if ([nome isEqualToString:@"next track"]) {
+        [self forwardTrack];
+    } else if ([nome isEqualToString:@"previous track"]) {
+        [self backwardTrack];
+    } else if ([nome isEqualToString:@"start recording"]) {
+        [self setScriptRecording:YES];
+    } else if ([nome isEqualToString:@"stop recording"]) {
+        [self setScriptRecording:NO];
+    } else {
+        NSLog(@"[AppleScript] Comando desconhecido: %@", nome);
+    }
 }
 
 #pragma mark - Faixa adiantada em memória
@@ -10842,3 +11093,24 @@ static ZPReplayGainLido ZPLerReplayGain(NSURL *url, NSData *dados) {
 @end
 
 
+
+#pragma mark - Comandos AppleScript
+
+// A classe que o tocaTintas.sdef dá a todos os comandos. Não faz nada sozinha:
+// entrega o nome do comando ao ViewController, que o executa como um clique.
+@interface ZPComandoAppleScript : NSScriptCommand
+@end
+
+@implementation ZPComandoAppleScript
+
+- (id)performDefaultImplementation {
+    ViewController *controlador = (ViewController *)NSApp.delegate;
+    if (![controlador isKindOfClass:[ViewController class]]) {
+        self.scriptErrorNumber = errAEEventNotHandled;
+        return nil;
+    }
+    [controlador executarComandoAppleScript:self.commandDescription.commandName];
+    return nil;
+}
+
+@end
