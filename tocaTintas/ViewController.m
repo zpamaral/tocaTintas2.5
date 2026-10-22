@@ -10617,7 +10617,8 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
             self.coverArtView.image = capa;
         } else {
             self.coverArtView.image = [NSImage imageNamed:@"placeholder"];
-            [self procurarCapaDoMusicaNoCatalogo:m[@"artista"] album:m[@"album"] faixa:chave];
+            [self procurarCapaDoMusicaNoCatalogo:m[@"artista"] album:m[@"album"]
+                                        titulo:m[@"titulo"] faixa:chave];
         }
     }
 
@@ -10654,33 +10655,50 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
 // Há faixas em streaming — sobretudo as da reprodução automática, que não vêm
 // de um álbum aberto — de que o Música não dá capa nenhuma: «count of
 // artworks» é 0, por mais que se espere (visto em 2026-10, num Trifonov). Vai-se
-// então buscá-la ao catálogo da Apple pela pesquisa pública do iTunes, pelo
-// artista e pelo álbum, a 600 px. Chega mais tarde: só se põe se a faixa à
-// vista ainda for a mesma.
-- (void)procurarCapaDoMusicaNoCatalogo:(NSString *)artista album:(NSString *)album faixa:(NSString *)chave {
+// então buscá-la ao catálogo da Apple pela pesquisa pública do iTunes, na loja
+// do país do Mac (é dela que o Música tira os nomes), a 600 px: primeiro o
+// álbum pelo artista e pelo nome; se nenhum tiver exactamente esse nome, a
+// faixa pelo artista e pelo título, e dela o álbum com esse nome. Sem
+// correspondência exacta fica a imagem genérica: uma capa de outro disco
+// engana mais do que nenhuma. Chega mais tarde: só se põe se a faixa à vista
+// ainda for a mesma.
+- (void)procurarCapaDoMusicaNoCatalogo:(NSString *)artista album:(NSString *)album
+                                titulo:(NSString *)titulo faixa:(NSString *)chave {
     if (album.length == 0) return;
     // O artista do Música é muitas vezes uma lista («Sumi Jo, Suyoen Kim &
     // …»): o primeiro nome basta para a pesquisa.
     NSString *primeiro = [[artista componentsSeparatedByCharactersInSet:
                            [NSCharacterSet characterSetWithCharactersInString:@",&"]].firstObject
                           stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet] ?: @"";
-    NSURLComponents *c = [NSURLComponents componentsWithString:@"https://itunes.apple.com/search"];
-    c.queryItems = @[ [NSURLQueryItem queryItemWithName:@"term" value:[NSString stringWithFormat:@"%@ %@", primeiro, album]],
-                      [NSURLQueryItem queryItemWithName:@"entity" value:@"album"],
-                      [NSURLQueryItem queryItemWithName:@"limit" value:@"5"] ];
-    __weak typeof(self) fraco = self;
-    [[[NSURLSession sharedSession] dataTaskWithURL:c.URL completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
-        if (!d) return;
-        NSArray *res = [NSJSONSerialization JSONObjectWithData:d options:0 error:NULL][@"results"];
-        if (![res isKindOfClass:[NSArray class]] || res.count == 0) return;
-        // O que tiver exactamente o mesmo nome de álbum; senão, o primeiro.
-        NSDictionary *escolhido = res.firstObject;
+    NSString *pais = [NSLocale.currentLocale objectForKey:NSLocaleCountryCode] ?: @"US";
+
+    NSString *(^capaExacta)(NSString *, NSString *, NSString *) = ^NSString *(NSString *termo, NSString *entidade, NSString *limite) {
+        NSURLComponents *c = [NSURLComponents componentsWithString:@"https://itunes.apple.com/search"];
+        c.queryItems = @[ [NSURLQueryItem queryItemWithName:@"term" value:termo],
+                          [NSURLQueryItem queryItemWithName:@"entity" value:entidade],
+                          [NSURLQueryItem queryItemWithName:@"country" value:pais],
+                          [NSURLQueryItem queryItemWithName:@"limit" value:limite] ];
+        NSData *d = [NSData dataWithContentsOfURL:c.URL];
+        NSArray *res = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:NULL][@"results"] : nil;
+        if (![res isKindOfClass:[NSArray class]]) return nil;
         for (NSDictionary *a in res) {
-            if ([a[@"collectionName"] caseInsensitiveCompare:album] == NSOrderedSame) { escolhido = a; break; }
+            if ([a isKindOfClass:[NSDictionary class]] && [a[@"collectionName"] isKindOfClass:[NSString class]]
+                && [a[@"collectionName"] caseInsensitiveCompare:album] == NSOrderedSame
+                && [a[@"artworkUrl100"] isKindOfClass:[NSString class]]) {
+                return a[@"artworkUrl100"];
+            }
         }
-        NSString *url = [escolhido[@"artworkUrl100"] stringByReplacingOccurrencesOfString:@"100x100bb"
-                                                                               withString:@"600x600bb"];
+        return nil;
+    };
+
+    __weak typeof(self) fraco = self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSString *url = capaExacta([NSString stringWithFormat:@"%@ %@", primeiro, album], @"album", @"10");
+        if (!url && titulo.length > 0) {
+            url = capaExacta([NSString stringWithFormat:@"%@ %@", primeiro, titulo], @"song", @"50");
+        }
         if (!url) return;
+        url = [url stringByReplacingOccurrencesOfString:@"100x100bb" withString:@"600x600bb"];
         NSData *img = [NSData dataWithContentsOfURL:[NSURL URLWithString:url]];
         NSImage *capa = img ? [[NSImage alloc] initWithData:img] : nil;
         if (capa.size.width <= 0) return;
@@ -10690,7 +10708,7 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
                 forte.coverArtView.image = capa;
             }
         });
-    }] resume];
+    });
 }
 
 // Não apaga o que está à vista: quem vier a seguir (o tocaTintas a tocar, ou o
