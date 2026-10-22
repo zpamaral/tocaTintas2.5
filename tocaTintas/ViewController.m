@@ -7948,8 +7948,10 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
         NSLog(@"Checking displayName: %@, Cleaned displayName: %@", displayName, cleanedDisplayName);
         #endif
 
-        // Check if the input string matches the prefix of the cleaned display name
-        if ([cleanedDisplayName hasPrefix:lowercaseInput]) {
+        // Check if the input string matches the prefix of the cleaned display name.
+        // O nome à vista já vem sem o número da faixa, e o que sobra pode começar
+        // por um número que é do título («12 Études…»): também se compara com ele.
+        if ([cleanedDisplayName hasPrefix:lowercaseInput] || [lowercaseDisplayName hasPrefix:lowercaseInput]) {
             #ifdef DEBUG
             NSLog(@"Found match: %@", displayName);
             #endif
