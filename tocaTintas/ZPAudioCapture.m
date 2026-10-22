@@ -316,12 +316,22 @@ typedef struct {
 // Estado do vigia da grelha (ver -vigiarGrelha:tramas:). Só na ioQueue.
 typedef struct {
     unsigned long long tramas;    // tramas com som na janela em curso
-    unsigned long long amostras;  // as amostras dessas tramas
-    unsigned long long fora16;    // fora dos degraus de 16 bits
-    unsigned long long fora24;    // fora dos degraus de 24 bits
+    unsigned long long fora16;    // dessas, as que têm amostras fora dos degraus de 16 bits
+    unsigned long long fora24;    // …e de 24 bits, sem contar as rampas (ver abaixo)
+    unsigned long long desdeSilencio;   // tramas com som desde o último silêncio digital
+    unsigned long long sequenciaFora;   // tramas seguidas fora da grelha de 24 bits
+    ZPEstadoDaGrelha estado;
     BOOL registado;               // a primeira janela boa já foi para o registo
     BOOL avisado;
 } ZPVigiaGrelha;
+
+// As rampas que o Música aplica ao arrancar e ao saltar de faixa duram uns
+// 25 ms (1200 tramas a 48 kHz), e encostam sempre a silêncio digital: a de
+// entrada depois dele, a de saída antes. Até 50 ms de um lado ou do outro do
+// silêncio não contam.
+static const unsigned long long kZPTramasDeRampa = 2400;
+
+NSString * const kZPAudioCaptureGridStateNotification = @"ZPAudioCaptureGridState";
 
 @implementation ZPAudioCapture {
     ZPVigiaCabeca _vigia;    // só na ioQueue
@@ -949,45 +959,85 @@ static OSStatus ZPIOProcMusica(AudioObjectID dispositivo, const AudioTimeStamp *
 // nenhuma.
 //
 // Por isso janelas de um segundo de som (os silêncios digitais não contam: zero
-// está em todas as grelhas), e um aviso, uma vez por gravação, se mais de
-// metade das amostras de uma janela estiver fora da grelha de 24 bits. A rampa
-// de entrada que o Música aplica ao começar a tocar (uns 20 ms fora da grelha)
-// fica muito abaixo disso. As janelas continuam até ao fim, para apanhar também
-// o que mude a meio.
+// está em todas as grelhas), e o estado da gravação a cada uma, que o botão ⏺
+// mostra pela cor:
+//
+//   bit-exacta              nada fora da grelha até agora           vermelho
+//   houve falhas            algumas tramas fora, ou esteve mal       amarelo
+//                           e já não está
+//   mal                     mais de metade da janela fora            laranja
+//
+// O amarelo não volta a vermelho: quer dizer que há um pedaço do ficheiro que
+// não é o master, e isso não se desfaz. A primeira vez que fica laranja há
+// também um aviso, que diz porquê. As rampas do Música junto ao silêncio
+// (kZPTramasDeRampa) não contam: davam amarelo em todas as gravações.
+
+static void ZPPublicarEstadoDaGrelha(ZPEstadoDaGrelha estado) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[NSNotificationCenter defaultCenter] postNotificationName:kZPAudioCaptureGridStateNotification
+                                                            object:nil
+                                                          userInfo:@{ @"estado": @(estado) }];
+    });
+}
 
 - (void)vigiarGrelha:(const float *)par tramas:(UInt32)tramas {
     ZPVigiaGrelha *g = &_grelha;
-    if (g->avisado) return;
+    BOOL haSom = NO;
 
     for (UInt32 i = 0; i < tramas; ++i) {
         float e = par[2*i], d = par[2*i+1];
-        if (e == 0.0f && d == 0.0f) continue;
+        if (e == 0.0f && d == 0.0f) {
+            // Uma sequência curta fora da grelha mesmo antes do silêncio é a
+            // rampa de saída: descontam-se as tramas que já tinham contado.
+            if (g->sequenciaFora > 0 && g->sequenciaFora <= kZPTramasDeRampa) {
+                g->fora24 -= MIN(g->fora24, g->sequenciaFora);
+            }
+            g->sequenciaFora = 0;
+            g->desdeSilencio = 0;
+            continue;
+        }
+        haSom = YES;
         g->tramas++;
-        for (int c = 0; c < 2; ++c) {
-            float x = c ? d : e;
-            float x16 = x * 32768.0f, x24 = x * 8388608.0f;   // exactos: potências de 2
-            g->amostras++;
-            if (x16 != rintf(x16)) g->fora16++;
-            if (x24 != rintf(x24)) g->fora24++;
+        g->desdeSilencio++;
+        // Multiplicar por potências de 2 é exacto em float.
+        float e16 = e * 32768.0f, d16 = d * 32768.0f, e24 = e * 8388608.0f, d24 = d * 8388608.0f;
+        if (e16 != rintf(e16) || d16 != rintf(d16)) g->fora16++;
+        if (e24 != rintf(e24) || d24 != rintf(d24)) {
+            g->sequenciaFora++;
+            // A rampa de entrada, logo a seguir ao silêncio, não conta.
+            if (g->desdeSilencio > kZPTramasDeRampa) g->fora24++;
+        } else {
+            g->sequenciaFora = 0;
         }
     }
-    if (g->tramas > 0 && !self.gravouSom) self.gravouSom = YES;
+    if (haSom && !self.gravouSom) self.gravouSom = YES;
     if (g->tramas < (unsigned long long)self.recordSampleRate) return;
 
-    double fracao24 = (double)g->fora24 / g->amostras;
+    double fracao24 = (double)g->fora24 / g->tramas;
+    ZPEstadoDaGrelha novo = g->estado;
     if (fracao24 > 0.5) {
+        novo = ZPEstadoDaGrelhaMal;
+    } else if (g->fora24 > 0 || g->estado == ZPEstadoDaGrelhaMal) {
+        novo = ZPEstadoDaGrelhaHouveFalhas;
+    }
+
+    if (novo == ZPEstadoDaGrelhaMal && !g->avisado) {
         g->avisado = YES;
-        NSLog(@"[Audio Capture] Gravação fora da grelha: %.0f %% das amostras fora dos degraus de 24 bits, a %.0f Hz.",
+        NSLog(@"[Audio Capture] Gravação fora da grelha: %.0f %% das tramas fora dos degraus de 24 bits, a %.0f Hz.",
               100.0 * fracao24, self.recordSampleRate);
         ZPAvisar(NSLocalizedString(@"rec_off_grid_title", @"A gravação não é bit-exacta"),
                  [NSString stringWithFormat:NSLocalizedString(@"rec_off_grid_text", @"O som está a ser recalculado (%.1f kHz)"),
                   self.recordSampleRate / 1000.0]);
-    } else if (!g->registado) {
+    } else if (novo == ZPEstadoDaGrelhaBitExacta && !g->registado) {
         g->registado = YES;
-        int bits = g->fora16 * 100 < g->amostras ? 16 : 24;
+        int bits = g->fora16 * 100 < g->tramas ? 16 : 24;
         NSLog(@"[Audio Capture] Gravação bit-exacta: %d bits, %.0f Hz.", bits, self.recordSampleRate);
     }
-    g->tramas = g->amostras = g->fora16 = g->fora24 = 0;
+    if (novo != g->estado) {
+        g->estado = novo;
+        ZPPublicarEstadoDaGrelha(novo);
+    }
+    g->tramas = g->fora16 = g->fora24 = 0;
 }
 
 #pragma mark - Audio Capture Management

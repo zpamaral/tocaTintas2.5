@@ -49,6 +49,19 @@ BOOL ZPMusicCommand(NSString *comando);
 /// pediu: userInfo[@"titulo"] e userInfo[@"texto"], já traduzidos.
 extern NSString * const kZPAudioCaptureWarningNotification;
 
+/// O estado da grelha da gravação em curso (ver -vigiarGrelha:tramas:). Só
+/// para as gravações pelo BlackHole.
+typedef NS_ENUM(NSInteger, ZPEstadoDaGrelha) {
+    ZPEstadoDaGrelhaBitExacta = 0,    // nada fora da grelha até agora
+    ZPEstadoDaGrelhaHouveFalhas = 1,  // algumas tramas fora, ou esteve mal e já não está
+    ZPEstadoDaGrelhaMal = 2,          // mais de metade da última janela fora
+};
+
+/// Publicada no thread principal quando o estado da grelha muda:
+/// userInfo[@"estado"] é um ZPEstadoDaGrelha. Uma gravação nova começa sempre
+/// em ZPEstadoDaGrelhaBitExacta, sem notificação.
+extern NSString * const kZPAudioCaptureGridStateNotification;
+
 @interface ZPAudioCapture : NSObject
 
 // Grava para um WAV de vírgula flutuante de 32 bits em

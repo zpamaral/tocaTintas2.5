@@ -376,6 +376,8 @@ static WavpackStreamReader memoryReader = {
 // Música, que acerta a frequência do BlackHole pela do master (ver
 // -acertarFrequenciaPeloMusica).
 @property (strong, nonatomic) id observadorDoMusica;
+// O estado da grelha da gravação em curso, que dá a cor ao ⏺.
+@property (assign, nonatomic) ZPEstadoDaGrelha estadoDaGrelha;
 
 // AirPlay-related properties
 @property (strong) NSButton *airPlayButton;
@@ -1548,6 +1550,10 @@ CoreAudioPlaybackState playbackState;
                                              selector:@selector(avisoDaGravacao:)
                                                  name:kZPAudioCaptureWarningNotification
                                                object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(estadoDaGrelhaMudou:)
+                                                 name:kZPAudioCaptureGridStateNotification
+                                               object:nil];
     // Uma gravação que mudou a frequência do BlackHole e não chegou ao fim (a
     // app foi abaixo, ou o Xcode parou-a): repõe-se agora.
     [self reporFrequenciaDoLoopbackRelancandoAPonte:YES];
@@ -2109,6 +2115,7 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
         }
         // Start recording. Se não arrancar, o porquê chega pelo aviso da
         // captura, e o botão fica apagado.
+        self.estadoDaGrelha = ZPEstadoDaGrelhaBitExacta;
         self.isRecording = [self.audioCapture startCapturingAudio];
         #ifdef DEBUG
         NSLog(@"[Audio recording] Audio recording %@.", self.isRecording ? @"started" : @"did not start");
@@ -2215,11 +2222,18 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
 
 // O Música começou a tocar uma faixa. Se a frequência dela não é a do
 // BlackHole e ainda não entrou som na gravação, recomeça-se tudo à frequência
-// certa: o Música em pausa e de volta ao início da faixa, o BlackHole mudado,
-// a gravação recomeçada num ficheiro limpo, e o Música outra vez a tocar. Não
-// se perde nada — o que havia no ficheiro era o silêncio de antes. Com som já
-// gravado (um álbum com faixas a frequências diferentes) não se pode mudar a
-// meio, porque um WAV só tem uma frequência: o vigia da grelha avisa.
+// certa: o BlackHole mudado, a gravação recomeçada num ficheiro limpo, e a
+// faixa de volta ao início. Não se perde nada — o que havia no ficheiro era o
+// silêncio de antes; o Música leva uns segundos a ter som depois de anunciar
+// que toca. Com som já gravado (um álbum com faixas a frequências diferentes)
+// não se pode mudar a meio, porque um WAV só tem uma frequência: o vigia da
+// grelha avisa.
+//
+// Sem pausa, e de propósito. Retomar de uma pausa faz o Música subir o volume
+// em rampa durante uns 7 s, e essa rampa ficava gravada no princípio da faixa:
+// fora da grelha e atenuada (medido em 2026-10, na Callas de 1954). Recomeçar a
+// faixa com ela a tocar só dá a descida de 25 ms do que estava a soar, que cai
+// no silêncio e no ficheiro abandonado.
 - (void)acertarFrequenciaPeloMusica {
     if (!self.isRecording) return;
     double doMusica = ZPMusicCurrentTrackSampleRate();
@@ -2230,14 +2244,13 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
         return;
     }
 
-    ZPMusicCommand(@"pause");
-    ZPMusicCommand(@"set player position to 0");
     [self.audioCapture abandonCapturingAudio];
     [self acertarFrequenciaDoLoopbackPara:doMusica];
+    self.estadoDaGrelha = ZPEstadoDaGrelhaBitExacta;
     self.isRecording = [self.audioCapture startCapturingAudio];
     [self updateRecordButtonAppearance:self.isRecording];
     if (self.isRecording) {
-        ZPMusicCommand(@"play");
+        ZPMusicCommand(@"set player position to 0");
     } else {
         [self deixarDeVigiarOMusica];
         [self reporFrequenciaDoLoopbackRelancandoAPonte:YES];
@@ -8347,8 +8360,24 @@ static const NSTimeInterval kCavaEsperaAteApagar = 0.2;
 }
 
 // Add visual feedback for when recording is active
+// A gravar, a cor diz como vai a grelha (ver -vigiarGrelha:tramas: no
+// ZPAudioCapture): vermelho bit-exacta, amarelo houve amostras fora, laranja
+// está mal agora. Mesmo que o aviso tenha passado despercebido, o botão fica.
 - (void)updateRecordButtonAppearance:(BOOL)isActive {
-    ZPPintaBotaoDeTransporte(self.recordButton, isActive ? [NSColor systemRedColor] : nil);
+    NSColor *cor = nil;
+    if (isActive) {
+        switch (self.estadoDaGrelha) {
+            case ZPEstadoDaGrelhaMal:         cor = [NSColor systemOrangeColor]; break;
+            case ZPEstadoDaGrelhaHouveFalhas: cor = [NSColor systemYellowColor]; break;
+            default:                          cor = [NSColor systemRedColor];    break;
+        }
+    }
+    ZPPintaBotaoDeTransporte(self.recordButton, cor);
+}
+
+- (void)estadoDaGrelhaMudou:(NSNotification *)nota {
+    self.estadoDaGrelha = [nota.userInfo[@"estado"] integerValue];
+    [self updateRecordButtonAppearance:self.isRecording];
 }
 
 - (void)repeatTracks {
