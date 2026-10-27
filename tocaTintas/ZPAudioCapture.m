@@ -201,13 +201,19 @@ BOOL ZPSetLoopbackSampleRate(double frequencia) {
 // autorização para o tocaTintas controlar o Música (NSAppleEventsUsageDescription
 // e a autorização de automação); se for recusada, a resposta é um erro e
 // grava-se como dantes, sem mudanças de frequência.
-static NSAppleEventDescriptor *ZPDizerAoMusica(NSString *comando) {
+//
+// Com prazo (em segundos, 0 para o de omissão, de uns dois minutos), um Música
+// encravado não segura o thread principal mais do que isso.
+static NSAppleEventDescriptor *ZPDizerAoMusica(NSString *comando, int prazo) {
     // «tell application» abriria o Música se estivesse fechado: só se fala com
     // um Música que já esteja a correr.
     if ([NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.apple.Music"].count == 0) {
         return nil;
     }
     NSString *fonte = [NSString stringWithFormat:@"tell application id \"com.apple.Music\" to %@", comando];
+    if (prazo > 0) {
+        fonte = [NSString stringWithFormat:@"with timeout of %d seconds\n  %@\nend timeout", prazo, fonte];
+    }
     NSDictionary *erro = nil;
     NSAppleEventDescriptor *resposta = [[[NSAppleScript alloc] initWithSource:fonte] executeAndReturnError:&erro];
     if (!resposta) {
@@ -218,11 +224,11 @@ static NSAppleEventDescriptor *ZPDizerAoMusica(NSString *comando) {
 }
 
 double ZPMusicCurrentTrackSampleRate(void) {
-    return (double)[ZPDizerAoMusica(@"get sample rate of current track") int32Value];
+    return (double)[ZPDizerAoMusica(@"get sample rate of current track", 0) int32Value];
 }
 
 BOOL ZPMusicCommand(NSString *comando) {
-    return ZPDizerAoMusica(comando) != nil;
+    return ZPDizerAoMusica(comando, 2) != nil;
 }
 
 // Pedido a cada faixa nova e de cinco em cinco segundos: compila-se uma vez e
@@ -268,7 +274,7 @@ NSDictionary *ZPMusicNowPlaying(void) {
 
 NSData *ZPMusicCurrentArtworkData(void) {
     // Com faixas em streaming também há capa: o Música vai buscá-la ao catálogo.
-    return [ZPDizerAoMusica(@"get raw data of artwork 1 of current track") data];
+    return [ZPDizerAoMusica(@"get raw data of artwork 1 of current track", 0) data];
 }
 
 BOOL ZPBindEngineInputToLoopback(AVAudioEngine *engine) {

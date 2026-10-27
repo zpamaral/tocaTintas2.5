@@ -7500,7 +7500,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     self.backwardButton = [[NSButton alloc] initWithFrame:NSMakeRect(startX, buttonYPosition, buttonWidth, buttonHeight)];
     ZPPreparaBotaoDeTransporte(self.backwardButton, @"⏮️");
     self.backwardButton.target = self;
-    self.backwardButton.action = @selector(backwardTrack);
+    self.backwardButton.action = @selector(botaoDeTransporte:);
     [self.view addSubview:self.backwardButton];
 
     // ▶️
@@ -7508,7 +7508,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     self.playButton = [[NSButton alloc] initWithFrame:NSMakeRect(startX, buttonYPosition, buttonWidth, buttonHeight)];
     ZPPreparaBotaoDeTransporte(self.playButton, @"▶️");
     self.playButton.target = self;
-    self.playButton.action = @selector(playButtonPressed);
+    self.playButton.action = @selector(botaoDeTransporte:);
     [self.view addSubview:self.playButton];
 
     // ⏸️
@@ -7516,7 +7516,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     self.pauseButton = [[NSButton alloc] initWithFrame:NSMakeRect(startX, buttonYPosition, buttonWidth, buttonHeight)];
     ZPPreparaBotaoDeTransporte(self.pauseButton, @"⏸️");
     self.pauseButton.target = self;
-    self.pauseButton.action = @selector(pauseAudio);
+    self.pauseButton.action = @selector(botaoDeTransporte:);
     [self.view addSubview:self.pauseButton];
 
     // ⏹️
@@ -7524,7 +7524,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     self.stopButton = [[NSButton alloc] initWithFrame:NSMakeRect(startX, buttonYPosition, buttonWidth, buttonHeight)];
     ZPPreparaBotaoDeTransporte(self.stopButton, @"⏹️");
     self.stopButton.target = self;
-    self.stopButton.action = @selector(stopButtonPressed);
+    self.stopButton.action = @selector(botaoDeTransporte:);
     [self.view addSubview:self.stopButton];
 
     // ⏭️
@@ -7532,7 +7532,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     self.forwardButton = [[NSButton alloc] initWithFrame:NSMakeRect(startX, buttonYPosition, buttonWidth, buttonHeight)];
     ZPPreparaBotaoDeTransporte(self.forwardButton, @"⏭️");
     self.forwardButton.target = self;
-    self.forwardButton.action = @selector(forwardTrack);
+    self.forwardButton.action = @selector(botaoDeTransporte:);
     [self.view addSubview:self.forwardButton];
 
     // 🔁
@@ -10589,6 +10589,38 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
 // de um segundo, corrigido de cinco em cinco segundos pela posição verdadeira
 // (salta-se para a frente, pára-se no meio). As audições do Música não contam
 // para a base da fonoteca: não são ficheiros dela.
+
+// Os botões de transporte controlam quem está à vista: com o Música na janela
+// (o título com ♫), vão para ele; de resto, para o tocaTintas, como sempre.
+// Para tocar uma faixa do tocaTintas com o Música à vista, escolhe-se na lista,
+// ou pára-se o Música com ⏹️, que devolve a janela. O ⏸️ alterna, como no
+// tocaTintas; o ⏮️ vai sempre à faixa anterior, também como no tocaTintas, e não
+// ao início da faixa, como o do Música. A janela acompanha pelo aviso que o
+// Música publica a cada mudança.
+//
+// É acção só dos botões: os comandos AppleScript do tocaTintas chamam os
+// métodos de baixo directamente e continuam a ser dele.
+- (void)botaoDeTransporte:(NSButton *)botao {
+    if (self.aMostrarOMusica) {
+        NSString *comando = botao == self.playButton     ? @"play"
+                          : botao == self.pauseButton    ? @"playpause"
+                          : botao == self.stopButton     ? @"stop"
+                          : botao == self.forwardButton  ? @"next track"
+                          : botao == self.backwardButton ? @"previous track"
+                          : nil;
+        // Se o Música não responder, não se passa ao tocaTintas: tocar de
+        // repente outra coisa surpreendia mais do que um clique sem efeito.
+        if (comando && !ZPMusicCommand(comando)) {
+            NSLog(@"[Música na janela] O Música não aceitou «%@».", comando);
+        }
+        return;
+    }
+    if (botao == self.playButton)          [self playButtonPressed];
+    else if (botao == self.pauseButton)    [self pauseAudio];
+    else if (botao == self.stopButton)     [self stopButtonPressed];
+    else if (botao == self.forwardButton)  [self forwardTrack];
+    else if (botao == self.backwardButton) [self backwardTrack];
+}
 
 - (void)comecarAMostrarOMusica {
     if (self.observadorDoMusicaNaJanela) return;

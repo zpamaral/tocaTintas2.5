@@ -42,7 +42,8 @@ BOOL ZPSetLoopbackSampleRate(double frequencia);
 double ZPMusicCurrentTrackSampleRate(void);
 
 /// Manda um comando AppleScript ao Música («pause», «play», «set player
-/// position to 0»…), se estiver aberto. Devolve NO se não estiver ou se falhar.
+/// position to 0»…), se estiver aberto. Devolve NO se não estiver ou se falhar,
+/// incluindo não responder em dois segundos.
 BOOL ZPMusicCommand(NSString *comando);
 
 /// O que o Música está a tocar: @"estado" («playing», «paused», «stopped») e,
