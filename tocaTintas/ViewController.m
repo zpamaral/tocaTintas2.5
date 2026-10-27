@@ -416,6 +416,7 @@ static WavpackStreamReader memoryReader = {
 @property (strong, nonatomic) NSDate *musicaQuando;
 @property (copy, nonatomic) NSString *musicaFaixaMostrada;
 @property (assign, nonatomic) NSUInteger musicaTiques;
+@property (assign, nonatomic) NSUInteger musicaFalhas;
 
 // AirPlay-related properties
 @property (strong) NSButton *airPlayButton;
@@ -6754,6 +6755,16 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
                 #endif
                 // Optionally, you can stop playback here if you don't want to repeat the playlist automatically.
                 //[self stopAudio];  // Stop the audio if playlist is completed
+
+                // Acabou a lista: a janela fica livre para o Música, se ele
+                // tocar. Sem isto só passava para ele na faixa seguinte do
+                // Música. O -stopAudio de cima fica comentado: chega-se aqui
+                // quando o descodificador acaba, com os últimos buffers ainda
+                // na fila, e ele cortava o fim do álbum. Vem do thread da
+                // AudioQueue.
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [self actualizarOMusicaNaJanela];
+                });
             }
         }
     }
@@ -10598,6 +10609,16 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
         return;
     }
     NSDictionary *m = ZPMusicNowPlaying();
+    // Sem resposta não é parado: fica o que está à vista, a barra segue pelo
+    // relógio local, e volta-se a perguntar daqui a cinco segundos. Só à
+    // terceira falha seguida se desiste — até ao próximo aviso do Música.
+    // Antes, uma falha só bastava para a janela largar o Música até à faixa
+    // seguinte, que numa obra longa podia ser muito tempo.
+    if (!m && self.aMostrarOMusica && ++self.musicaFalhas < 3) {
+        self.musicaTiques = 0;
+        return;
+    }
+    self.musicaFalhas = 0;
     if (!m || [m[@"estado"] isEqualToString:@"stopped"] || !m[@"titulo"]) {
         if (self.aMostrarOMusica) {
             [self.progressBar setDoubleValue:0.0];
@@ -10723,6 +10744,7 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     self.relogioDoMusica = nil;
     self.aMostrarOMusica = NO;
     self.musicaFaixaMostrada = nil;
+    self.musicaFalhas = 0;
 }
 
 #pragma mark - AppleScript

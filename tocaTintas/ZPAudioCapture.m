@@ -227,23 +227,34 @@ BOOL ZPMusicCommand(NSString *comando) {
 
 // Pedido a cada faixa nova e de cinco em cinco segundos: compila-se uma vez e
 // guarda-se. Tudo no thread principal (o NSAppleScript não é para mais nenhum).
+//
+// Fechado e sem resposta são coisas diferentes: fechado é «stopped», e a janela
+// deixa de o mostrar; sem resposta é nil, e a janela tenta outra vez. O prazo de
+// dois segundos é porque o pedido bloqueia o thread principal, e o de omissão
+// dos Apple Events é de uns dois minutos: um Música encravado congelava o
+// tocaTintas.
 NSDictionary *ZPMusicNowPlaying(void) {
     if ([NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.apple.Music"].count == 0) {
-        return nil;
+        return @{ @"estado": @"stopped" };
     }
     static NSAppleScript *pergunta;
     if (!pergunta) {
         pergunta = [[NSAppleScript alloc] initWithSource:
-            @"tell application id \"com.apple.Music\"\n"
-             "  set e to player state as string\n"
-             "  if e is \"stopped\" then return {e}\n"
-             "  set t to current track\n"
-             "  return {e, player position, name of t, artist of t, album of t, duration of t, track number of t}\n"
-             "end tell"];
+            @"with timeout of 2 seconds\n"
+             "  tell application id \"com.apple.Music\"\n"
+             "    set e to player state as string\n"
+             "    if e is \"stopped\" then return {e}\n"
+             "    set t to current track\n"
+             "    return {e, player position, name of t, artist of t, album of t, duration of t, track number of t}\n"
+             "  end tell\n"
+             "end timeout"];
     }
     NSDictionary *erro = nil;
     NSAppleEventDescriptor *r = [pergunta executeAndReturnError:&erro];
-    if (!r || r.numberOfItems < 1) return nil;
+    if (!r || r.numberOfItems < 1) {
+        NSLog(@"[Música na janela] O Música não respondeu: %@", erro[NSAppleScriptErrorMessage] ?: erro);
+        return nil;
+    }
     NSString *estado = [r descriptorAtIndex:1].stringValue ?: @"stopped";
     if (r.numberOfItems < 7) return @{ @"estado": estado };
     return @{ @"estado":  estado,
