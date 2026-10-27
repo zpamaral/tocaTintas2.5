@@ -2158,7 +2158,10 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
         // Start recording. Se não arrancar, o porquê chega pelo aviso da
         // captura, e o botão fica apagado.
         self.estadoDaGrelha = ZPEstadoDaGrelhaBitExacta;
-        self.albumDaGravacao = nil;
+        // O álbum da faixa que o Música já tiver, a tocar ou em pausa: não há
+        // aviso nenhum para ela, porque não mudou.
+        NSDictionary *doMusica = peloLoopback ? ZPMusicNowPlaying() : nil;
+        self.albumDaGravacao = [doMusica[@"album"] length] ? doMusica[@"album"] : nil;
         self.isRecording = [self.audioCapture startCapturingAudio];
         #ifdef DEBUG
         NSLog(@"[Audio recording] Audio recording %@.", self.isRecording ? @"started" : @"did not start");
@@ -2316,7 +2319,12 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
 - (BOOL)terminouOAlbumDaGravacao:(NSDictionary *)info {
     NSString *estado = info[@"Player State"];
     NSString *album = info[@"Album"];
-    if (!self.audioCapture.gravouSom) {
+    // Sem álbum ainda, o primeiro que tocar serve, mesmo com som já gravado. Com
+    // o ⏸️ do tocaTintas a pôr o Música a tocar (2026-10, num Respighi), o som
+    // chegava à captura antes de o aviso «Playing» chegar ao thread principal,
+    // ocupado à espera da resposta do Música: o álbum ficava por saber, e a
+    // gravação não parava no fim dele.
+    if (!self.audioCapture.gravouSom || !self.albumDaGravacao) {
         if ([estado isEqualToString:@"Playing"] && album.length) self.albumDaGravacao = album;
         return NO;
     }
