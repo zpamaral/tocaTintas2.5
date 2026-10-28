@@ -407,6 +407,12 @@ static WavpackStreamReader memoryReader = {
 // Música, que acerta a frequência do BlackHole pela do master (ver
 // -acertarFrequenciaPeloMusica).
 @property (strong, nonatomic) id observadorDoMusica;
+// As perguntas repetidas pela frequência (ver -acertarFrequenciaPeloMusica:):
+// a geração cancela as de uma faixa anterior; a faixa da gravação e se ela
+// ainda é a primeira dizem se o som já gravado se pode deitar fora.
+@property (assign, nonatomic) NSUInteger geracaoDaFrequencia;
+@property (copy, nonatomic) NSString *faixaDaGravacao;
+@property (assign, nonatomic) BOOL aindaNaPrimeiraFaixa;
 // O estado da grelha da gravação em curso, que dá a cor ao ⏺.
 @property (assign, nonatomic) ZPEstadoDaGrelha estadoDaGrelha;
 // O álbum que se está a gravar, para parar no fim dele (ver
@@ -2158,9 +2164,16 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
         // houver faixa escolhida, e depois a cada faixa que comece a tocar.
         // Pela captura do Música não há BlackHole nenhum a acertar.
         BOOL peloLoopback = ![ZPCurrentRecordSource() isEqualToString:@"music"];
+        // O Música pode ainda não saber a frequência (responde «missing value»
+        // durante uns segundos depois de uma faixa começar, visto em 2026-10 na
+        // Carmen a 48 kHz): então grava-se já, e as perguntas repetidas acertam
+        // o BlackHole e recomeçam a faixa quando ele a disser.
+        double frequenciaDoMusica = peloLoopback ? ZPMusicCurrentTrackSampleRate() : 0.0;
         if (peloLoopback) {
-            [self acertarFrequenciaDoLoopbackPara:ZPMusicCurrentTrackSampleRate()];
+            [self acertarFrequenciaDoLoopbackPara:frequenciaDoMusica];
         }
+        self.faixaDaGravacao = nil;
+        self.aindaNaPrimeiraFaixa = YES;
         // Start recording. Se não arrancar, o porquê chega pelo aviso da
         // captura, e o botão fica apagado.
         self.estadoDaGrelha = ZPEstadoDaGrelhaBitExacta;
@@ -2174,6 +2187,7 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
         #endif
         if (self.isRecording && peloLoopback) {
             [self comecarAVigiarOMusica];
+            if (frequenciaDoMusica <= 0.0) [self acertarFrequenciaPeloMusica];
         } else if (!self.isRecording) {
             [self reporFrequenciaDoLoopbackRelancandoAPonte:YES];
         }
@@ -2196,7 +2210,15 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
 // Devolve YES se a mudou.
 - (BOOL)acertarFrequenciaDoLoopbackPara:(double)frequencia {
     double actual = ZPLoopbackSampleRate();
-    if (frequencia <= 0.0 || actual <= 0.0 || frequencia == actual) {
+    // As desistências também ficam no registo: sem elas, uma gravação à
+    // frequência errada (laranja) não deixava rasto nenhum do porquê.
+    if (frequencia <= 0.0 || actual <= 0.0) {
+        ZPRegistarFrequencia([NSString stringWithFormat:@"gravar: não acertei (Música %.0f Hz, BlackHole %.0f Hz; 0 = não consegui ler)",
+                              frequencia, actual]);
+        return NO;
+    }
+    if (frequencia == actual) {
+        ZPRegistarFrequencia([NSString stringWithFormat:@"gravar: já a %.0f Hz (a do Música)", actual]);
         return NO;
     }
 
@@ -2308,7 +2330,17 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
         if (!forte || !forte.isRecording) return;
         NSString *estado = nota.userInfo[@"Player State"];
         if ([forte terminouOAlbumDaGravacao:nota.userInfo]) return;
-        if ([estado isEqualToString:@"Playing"]) [forte acertarFrequenciaPeloMusica];
+        if ([estado isEqualToString:@"Playing"]) {
+            // Outra faixa, com som já no ficheiro: a primeira ficou gravada e
+            // daqui em diante não se recomeça nada.
+            NSString *faixa = [nota.userInfo[@"PersistentID"] description] ?: nota.userInfo[@"Name"];
+            if (faixa && forte.faixaDaGravacao && ![faixa isEqualToString:forte.faixaDaGravacao]
+                && forte.audioCapture.gravouSom) {
+                forte.aindaNaPrimeiraFaixa = NO;
+            }
+            if (faixa) forte.faixaDaGravacao = faixa;
+            [forte acertarFrequenciaPeloMusica];
+        }
     }];
 }
 
@@ -2389,11 +2421,38 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
 // fora da grelha e atenuada (medido em 2026-10, na Callas de 1954). Recomeçar a
 // faixa com ela a tocar só dá a descida de 25 ms do que estava a soar, que cai
 // no silêncio e no ficheiro abandonado.
+//
+// Logo depois de uma faixa começar, o Música pode responder «missing value» à
+// frequência: pergunta-se outra vez de meio em meio segundo, até 10 s. Se o som
+// chegar ao ficheiro antes da resposta, e for ainda só o da primeira faixa,
+// deita-se fora na mesma — a faixa recomeça do zero.
+static const NSUInteger ZPTentativasDaFrequencia = 20;   // × 0,5 s
+
 - (void)acertarFrequenciaPeloMusica {
-    if (!self.isRecording) return;
+    self.geracaoDaFrequencia += 1;
+    [self acertarFrequenciaPeloMusicaTentativas:ZPTentativasDaFrequencia geracao:self.geracaoDaFrequencia];
+}
+
+- (void)acertarFrequenciaPeloMusicaTentativas:(NSUInteger)tentativas geracao:(NSUInteger)geracao {
+    if (!self.isRecording || geracao != self.geracaoDaFrequencia) return;
     double doMusica = ZPMusicCurrentTrackSampleRate();
-    if (doMusica <= 0.0 || doMusica == ZPLoopbackSampleRate()) return;
-    if (self.audioCapture.gravouSom) {
+    if (doMusica <= 0.0) {
+        if (tentativas > 1) {
+            __weak typeof(self) fraco = self;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [fraco acertarFrequenciaPeloMusicaTentativas:tentativas - 1 geracao:geracao];
+            });
+        } else {
+            ZPRegistarFrequencia(@"gravar: o Música não disse a frequência em 10 s; fica a do BlackHole");
+        }
+        return;
+    }
+    if (tentativas < ZPTentativasDaFrequencia) {
+        ZPRegistarFrequencia([NSString stringWithFormat:@"gravar: o Música disse %.0f Hz à %lu.ª pergunta",
+                              doMusica, (unsigned long)(ZPTentativasDaFrequencia - tentativas + 1)]);
+    }
+    if (doMusica == ZPLoopbackSampleRate()) return;
+    if (self.audioCapture.gravouSom && !self.aindaNaPrimeiraFaixa) {
         NSLog(@"[Audio recording] A faixa nova está a %.0f Hz e a gravação já tem som a %.0f Hz; fica como está.",
               doMusica, ZPLoopbackSampleRate());
         ZPRegistarFrequencia([NSString stringWithFormat:@"gravar: faixa nova a %.0f Hz com som já gravado a %.0f Hz; fica",

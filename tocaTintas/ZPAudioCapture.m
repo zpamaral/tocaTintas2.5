@@ -224,7 +224,15 @@ static NSAppleEventDescriptor *ZPDizerAoMusica(NSString *comando, int prazo) {
 }
 
 double ZPMusicCurrentTrackSampleRate(void) {
-    return (double)[ZPDizerAoMusica(@"get sample rate of current track", 0) int32Value];
+    NSAppleEventDescriptor *resposta = ZPDizerAoMusica(@"get sample rate of current track", 0);
+    // Uma resposta sem erro mas sem número (missing value, por exemplo) dava 0
+    // sem deixar rasto: diz-se o que veio.
+    if (resposta && resposta.int32Value <= 0) {
+        FourCharCode t = resposta.descriptorType;
+        NSLog(@"[Audio Capture] O Música respondeu à frequência sem número: tipo '%c%c%c%c', «%@».",
+              (char)(t >> 24), (char)(t >> 16), (char)(t >> 8), (char)t, resposta.stringValue);
+    }
+    return (double)resposta.int32Value;
 }
 
 BOOL ZPMusicCommand(NSString *comando) {
