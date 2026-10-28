@@ -367,6 +367,12 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, assign) BOOL audioLibraryNeedsReload;
 @property (nonatomic, assign) BOOL hasCompletedInitialScan;
 @property (nonatomic, assign) NSUInteger pendingReloadGeneration;
+// Registo na fonoteca (fonoteca.py registar) das pastas que o FSEvents viu mudar
+// — ver «Registo na fonoteca». Tudo na thread principal.
+@property (nonatomic, strong) NSMutableSet<NSString *> *caminhosPorRegistar;
+@property (nonatomic, assign) NSUInteger geracaoDoRegisto;
+@property (nonatomic, strong) NSTask *registoTask;
+- (void)agendarRegistoNaFonoteca:(NSSet<NSString *> *)caminhos tudo:(BOOL)tudo;   // chamado do callback do FSEvents
 @property (nonatomic, assign) BOOL isPlaylistModeActive; // Indicates if an M3U8 playlist is loaded
 
 @property (nonatomic, strong) NSArray<NSURL *> *audioFiles;
@@ -4279,8 +4285,10 @@ static NSDictionary *ZPExtraDaFaixaParaFonoteca(NSDictionary *disco, NSInteger n
 // FONOTECA_ID que o verificar_md5IV.sh ainda não viu), fica uma linha só com o
 // id, que o fonoteca.py completa quando o vir. caminho é o do ficheiro tocado
 // (nil num CD): liga a audição à cópia que tocou, se a base a conhecer por esse
-// caminho (absoluto e em NFC, como o fonoteca.py o guarda); fora da fonoteca, ou
-// ainda por verificar, fica NULL.
+// caminho (absoluto e em NFC, como o fonoteca.py o guarda). Se não conhecer —
+// a pasta mudou de nome e o registo ainda não passou, por exemplo — e a música
+// tiver um só ficheiro, é esse: o que identifica é o UUID, não o caminho. Fora
+// da fonoteca, ou ainda por registar, fica NULL, e o fonoteca.py liga-a depois.
 - (BOOL)registarAudicaoNaFonoteca:(NSString *)uuid doCD:(BOOL)doCD cddb:(nullable NSString *)cddb
                           caminho:(nullable NSString *)caminho {
     NSString *caminhoNFC = caminho.stringByStandardizingPath.precomposedStringWithCanonicalMapping;
@@ -4294,7 +4302,10 @@ static NSDictionary *ZPExtraDaFaixaParaFonoteca(NSDictionary *disco, NSInteger n
                                     " VALUES (?1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), ?2,"
                                     " (SELECT fc.disco FROM faixas_cd fc JOIN discos d ON d.id = fc.disco"
                                     "  WHERE fc.musica = ?1 AND d.cddb = ?3 ORDER BY fc.disco LIMIT 1),"
-                                    " (SELECT f.id FROM ficheiros f WHERE f.caminho = ?4 AND f.musica = ?1))",
+                                    " CASE WHEN ?2 = 'ficheiro' THEN COALESCE("
+                                    "  (SELECT f.id FROM ficheiros f WHERE f.caminho = ?4 AND f.musica = ?1),"
+                                    "  (SELECT CASE WHEN COUNT(*) = 1 THEN MIN(f.id) END FROM ficheiros f"
+                                    "   WHERE f.musica = ?1 AND f.caminho IS NOT NULL)) END)",
                                 @[uuid, doCD ? @"cd" : @"ficheiro", cddb ?: [NSNull null],
                                   caminhoNFC ?: [NSNull null]]);
         ZPFonotecaExecutar(db, ok ? "COMMIT" : "ROLLBACK", nil);
@@ -8829,30 +8840,41 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
                                                       kFSEventStreamEventFlagItemRemoved |
                                                       kFSEventStreamEventFlagItemRenamed;
 
+    // Percorrem-se todos os eventos, mesmo depois de se saber que a lista mudou:
+    // os caminhos vão também para o registo na fonoteca. Aí contam ainda os
+    // ficheiros de áudio só modificados (um rip ou um corte a meio de escrever,
+    // etiquetas novas), que não mexem na lista mas adiam o registo até assentarem.
     BOOL affectsLibrary = NO;
+    BOOL registarTudo = NO;
+    NSMutableSet<NSString *> *caminhos = [NSMutableSet set];
     for (size_t i = 0; i < numEvents; i++) {
         FSEventStreamEventFlags flags = eventFlags[i];
+        NSString *path = (i < paths.count) ? paths[i] : nil;
 
         if (flags & mustReloadFlags) {
             affectsLibrary = YES;
-            break;
-        }
-        if (!(flags & listChangingFlags)) {
+            registarTudo = YES;
             continue;
         }
 
-        if (flags & kFSEventStreamEventFlagItemIsDir) {
-            // Uma pasta de artista, álbum ou CD apareceu, desapareceu ou mudou de nome.
-            affectsLibrary = YES;
-            break;
-        }
-        if (flags & kFSEventStreamEventFlagItemIsFile) {
-            NSString *path = (i < paths.count) ? paths[i] : nil;
-            if (path && [audioExtensions containsObject:path.pathExtension.lowercaseString]) {
+        BOOL ehAudio = (flags & kFSEventStreamEventFlagItemIsFile) && path &&
+                       [audioExtensions containsObject:path.pathExtension.lowercaseString];
+        if (flags & listChangingFlags) {
+            if (flags & kFSEventStreamEventFlagItemIsDir) {
+                // Uma pasta de artista, álbum ou CD apareceu, desapareceu ou mudou de nome.
                 affectsLibrary = YES;
-                break;
+                if (path) [caminhos addObject:path];
+            } else if (ehAudio) {
+                affectsLibrary = YES;
+                [caminhos addObject:path];
             }
+        } else if (ehAudio && (flags & kFSEventStreamEventFlagItemModified)) {
+            [caminhos addObject:path];
         }
+    }
+
+    if (caminhos.count > 0 || registarTudo) {
+        [controller agendarRegistoNaFonoteca:caminhos tudo:registarTudo];
     }
 
     if (!affectsLibrary) {
@@ -8956,6 +8978,173 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
     FSEventStreamRelease(self.directoryEventStream);
     self.directoryEventStream = NULL;
     self.watchedDirectoryPath = nil;
+}
+
+#pragma mark - Registo na fonoteca
+
+// Um álbum novo, ou uma pasta que mudou de nome, entra na base sem esperar
+// pelo verificar_md5IV.sh: o FSEvents dá os caminhos e o «fonoteca.py registar»
+// trata do resto (mudanças de sítio pelo MD5 e pelo FONOTECA_ID, ficheiros
+// novos, os que desapareceram, as audições que ficaram sem ficheiro). Não
+// verifica o áudio — isso continua a ser com o verificar. Fica um processo à
+// parte para haver uma só maneira de mexer no catálogo: a mesma que o verificar
+// usa e que se corre à mão.
+//
+// Espera-se um minuto sem eventos: um rip ou um corte escrevem durante muito
+// tempo, e o registo pode gravar o FONOTECA_ID — nunca num ficheiro a meio.
+// As etiquetas que o registo grava dão eventos de modificação, que agendam um
+// segundo registo; esse já não encontra nada por fazer e não escreve.
+static const NSTimeInterval ZPEsperaDoRegisto = 60.0;
+
+// fonoteca.py e o python que o corre. O caminho do script pode mudar-se com
+// «defaults write <id da app> fonotecaPy <caminho>».
+static NSString *ZPCaminhoDoFonotecaPy(void) {
+    NSString *p = [[NSUserDefaults standardUserDefaults] stringForKey:@"fonotecaPy"];
+    return p.length ? p.stringByExpandingTildeInPath : @"/usr/local/bin/fonoteca.py";   // ao lado do verificar
+}
+static NSString *const ZPPythonDaFonoteca = @"/usr/local/bin/python3.14";
+
+- (void)agendarRegistoNaFonoteca:(NSSet<NSString *> *)caminhos tudo:(BOOL)tudo {
+    NSString *raiz = [self loadSongsDirectoryPath];
+    if (raiz.length == 0) return;
+    if (!self.caminhosPorRegistar) self.caminhosPorRegistar = [NSMutableSet set];
+    if (tudo) [self.caminhosPorRegistar addObject:raiz];
+    [self.caminhosPorRegistar unionSet:caminhos];
+
+    // Como na releitura da lista: cada evento adia, só a última geração corre.
+    self.geracaoDoRegisto += 1;
+    NSUInteger geracao = self.geracaoDoRegisto;
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(ZPEsperaDoRegisto * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        if (geracao != weakSelf.geracaoDoRegisto) return;   // chegaram mais alterações entretanto
+        [weakSelf correrRegistoNaFonoteca];
+    });
+}
+
+// As pastas a passar ao registar: para cada caminho, a pasta mais próxima que
+// ainda exista (um ficheiro dá a sua pasta; uma pasta apagada ou com o nome
+// mudado dá a de cima, onde o registar vê a mudança). Só dentro da raiz, e sem
+// pastas que já estejam dentro de outras da lista.
+static NSArray<NSString *> *ZPPastasParaRegistar(NSSet<NSString *> *caminhos, NSString *raiz) {
+    // Sem -stringByStandardizingPath: esse só tira o «/private» a caminhos que
+    // existem, e um caminho apagado deixava de parecer estar dentro da raiz.
+    NSFileManager *fm = [NSFileManager defaultManager];
+    while (raiz.length > 1 && [raiz hasSuffix:@"/"]) raiz = [raiz substringToIndex:raiz.length - 1];
+    NSString *dentroDaRaiz = [raiz stringByAppendingString:@"/"];
+    NSMutableSet<NSString *> *pastas = [NSMutableSet set];
+    for (NSString *c0 in caminhos) {
+        NSString *c = c0;
+        if (!([c isEqualToString:raiz] || [c hasPrefix:dentroDaRaiz])) continue;
+        BOOL ehPasta = NO;
+        while (c.length > raiz.length && !([fm fileExistsAtPath:c isDirectory:&ehPasta] && ehPasta)) {
+            c = c.stringByDeletingLastPathComponent;
+        }
+        [pastas addObject:c];
+    }
+    NSArray<NSString *> *porTamanho = [pastas.allObjects sortedArrayUsingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        if (a.length != b.length) return a.length < b.length ? NSOrderedAscending : NSOrderedDescending;
+        return [a compare:b];
+    }];
+    NSMutableArray<NSString *> *finais = [NSMutableArray array];
+    for (NSString *p in porTamanho) {
+        BOOL dentro = NO;
+        for (NSString *q in finais) {
+            if ([p isEqualToString:q] || [p hasPrefix:[q stringByAppendingString:@"/"]]) { dentro = YES; break; }
+        }
+        if (!dentro) [finais addObject:p];
+    }
+    return finais;
+}
+
+- (void)correrRegistoNaFonoteca {
+    // Ainda a correr: os caminhos ficam guardados e voltam a ser agendados
+    // quando este acabar.
+    if (self.registoTask) return;
+
+    NSString *raiz = [self loadSongsDirectoryPath];
+    NSSet<NSString *> *caminhos = [self.caminhosPorRegistar copy];
+    [self.caminhosPorRegistar removeAllObjects];
+    if (caminhos.count == 0 || raiz.length == 0) return;
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *script = ZPCaminhoDoFonotecaPy();
+    if (![fm fileExistsAtPath:[raiz stringByAppendingPathComponent:@".fonoteca.sqlite"]] ||
+        ![fm isExecutableFileAtPath:ZPPythonDaFonoteca] || ![fm fileExistsAtPath:script]) {
+        #ifdef DEBUG
+        NSLog(@"[Fonoteca] Sem base, sem python ou sem %@: não há registo.", script);
+        #endif
+        return;
+    }
+    NSArray<NSString *> *pastas = ZPPastasParaRegistar(caminhos, raiz);
+    if (pastas.count == 0) return;
+
+    NSTask *task = [[NSTask alloc] init];
+    task.executableURL = [NSURL fileURLWithPath:ZPPythonDaFonoteca];
+    task.arguments = [@[script, @"registar"] arrayByAddingObjectsFromArray:pastas];
+    task.currentDirectoryURL = [NSURL fileURLWithPath:raiz];
+    NSMutableDictionary<NSString *, NSString *> *ambiente = [[NSProcessInfo processInfo].environment mutableCopy];
+    ambiente[@"FONOTECA_RAIZ"] = raiz;   // a base é a que o tocaTintas usa
+    task.environment = ambiente;
+    task.standardInput = [NSFileHandle fileHandleWithNullDevice];
+
+    // A saída vai para registar.log, ao lado da cache e das contagens.
+    NSString *registo = [[[fm URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject
+                          URLByAppendingPathComponent:@"tocaTintas/registar.log"] path];
+    if (![fm fileExistsAtPath:registo]) [fm createFileAtPath:registo contents:nil attributes:nil];
+    NSFileHandle *log = [NSFileHandle fileHandleForWritingAtPath:registo];
+    [log seekToEndOfFile];
+    NSString *cabecalho = [NSString stringWithFormat:@"\n=== %@ registar %@\n",
+                           [NSISO8601DateFormatter stringFromDate:[NSDate date] timeZone:[NSTimeZone localTimeZone]
+                                                    formatOptions:NSISO8601DateFormatWithInternetDateTime],
+                           [pastas componentsJoinedByString:@" · "]];
+    [log writeData:[cabecalho dataUsingEncoding:NSUTF8StringEncoding]];
+    task.standardOutput = log ?: [NSFileHandle fileHandleWithNullDevice];
+    task.standardError = log ?: [NSFileHandle fileHandleWithNullDevice];
+
+    __weak typeof(self) weakSelf = self;
+    task.terminationHandler = ^(NSTask *acabou) {
+        [log closeFile];
+        int estado = acabou.terminationStatus;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (weakSelf.registoTask == acabou) weakSelf.registoTask = nil;
+            #ifdef DEBUG
+            NSLog(@"[Fonoteca] registar acabou (%d): %@", estado, pastas);
+            #endif
+            // 1: correu, mas houve ficheiros com problemas (ficam no registo);
+            // outro valor: nem chegou a correr como devia.
+            if (estado != 0) [weakSelf avisarProblemaNoRegisto:pastas estado:estado log:registo];
+            // Os .m4a novos trazem o codec (aac/alac) que a lista mostra.
+            [weakSelf carregarCodecsDaFonoteca];
+            if (weakSelf.caminhosPorRegistar.count > 0) {
+                [weakSelf agendarRegistoNaFonoteca:[NSSet set] tudo:NO];
+            }
+        });
+    };
+
+    NSError *erro = nil;
+    if (![task launchAndReturnError:&erro]) {
+        NSLog(@"[Fonoteca] Não consegui correr o registar: %@", erro.localizedDescription);
+        [log closeFile];
+        return;
+    }
+    self.registoTask = task;
+}
+
+// Uma notificação, como no fim de uma gravação: o registo corre sozinho e,
+// sem ela, um problema só se via abrindo o registar.log.
+- (void)avisarProblemaNoRegisto:(NSArray<NSString *> *)pastas estado:(int)estado log:(NSString *)log {
+    UNMutableNotificationContent *conteudo = [[UNMutableNotificationContent alloc] init];
+    conteudo.title = NSLocalizedString(estado == 1 ? @"fonoteca_register_problems_title"
+                                                   : @"fonoteca_register_failed_title",
+                                       @"Registo na fonoteca: problemas / falhou");
+    conteudo.body = [NSString stringWithFormat:NSLocalizedString(@"fonoteca_register_body", @"%@ — ver %@"),
+                     [[pastas valueForKey:@"lastPathComponent"] componentsJoinedByString:@", "],
+                     log.stringByAbbreviatingWithTildeInPath];
+    UNNotificationRequest *pedido = [UNNotificationRequest requestWithIdentifier:@"RegistoNaFonoteca"
+                                                                         content:conteudo
+                                                                         trigger:nil];
+    [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:pedido withCompletionHandler:nil];
 }
 
 // Optimized method to load audio files with correct sorting
