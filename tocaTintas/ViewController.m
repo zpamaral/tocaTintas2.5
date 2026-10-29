@@ -55,6 +55,7 @@ SOFTWARE.
 #import <UserNotifications/UserNotifications.h>
 #import "PreferencesWindowController.h"
 #import "ZPEtiquetaDeslizante.h"   // Etiquetas que deslizam quando o texto não cabe
+#import "ZPBarraDeProgresso.h"   // Barra de progresso que não anima cada mudança de valor
 
 #import "ZPAirPlay.h"
 #import "ZPAudioCapture.h"
@@ -339,7 +340,7 @@ static WavpackStreamReader memoryReader = {
 
 @property (nonatomic, strong) NSButton *shuffleButton;
 
-@property (nonatomic, strong) NSProgressIndicator *progressBar;  // Progress bar
+@property (nonatomic, strong) ZPBarraDeProgresso *progressBar;  // Progress bar
 @property (nonatomic, strong) HistogramView *histogramView;
 
 @property (nonatomic, strong) ZPOpusDecoder *opusDecoder;
@@ -7682,9 +7683,10 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     [self.view addSubview:self.ejectButton];
     [self acertarControlosDoCD];
 
-    // Progress bar
-    self.progressBar = [[NSProgressIndicator alloc] initWithFrame:NSMakeRect(160, 80, windowWidth - 320, 20)];
-    self.progressBar.indeterminate = NO;
+    // Progress bar. Não é um NSProgressIndicator: esse anima cada mudança de
+    // valor, e actualizado de segundo a segundo punha o WindowServer a compor a
+    // janela sem parar — ver ZPBarraDeProgresso.h.
+    self.progressBar = [[ZPBarraDeProgresso alloc] initWithFrame:NSMakeRect(160, 80, windowWidth - 320, 20)];
     self.progressBar.minValue = 0.0;
     self.progressBar.maxValue = 100.0;
     self.progressBar.doubleValue = 0.0;
