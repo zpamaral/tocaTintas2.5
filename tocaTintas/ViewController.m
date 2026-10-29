@@ -59,6 +59,7 @@ SOFTWARE.
 #import "ZPAirPlay.h"
 #import "ZPAudioCapture.h"
 #import "ZPAirPlayStreamer.h"
+#import "ZPLigacoesDoMusicaWindowController.h"
 
 #define NUM_BUFFERS 3  // Three is typically a good number for real-time audio playback
 #define ENABLE_BS2B_BRIDGE 1 // Running bs2b_bridge
@@ -264,7 +265,7 @@ static WavpackStreamReader memoryReader = {
     get_length,
     can_seek
 };
-@interface ViewController () <AVAudioPlayerDelegate>
+@interface ViewController () <AVAudioPlayerDelegate, UNUserNotificationCenterDelegate>
 
 @property (nonatomic, strong) NSTextField *playCountLabel;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *trackPlayCounts;   // chave da música → reproduções
@@ -373,6 +374,10 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, assign) NSUInteger geracaoDoRegisto;
 @property (nonatomic, strong) NSTask *registoTask;
 - (void)agendarRegistoNaFonoteca:(NSSet<NSString *> *)caminhos tudo:(BOOL)tudo;   // chamado do callback do FSEvents
+// As faixas do Música (fonoteca.py sincronizar-musica) — ver «Faixas do Música».
+@property (nonatomic, strong) NSTask *sincronizacaoTask;
+@property (nonatomic, strong) NSTimer *relogioDaSincronizacao;
+@property (nonatomic, strong) ZPLigacoesDoMusicaWindowController *ligacoesDoMusica;
 @property (nonatomic, assign) BOOL isPlaylistModeActive; // Indicates if an M3U8 playlist is loaded
 
 @property (nonatomic, strong) NSArray<NSURL *> *audioFiles;
@@ -3618,6 +3623,9 @@ static const NSUInteger ZPTentativasDaFrequencia = 20;   // × 0,5 s
     [self initializeAirPlaySettings];
     [self startBs2bHeadphoneAutoStart];
     [self setupBs2bHeadphoneMonitoring];
+    // Para o clique no aviso das faixas do Música abrir a janela delas.
+    [UNUserNotificationCenter currentNotificationCenter].delegate = self;
+    [self comecarASincronizarComOMusica];
 }
 
 - (NSString *)localizedVersionStringWithVersion:(NSString *)version {
@@ -4310,15 +4318,16 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
     });
 }
 
-// As reproduções de uma música: as que vieram do contagens.json mais as
-// audições. nil sem base.
+// As reproduções de uma música, pela vista contagens da base: as que vieram do
+// contagens.json, as que o Música tinha quando as suas faixas foram ligadas a
+// ela, e as audições. A vista é a mesma antes e depois do «fonoteca.py migrar».
+// nil sem base.
 - (nullable NSNumber *)contagemNaFonoteca:(NSString *)uuid {
     __block NSNumber *n = nil;
     dispatch_sync(self.filaDaFonoteca, ^{
         if (![self abrirFonoteca]) return;
         n = ZPFonotecaValor(self.fonoteca,
-                            "SELECT COALESCE((SELECT n FROM contagens_importadas WHERE musica = ?1), 0)"
-                            " + (SELECT COUNT(*) FROM audicoes WHERE musica = ?1)", @[uuid]);
+                            "SELECT COALESCE((SELECT n FROM contagens WHERE musica = ?1), 0)", @[uuid]);
     });
     return n;
 }
@@ -5436,6 +5445,18 @@ static NSString *ZPDesescaparXmcd(NSString *s) {
     self.cdMenuItem.target = self;
     if (sair.menu) {
         [sair.menu insertItem:self.cdMenuItem atIndex:[sair.menu indexOfItem:sair]];
+    }
+    // As faixas do Música, logo a seguir: a janela das que esperam por uma
+    // escolha, e o sincronizar à mão (sozinho corre de meia em meia hora).
+    NSMenuItem *ligacoes = [[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"music_links_menu", @"Ligar faixas do Música…")
+                                                      action:@selector(abrirLigacoesDoMusica:) keyEquivalent:@""];
+    NSMenuItem *sincronizar = [[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"music_sync_menu", @"Sincronizar com o Música")
+                                                         action:@selector(sincronizarComOMusicaAgora:) keyEquivalent:@""];
+    ligacoes.target = self;
+    sincronizar.target = self;
+    if (sair.menu) {
+        [sair.menu insertItem:ligacoes atIndex:[sair.menu indexOfItem:sair]];
+        [sair.menu insertItem:sincronizar atIndex:[sair.menu indexOfItem:sair]];
     }
     [self acertarControlosDoCD];
 
@@ -9206,6 +9227,146 @@ static NSArray<NSString *> *ZPPastasParaRegistar(NSSet<NSString *> *caminhos, NS
     [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:pedido withCompletionHandler:nil];
 }
 
+#pragma mark - Faixas do Música
+
+// As audições do Música contam pela regra dele (só quando a faixa toca até ao
+// fim), não pela dos 5 s: o «fonoteca.py sincronizar-musica» lê as contagens da
+// biblioteca do Música e regista na base o que subiu, ligando cada faixa à sua
+// música (a versão local, quando é certa) — ver o fonoteca.py. Corre como o
+// registar, num processo à parte: ao arrancar, depois de meia em meia hora, e
+// pelo menu. Só com o Música aberto: perguntar-lhe abri-lo-ia.
+//
+// As faixas em dúvida ficam pendentes e escolhem-se na janela das ligações; um
+// aviso diz quando há novas.
+static const NSTimeInterval ZPEsperaDaPrimeiraSincronizacao = 60.0;
+static const NSTimeInterval ZPIntervaloDaSincronizacao = 30 * 60.0;
+static NSString *const kZPPendentesAvisadosKey = @"fonotecaPendentesDoMusicaAvisados";
+static NSString *const kZPAvisoDasLigacoes = @"LigacoesDoMusica";
+
+- (void)comecarASincronizarComOMusica {
+    __weak typeof(self) fraco = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(ZPEsperaDaPrimeiraSincronizacao * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        [fraco sincronizarComOMusica];
+    });
+    self.relogioDaSincronizacao = [NSTimer scheduledTimerWithTimeInterval:ZPIntervaloDaSincronizacao repeats:YES
+                                                                    block:^(NSTimer *t) {
+        if (!fraco) { [t invalidate]; return; }
+        [fraco sincronizarComOMusica];
+    }];
+}
+
+- (IBAction)sincronizarComOMusicaAgora:(id)sender {
+    [self sincronizarComOMusica];
+}
+
+- (void)sincronizarComOMusica {
+    if (self.sincronizacaoTask) return;
+    if ([NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.apple.Music"].count == 0) return;
+    NSString *raiz = [self loadSongsDirectoryPath];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *script = ZPCaminhoDoFonotecaPy();
+    if (raiz.length == 0 || ![fm fileExistsAtPath:[raiz stringByAppendingPathComponent:@".fonoteca.sqlite"]] ||
+        ![fm isExecutableFileAtPath:ZPPythonDaFonoteca] || ![fm fileExistsAtPath:script]) {
+        return;
+    }
+
+    NSTask *task = [[NSTask alloc] init];
+    task.executableURL = [NSURL fileURLWithPath:ZPPythonDaFonoteca];
+    task.arguments = @[script, @"sincronizar-musica"];
+    task.currentDirectoryURL = [NSURL fileURLWithPath:raiz];
+    NSMutableDictionary<NSString *, NSString *> *ambiente = [[NSProcessInfo processInfo].environment mutableCopy];
+    ambiente[@"FONOTECA_RAIZ"] = raiz;
+    task.environment = ambiente;
+    task.standardInput = [NSFileHandle fileHandleWithNullDevice];
+
+    NSString *registo = [[[fm URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject
+                          URLByAppendingPathComponent:@"tocaTintas/sincronizar-musica.log"] path];
+    if (![fm fileExistsAtPath:registo]) [fm createFileAtPath:registo contents:nil attributes:nil];
+    NSFileHandle *log = [NSFileHandle fileHandleForWritingAtPath:registo];
+    [log seekToEndOfFile];
+    NSString *cabecalho = [NSString stringWithFormat:@"\n=== %@ sincronizar-musica\n",
+                           [NSISO8601DateFormatter stringFromDate:[NSDate date] timeZone:[NSTimeZone localTimeZone]
+                                                    formatOptions:NSISO8601DateFormatWithInternetDateTime]];
+    [log writeData:[cabecalho dataUsingEncoding:NSUTF8StringEncoding]];
+    task.standardOutput = log ?: [NSFileHandle fileHandleWithNullDevice];
+    task.standardError = log ?: [NSFileHandle fileHandleWithNullDevice];
+
+    __weak typeof(self) fraco = self;
+    task.terminationHandler = ^(NSTask *acabou) {
+        [log closeFile];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (fraco.sincronizacaoTask == acabou) fraco.sincronizacaoTask = nil;
+            #ifdef DEBUG
+            NSLog(@"[Fonoteca] sincronizar-musica acabou (%d)", acabou.terminationStatus);
+            #endif
+            // Uma base por migrar sai com 1 e fica tudo como estava: só o registo
+            // o diz.
+            if (acabou.terminationStatus == 0) [fraco depoisDaSincronizacao];
+        });
+    };
+    NSError *erro = nil;
+    if (![task launchAndReturnError:&erro]) {
+        NSLog(@"[Fonoteca] Não consegui correr o sincronizar-musica: %@", erro.localizedDescription);
+        [log closeFile];
+        return;
+    }
+    self.sincronizacaoTask = task;
+}
+
+// As pendentes que ficaram: a janela, se estiver aberta, relê-as; se há mais do
+// que da última vez que se avisou, avisa-se outra vez. Menos não avisa: são
+// escolhas feitas.
+- (void)depoisDaSincronizacao {
+    [self.ligacoesDoMusica recarregar];
+    dispatch_async(self.filaDaFonoteca, ^{
+        if (![self abrirFonoteca]) return;
+        NSNumber *n = ZPFonotecaValor(self.fonoteca, "SELECT COUNT(*) FROM faixas_musica WHERE estado = 'pendente'", nil);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSUserDefaults *pref = [NSUserDefaults standardUserDefaults];
+            NSInteger pendentes = n.integerValue, avisados = [pref integerForKey:kZPPendentesAvisadosKey];
+            if (pendentes > avisados) [self avisarFaixasPorLigar:pendentes];
+            [pref setInteger:pendentes forKey:kZPPendentesAvisadosKey];
+        });
+    });
+}
+
+- (void)avisarFaixasPorLigar:(NSInteger)n {
+    UNMutableNotificationContent *conteudo = [[UNMutableNotificationContent alloc] init];
+    conteudo.title = NSLocalizedString(@"music_links_notify_title", @"Faixas do Música por ligar");
+    conteudo.body = [NSString stringWithFormat:NSLocalizedString(@"music_links_notify_body", @"%ld faixas esperam por uma escolha."),
+                     (long)n];
+    UNNotificationRequest *pedido = [UNNotificationRequest requestWithIdentifier:kZPAvisoDasLigacoes
+                                                                         content:conteudo
+                                                                         trigger:nil];
+    [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:pedido withCompletionHandler:nil];
+}
+
+- (IBAction)abrirLigacoesDoMusica:(id)sender {
+    NSString *base = [[self loadSongsDirectoryPath] stringByAppendingPathComponent:@".fonoteca.sqlite"];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:base]) { NSBeep(); return; }
+    if (!self.ligacoesDoMusica) {
+        self.ligacoesDoMusica = [[ZPLigacoesDoMusicaWindowController alloc] initComBase:base];
+    } else {
+        [self.ligacoesDoMusica recarregar];
+    }
+    [self.ligacoesDoMusica showWindow:self];
+    [self.ligacoesDoMusica.window makeKeyAndOrderFront:self];
+    [NSApp activate];
+}
+
+// Só o aviso das ligações faz alguma coisa ao ser clicado; os outros (a faixa
+// a tocar, o fim de uma gravação) trazem o tocaTintas para a frente, como antes
+// de haver delegado.
+- (void)userNotificationCenter:(UNUserNotificationCenter *)centro
+didReceiveNotificationResponse:(UNNotificationResponse *)resposta
+         withCompletionHandler:(void (^)(void))acabar {
+    if ([resposta.notification.request.identifier isEqualToString:kZPAvisoDasLigacoes]) {
+        [self abrirLigacoesDoMusica:nil];
+    }
+    acabar();
+}
+
 // Optimized method to load audio files with correct sorting
 - (void)loadAudioFiles {
     // Check if we are in playlist mode
@@ -10934,6 +11095,19 @@ static NSArray<NSString *> *ZPPastasParaRegistar(NSSet<NSString *> *caminhos, NS
             [self procurarCapaDoMusicaNoCatalogo:m[@"artista"] album:m[@"album"]
                                         titulo:m[@"titulo"] faixa:chave];
         }
+    }
+
+    // Escreve-se a cada pergunta, e não só ao mudar de faixa: o Música soma a
+    // audição quando a faixa acaba, e a contagem nova aparece na pergunta
+    // seguinte.
+    NSInteger ouvida = [m[@"ouvida"] integerValue];
+    if (ouvida <= 0) {
+        self.playCountLabel.stringValue = @"";
+    } else if (ouvida == 1) {
+        self.playCountLabel.stringValue = NSLocalizedString(@"Played 1 time", @"Play count label when played at least once");
+    } else {
+        self.playCountLabel.stringValue = [NSString stringWithFormat:
+            NSLocalizedString(@"Played %@ times", @"Play count label when played more than once"), @(ouvida)];
     }
 
     self.aMostrarOMusica = YES;

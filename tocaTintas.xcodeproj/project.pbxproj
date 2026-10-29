@@ -53,6 +53,7 @@
 		1FE43C2E307304AF0030BCFC /* libc++.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FE43C2D307304AF0030BCFC /* libc++.tbd */; };
 		1FE43C30307305B50030BCFC /* libMAC.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FE43C2F307305B50030BCFC /* libMAC.a */; };
 		1FE43C333073B7A20030BCFC /* ZPEtiquetaDeslizante.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FE43C323073B7A20030BCFC /* ZPEtiquetaDeslizante.m */; };
+		1FE4A9A6E517F886FFB90E7F /* ZPLigacoesDoMusicaWindowController.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FE4194DE889044F9592974F /* ZPLigacoesDoMusicaWindowController.m */; };
 		1FE94C532C7CDAE700C3EF4E /* HistogramView.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FE94C522C7CDAE700C3EF4E /* HistogramView.m */; };
 		1FF2BD3F2CEF75CE009726BF /* ListAudioDevices in Resources */ = {isa = PBXBuildFile; fileRef = 1FF2BD3E2CEF75CE009726BF /* ListAudioDevices */; };
 		9E7D6D52EBF61BE8A212D080 /* libPods-tocaTintas.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 17E8DA888F4D64ACE9A45A1E /* libPods-tocaTintas.a */; };
@@ -161,6 +162,8 @@
 		1FE43C2D307304AF0030BCFC /* libc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.tbd"; path = "usr/lib/libc++.tbd"; sourceTree = SDKROOT; };
 		1FE43C2F307305B50030BCFC /* libMAC.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libMAC.a; path = tocaTintas.xcodeproj/Frameworks/libMAC.a; sourceTree = "<group>"; };
 		1FE43C313073B78A0030BCFC /* ZPEtiquetaDeslizante.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPEtiquetaDeslizante.h; sourceTree = "<group>"; };
+		1FE4781A5B7A96AA8E5CA15F /* ZPLigacoesDoMusicaWindowController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPLigacoesDoMusicaWindowController.h; sourceTree = "<group>"; };
+		1FE4194DE889044F9592974F /* ZPLigacoesDoMusicaWindowController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPLigacoesDoMusicaWindowController.m; sourceTree = "<group>"; };
 		1FE43C323073B7A20030BCFC /* ZPEtiquetaDeslizante.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPEtiquetaDeslizante.m; sourceTree = "<group>"; };
 		1FE94C522C7CDAE700C3EF4E /* HistogramView.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = HistogramView.m; sourceTree = "<group>"; };
 		1FE94C562C7CDB5000C3EF4E /* HistogramView.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = HistogramView.h; sourceTree = "<group>"; };
@@ -266,6 +269,8 @@
 				1FC8C3F12CE63CE500271175 /* ZPAirPlayStreamer.m */,
 				1FE43C313073B78A0030BCFC /* ZPEtiquetaDeslizante.h */,
 				1FE43C323073B7A20030BCFC /* ZPEtiquetaDeslizante.m */,
+				1FE4781A5B7A96AA8E5CA15F /* ZPLigacoesDoMusicaWindowController.h */,
+				1FE4194DE889044F9592974F /* ZPLigacoesDoMusicaWindowController.m */,
 				1FE94C562C7CDB5000C3EF4E /* HistogramView.h */,
 				1FE94C522C7CDAE700C3EF4E /* HistogramView.m */,
 				1F7D75212C963F600046E0AC /* ZPOpusDecoder.h */,
@@ -582,6 +587,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1FE43C333073B7A20030BCFC /* ZPEtiquetaDeslizante.m in Sources */,
+				1FE4A9A6E517F886FFB90E7F /* ZPLigacoesDoMusicaWindowController.m in Sources */,
 				1F7D75202C95DCAF0046E0AC /* M3UPlaylist.m in Sources */,
 				1FC8C3F22CE63CE500271175 /* ZPAirPlayStreamer.m in Sources */,
 				1F12F2AA2C7C85480064C694 /* ViewController.m in Sources */,

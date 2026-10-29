@@ -259,7 +259,7 @@ NSDictionary *ZPMusicNowPlaying(void) {
              "    set e to player state as string\n"
              "    if e is \"stopped\" then return {e}\n"
              "    set t to current track\n"
-             "    return {e, player position, name of t, artist of t, album of t, duration of t, track number of t}\n"
+             "    return {e, player position, name of t, artist of t, album of t, duration of t, track number of t, played count of t}\n"
              "  end tell\n"
              "end timeout"];
     }
@@ -277,7 +277,10 @@ NSDictionary *ZPMusicNowPlaying(void) {
               @"artista": [r descriptorAtIndex:4].stringValue ?: @"",
               @"album":   [r descriptorAtIndex:5].stringValue ?: @"",
               @"duracao": @([r descriptorAtIndex:6].doubleValue),
-              @"faixa":   @([r descriptorAtIndex:7].int32Value) };
+              @"faixa":   @([r descriptorAtIndex:7].int32Value),
+              // A contagem do próprio Música, que só soma quando a faixa chega
+              // ao fim: não é a regra dos 5 s das faixas do tocaTintas.
+              @"ouvida":  @(r.numberOfItems >= 8 ? [r descriptorAtIndex:8].int32Value : 0) };
 }
 
 NSData *ZPMusicCurrentArtworkData(void) {
