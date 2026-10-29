@@ -259,7 +259,7 @@ NSDictionary *ZPMusicNowPlaying(void) {
              "    set e to player state as string\n"
              "    if e is \"stopped\" then return {e}\n"
              "    set t to current track\n"
-             "    return {e, player position, name of t, artist of t, album of t, duration of t, track number of t, played count of t}\n"
+             "    return {e, player position, name of t, artist of t, album of t, duration of t, track number of t, played count of t, persistent ID of t, class of t as string, disc number of t}\n"
              "  end tell\n"
              "end timeout"];
     }
@@ -280,7 +280,12 @@ NSDictionary *ZPMusicNowPlaying(void) {
               @"faixa":   @([r descriptorAtIndex:7].int32Value),
               // A contagem do próprio Música, que só soma quando a faixa chega
               // ao fim: não é a regra dos 5 s das faixas do tocaTintas.
-              @"ouvida":  @(r.numberOfItems >= 8 ? [r descriptorAtIndex:8].int32Value : 0) };
+              @"ouvida":  @(r.numberOfItems >= 8 ? [r descriptorAtIndex:8].int32Value : 0),
+              @"pid":     (r.numberOfItems >= 9 ? [r descriptorAtIndex:9].stringValue : nil) ?: @"",
+              // «URL track» é uma faixa do catálogo tocada sem estar na
+              // biblioteca: o Música não lhe guarda contagem.
+              @"classe":  (r.numberOfItems >= 10 ? [r descriptorAtIndex:10].stringValue : nil) ?: @"",
+              @"disco":   @(r.numberOfItems >= 11 ? [r descriptorAtIndex:11].int32Value : 0) };
 }
 
 NSData *ZPMusicCurrentArtworkData(void) {

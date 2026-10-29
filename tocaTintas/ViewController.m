@@ -434,6 +434,15 @@ static WavpackStreamReader memoryReader = {
 @property (copy, nonatomic) NSString *musicaFaixaMostrada;
 @property (assign, nonatomic) NSUInteger musicaTiques;
 @property (assign, nonatomic) NSUInteger musicaFalhas;
+// A faixa do catálogo (fora da biblioteca do Música) que está a tocar, quanto
+// já tocou desta vez e se já contou, e a contagem dela na base (nil enquanto
+// não se leu).
+@property (copy, nonatomic) NSDictionary *faixaDoCatalogo;
+@property (assign, nonatomic) double catalogoOuvido;
+@property (assign, nonatomic) BOOL catalogoContado;
+@property (assign, nonatomic) BOOL catalogoATocar;
+@property (strong, nonatomic) NSDate *catalogoDesde;
+@property (strong, nonatomic) NSNumber *contagemDoCatalogo;
 
 // AirPlay-related properties
 @property (strong) NSButton *airPlayButton;
@@ -9263,17 +9272,32 @@ static NSString *const kZPAvisoDasLigacoes = @"LigacoesDoMusica";
 - (void)sincronizarComOMusica {
     if (self.sincronizacaoTask) return;
     if ([NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.apple.Music"].count == 0) return;
+    __weak typeof(self) fraco = self;
+    __block __weak NSTask *task = nil;   // fraca: o fim do task guarda este bloco
+    task = [self correrNaFonoteca:@[@"sincronizar-musica"] depois:^(int estado) {
+        if (fraco.sincronizacaoTask == task) fraco.sincronizacaoTask = nil;
+        // Uma base por migrar sai com 1 e fica tudo como estava: só o registo
+        // o diz.
+        if (estado == 0) [fraco depoisDaSincronizacao];
+    }];
+    self.sincronizacaoTask = task;
+}
+
+// Corre «fonoteca.py <argumentos>» na raiz das músicas, com a saída no
+// sincronizar-musica.log, e chama depois (no thread principal) com o estado de
+// saída. nil se não houver base, python ou script, ou se não arrancar.
+- (nullable NSTask *)correrNaFonoteca:(NSArray<NSString *> *)argumentos depois:(void (^)(int estado))depois {
     NSString *raiz = [self loadSongsDirectoryPath];
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *script = ZPCaminhoDoFonotecaPy();
     if (raiz.length == 0 || ![fm fileExistsAtPath:[raiz stringByAppendingPathComponent:@".fonoteca.sqlite"]] ||
         ![fm isExecutableFileAtPath:ZPPythonDaFonoteca] || ![fm fileExistsAtPath:script]) {
-        return;
+        return nil;
     }
 
     NSTask *task = [[NSTask alloc] init];
     task.executableURL = [NSURL fileURLWithPath:ZPPythonDaFonoteca];
-    task.arguments = @[script, @"sincronizar-musica"];
+    task.arguments = [@[script] arrayByAddingObjectsFromArray:argumentos];
     task.currentDirectoryURL = [NSURL fileURLWithPath:raiz];
     NSMutableDictionary<NSString *, NSString *> *ambiente = [[NSProcessInfo processInfo].environment mutableCopy];
     ambiente[@"FONOTECA_RAIZ"] = raiz;
@@ -9285,33 +9309,30 @@ static NSString *const kZPAvisoDasLigacoes = @"LigacoesDoMusica";
     if (![fm fileExistsAtPath:registo]) [fm createFileAtPath:registo contents:nil attributes:nil];
     NSFileHandle *log = [NSFileHandle fileHandleForWritingAtPath:registo];
     [log seekToEndOfFile];
-    NSString *cabecalho = [NSString stringWithFormat:@"\n=== %@ sincronizar-musica\n",
+    NSString *cabecalho = [NSString stringWithFormat:@"\n=== %@ %@\n",
                            [NSISO8601DateFormatter stringFromDate:[NSDate date] timeZone:[NSTimeZone localTimeZone]
-                                                    formatOptions:NSISO8601DateFormatWithInternetDateTime]];
+                                                    formatOptions:NSISO8601DateFormatWithInternetDateTime],
+                           argumentos.firstObject];
     [log writeData:[cabecalho dataUsingEncoding:NSUTF8StringEncoding]];
     task.standardOutput = log ?: [NSFileHandle fileHandleWithNullDevice];
     task.standardError = log ?: [NSFileHandle fileHandleWithNullDevice];
 
-    __weak typeof(self) fraco = self;
     task.terminationHandler = ^(NSTask *acabou) {
         [log closeFile];
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (fraco.sincronizacaoTask == acabou) fraco.sincronizacaoTask = nil;
             #ifdef DEBUG
-            NSLog(@"[Fonoteca] sincronizar-musica acabou (%d)", acabou.terminationStatus);
+            NSLog(@"[Fonoteca] %@ acabou (%d)", argumentos.firstObject, acabou.terminationStatus);
             #endif
-            // Uma base por migrar sai com 1 e fica tudo como estava: só o registo
-            // o diz.
-            if (acabou.terminationStatus == 0) [fraco depoisDaSincronizacao];
+            if (depois) depois(acabou.terminationStatus);
         });
     };
     NSError *erro = nil;
     if (![task launchAndReturnError:&erro]) {
-        NSLog(@"[Fonoteca] Não consegui correr o sincronizar-musica: %@", erro.localizedDescription);
+        NSLog(@"[Fonoteca] Não consegui correr o %@: %@", argumentos.firstObject, erro.localizedDescription);
         [log closeFile];
-        return;
+        return nil;
     }
-    self.sincronizacaoTask = task;
+    return task;
 }
 
 // As pendentes que ficaram: a janela, se estiver aberta, relê-as; se há mais do
@@ -11039,6 +11060,28 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
     else if (botao == self.backwardButton) [self backwardTrack];
 }
 
+static NSString *ZPTituloDoMusica(NSDictionary *m) {
+    return [m[@"faixa"] intValue] > 0
+        ? [NSString stringWithFormat:@"♫ %@. %@", m[@"faixa"], m[@"titulo"]]
+        : [NSString stringWithFormat:@"♫ %@", m[@"titulo"]];
+}
+
+static NSString *ZPChaveDoMusica(NSDictionary *m) {
+    return [NSString stringWithFormat:@"%@|%@|%@", m[@"artista"], m[@"album"], ZPTituloDoMusica(m)];
+}
+
+// Uma faixa do catálogo tocada sem estar na biblioteca do Música («URL track»)
+// fica sempre com «played count» 0: o Música não lha guarda. Conta-a então o
+// tocaTintas, pela regra dele (os mesmos 5 s das suas faixas), com o
+// «fonoteca.py ouvir-musica», e a contagem que se mostra é a da base. As das
+// estações também são assim. As rádios
+// também são «URL track», mas sem duração. Uma que tenha contagem é porque o
+// Música já a conta.
+static BOOL ZPEDoCatalogo(NSDictionary *m) {
+    return [m[@"classe"] isEqualToString:@"URL track"] && [m[@"duracao"] doubleValue] > 0.0
+        && [m[@"ouvida"] integerValue] == 0 && [m[@"pid"] length] > 0;
+}
+
 - (void)comecarAMostrarOMusica {
     if (self.observadorDoMusicaNaJanela) return;
     __weak typeof(self) fraco = self;
@@ -11076,16 +11119,19 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
         return;
     }
 
-    NSString *titulo = [m[@"faixa"] intValue] > 0
-        ? [NSString stringWithFormat:@"♫ %@. %@", m[@"faixa"], m[@"titulo"]]
-        : [NSString stringWithFormat:@"♫ %@", m[@"titulo"]];
-    NSString *chave = [NSString stringWithFormat:@"%@|%@|%@", m[@"artista"], m[@"album"], titulo];
+    BOOL doCatalogo = ZPEDoCatalogo(m);
+    [self acompanharOCatalogo:doCatalogo ? m : nil];
+
+    NSString *titulo = ZPTituloDoMusica(m);
+    NSString *chave = ZPChaveDoMusica(m);
     if (!self.aMostrarOMusica || ![chave isEqualToString:self.musicaFaixaMostrada]) {
         self.musicaFaixaMostrada = chave;
         [self.artistLabel setStringValue:m[@"artista"]];
         [self.albumLabel setStringValue:m[@"album"]];
         [self.titleLabel setStringValue:titulo];
         self.playCountLabel.stringValue = @"";
+        self.contagemDoCatalogo = nil;
+        if (doCatalogo) [self lerContagemDoCatalogo:m];
         NSData *dados = ZPMusicCurrentArtworkData();
         NSImage *capa = dados ? [[NSImage alloc] initWithData:dados] : nil;
         if (capa.size.width > 0) {
@@ -11099,16 +11145,9 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
 
     // Escreve-se a cada pergunta, e não só ao mudar de faixa: o Música soma a
     // audição quando a faixa acaba, e a contagem nova aparece na pergunta
-    // seguinte.
-    NSInteger ouvida = [m[@"ouvida"] integerValue];
-    if (ouvida <= 0) {
-        self.playCountLabel.stringValue = @"";
-    } else if (ouvida == 1) {
-        self.playCountLabel.stringValue = NSLocalizedString(@"Played 1 time", @"Play count label when played at least once");
-    } else {
-        self.playCountLabel.stringValue = [NSString stringWithFormat:
-            NSLocalizedString(@"Played %@ times", @"Play count label when played more than once"), @(ouvida)];
-    }
+    // seguinte. Uma do catálogo mostra a da base, que chega à parte.
+    NSNumber *ouvida = doCatalogo ? self.contagemDoCatalogo : m[@"ouvida"];
+    if (ouvida) [self escreverContagemDoMusica:ouvida.integerValue];
 
     self.aMostrarOMusica = YES;
     self.musicaATocar = [m[@"estado"] isEqualToString:@"playing"];
@@ -11128,6 +11167,7 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
                 [forte actualizarOMusicaNaJanela];   // a posição verdadeira, de cinco em cinco segundos
             } else {
                 [forte desenharProgressoDoMusica];
+                [forte somarAoCatalogo];
             }
         }];
     }
@@ -11199,9 +11239,97 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
     });
 }
 
+// O 0 também se mostra: é por ele que se sabe que é a primeira vez.
+- (void)escreverContagemDoMusica:(NSInteger)ouvida {
+    if (ouvida <= 0) {
+        self.playCountLabel.stringValue = NSLocalizedString(@"Played 0 times", @"Play count label when never played");
+    } else if (ouvida == 1) {
+        self.playCountLabel.stringValue = NSLocalizedString(@"Played 1 time", @"Play count label when played at least once");
+    } else {
+        self.playCountLabel.stringValue = [NSString stringWithFormat:
+            NSLocalizedString(@"Played %@ times", @"Play count label when played more than once"), @(ouvida)];
+    }
+}
+
+#pragma mark - Faixas do catálogo
+
+// Uma faixa do catálogo conta pela regra das do tocaTintas: kPlayCountThreshold
+// segundos a tocar (as pausas não contam), uma vez por cada vez que se toca. O
+// tempo soma-se a cada pergunta ao Música e a cada segundo do relógio da barra.
+
+// m é a faixa do catálogo que está a tocar, ou nil se não é nenhuma. Chama-se
+// antes de musicaPosicao/musicaQuando mudarem: ainda dizem onde ia a anterior.
+- (void)acompanharOCatalogo:(nullable NSDictionary *)m {
+    [self somarAoCatalogo];
+    NSDictionary *f = self.faixaDoCatalogo;
+    if (f) {
+        BOOL outra = ![m[@"pid"] isEqualToString:f[@"pid"]];
+        // A mesma faixa de volta ao princípio: repetida, ou ⏮.
+        BOOL deVolta = !outra && [m[@"posicao"] doubleValue] + 10.0 < [self posicaoEstimadaDoMusica];
+        if (outra || deVolta) self.faixaDoCatalogo = nil;
+    }
+    if (m && !self.faixaDoCatalogo) {
+        self.faixaDoCatalogo = m;
+        self.catalogoOuvido = 0.0;
+        self.catalogoContado = NO;
+    }
+    self.catalogoATocar = m && [m[@"estado"] isEqualToString:@"playing"];
+    self.catalogoDesde = [NSDate date];
+}
+
+- (double)posicaoEstimadaDoMusica {
+    double p = self.musicaPosicao;
+    if (self.musicaATocar && self.musicaQuando) p += -[self.musicaQuando timeIntervalSinceNow];
+    return p;
+}
+
+// Junta o que tocou desde a última vez e, ao passar o limiar, conta.
+- (void)somarAoCatalogo {
+    NSDictionary *f = self.faixaDoCatalogo;
+    if (!f) return;
+    if (self.catalogoATocar && self.catalogoDesde) self.catalogoOuvido += -[self.catalogoDesde timeIntervalSinceNow];
+    self.catalogoDesde = [NSDate date];
+    if (self.catalogoContado || self.catalogoOuvido < kPlayCountThreshold) return;
+    self.catalogoContado = YES;
+    #ifdef DEBUG
+    NSLog(@"[Fonoteca] %@ — %@ conta (%.1f s a tocar)", f[@"artista"], f[@"titulo"], self.catalogoOuvido);
+    #endif
+    __weak typeof(self) fraco = self;
+    [self correrNaFonoteca:@[@"ouvir-musica", f[@"pid"], f[@"titulo"] ?: @"", f[@"artista"] ?: @"", f[@"album"] ?: @"",
+                             [f[@"disco"] description] ?: @"0", [f[@"faixa"] description] ?: @"0",
+                             [NSString stringWithFormat:@"%.3f", [f[@"duracao"] doubleValue]]]
+                    depois:^(int estado) {
+        if (estado == 0) [fraco lerContagemDoCatalogo:f];
+    }];
+}
+
+// A contagem da faixa na base (a da música, se já estiver ligada a uma; a que
+// ela juntou, se estiver pendente), e escreve-a se a faixa ainda estiver à
+// vista. As colunas são as que o ouvir-musica gravou, tal como o Música as dá.
+- (void)lerContagemDoCatalogo:(NSDictionary *)f {
+    NSString *chave = ZPChaveDoMusica(f);
+    NSArray *args = @[f[@"artista"] ?: @"", f[@"album"] ?: @"", f[@"titulo"] ?: @"", @([f[@"faixa"] integerValue]),
+                      @([f[@"duracao"] doubleValue])];
+    dispatch_async(self.filaDaFonoteca, ^{
+        if (![self abrirFonoteca]) return;
+        NSNumber *n = ZPFonotecaValor(self.fonoteca,
+            "SELECT COALESCE((SELECT n FROM contagens WHERE musica = fm.musica), fm.contagem_inicial)"
+            " FROM faixas_musica fm WHERE fm.tipo = 'catalogo' AND fm.artista = ?1 AND fm.album = ?2"
+            " AND fm.titulo = ?3 AND fm.faixa = ?4 AND ABS(fm.duracao - ?5) < 1.0 LIMIT 1", args);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (!self.aMostrarOMusica || ![chave isEqualToString:self.musicaFaixaMostrada]) return;
+            self.contagemDoCatalogo = n ?: @0;
+            [self escreverContagemDoMusica:self.contagemDoCatalogo.integerValue];
+        });
+    });
+}
+
 // Não apaga o que está à vista: quem vier a seguir (o tocaTintas a tocar, ou o
-// Música outra vez) escreve por cima.
+// Música outra vez) escreve por cima. Uma faixa do catálogo que estava a tocar
+// fecha-se aqui, com o que tocou até agora.
 - (void)deixarDeMostrarOMusica {
+    [self somarAoCatalogo];
+    self.faixaDoCatalogo = nil;
     [self.relogioDoMusica invalidate];
     self.relogioDoMusica = nil;
     self.aMostrarOMusica = NO;

@@ -48,8 +48,9 @@ BOOL ZPMusicCommand(NSString *comando);
 
 /// O que o Música está a tocar: @"estado" («playing», «paused», «stopped») e,
 /// fora de «stopped», @"posicao" e @"duracao" (segundos), @"titulo",
-/// @"artista", @"album", @"faixa" (número) e @"ouvida" (o «played count» do
-/// próprio Música). Com o Música fechado, @"estado" é
+/// @"artista", @"album", @"faixa" e @"disco" (números), @"ouvida" (o «played
+/// count» do próprio Música), @"pid" (o persistent ID) e @"classe" («file
+/// track», «shared track», «URL track»…). Com o Música fechado, @"estado" é
 /// «stopped». nil só se o Música não responder (ocupado, encravado, ou a
 /// automação recusada): quem pergunta pode tentar outra vez. Espera no máximo
 /// dois segundos. Só no thread principal.
