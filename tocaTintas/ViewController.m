@@ -11260,8 +11260,9 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
 // artworks» é 0, por mais que se espere (visto em 2026-10, num Trifonov). Vai-se
 // então buscá-la ao catálogo da Apple pela pesquisa pública do iTunes, na loja
 // do país do Mac (é dela que o Música tira os nomes), a 600 px: primeiro o
-// álbum pelo artista e pelo nome; se nenhum tiver esse nome, a faixa pelo
-// artista e pelo título, e dela o álbum com esse nome. O nome compara-se sem
+// artista e, entre os álbuns dele, o que tiver esse nome; depois, pesquisando
+// por texto, o álbum pelo artista e pelo nome; por fim, a faixa pelo artista e
+// pelo título, e dela o álbum com esse nome. O nome compara-se sem
 // maiúsculas nem acentos e, se assim não houver, também sem os sufixos de
 // edição («(Deluxe Version)», «- EP», «- Single»); entre os que servem, o do
 // mesmo artista passa à frente (há «Bloom» de mais de um). Sem nenhum fica a
@@ -11297,15 +11298,21 @@ static NSInteger ZPMesmoNomeDeAlbum(NSString *a, NSString *b) {
                           stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet] ?: @"";
     NSString *pais = [NSLocale.currentLocale objectForKey:NSLocaleCountryCode] ?: @"US";
 
-    NSString *(^capaExacta)(NSString *, NSString *, NSString *) = ^NSString *(NSString *termo, NSString *entidade, NSString *limite) {
-        NSURLComponents *c = [NSURLComponents componentsWithString:@"https://itunes.apple.com/search"];
-        c.queryItems = @[ [NSURLQueryItem queryItemWithName:@"term" value:termo],
-                          [NSURLQueryItem queryItemWithName:@"entity" value:entidade],
-                          [NSURLQueryItem queryItemWithName:@"country" value:pais],
-                          [NSURLQueryItem queryItemWithName:@"limit" value:limite] ];
+    // Os resultados de um pedido ao catálogo (search ou lookup), ou nil.
+    NSArray *(^pedir)(NSString *, NSDictionary *) = ^NSArray *(NSString *onde, NSDictionary *campos) {
+        NSURLComponents *c = [NSURLComponents componentsWithString:[@"https://itunes.apple.com/" stringByAppendingString:onde]];
+        NSMutableArray *itens = [NSMutableArray arrayWithObject:[NSURLQueryItem queryItemWithName:@"country" value:pais]];
+        [campos enumerateKeysAndObjectsUsingBlock:^(NSString *k, NSString *v, BOOL *parar) {
+            [itens addObject:[NSURLQueryItem queryItemWithName:k value:v]];
+        }];
+        c.queryItems = itens;
         NSData *d = [NSData dataWithContentsOfURL:c.URL];
         NSArray *res = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:NULL][@"results"] : nil;
-        if (![res isKindOfClass:[NSArray class]]) return nil;
+        return [res isKindOfClass:[NSArray class]] ? res : nil;
+    };
+
+    // Dos resultados, a capa do álbum com esse nome, o do mesmo artista à frente.
+    NSString *(^melhorCapa)(NSArray *) = ^NSString *(NSArray *res) {
         NSString *melhor = nil;
         NSInteger melhorPontos = 0;
         for (NSDictionary *a in res) {
@@ -11320,9 +11327,31 @@ static NSInteger ZPMesmoNomeDeAlbum(NSString *a, NSString *b) {
         return melhor;
     };
 
+    NSString *(^capaExacta)(NSString *, NSString *, NSString *) = ^NSString *(NSString *termo, NSString *entidade, NSString *limite) {
+        return melhorCapa(pedir(@"search", @{ @"term": termo, @"entity": entidade, @"limit": limite }));
+    };
+
+    // Pelo artista: os álbuns dele, todos. É o que acha os discos de nomes
+    // comuns, que a pesquisa por texto enterra debaixo de outros («Alex G
+    // Trick» dava Radiohead e Rihanna). Há artistas com o mesmo nome (três
+    // «Alex G»): vêem-se os que tiverem exactamente esse, até três.
+    NSString *(^capaPeloArtista)(void) = ^NSString *(void) {
+        if (primeiro.length == 0) return nil;
+        NSUInteger vistos = 0;
+        for (NSDictionary *a in pedir(@"search", @{ @"term": primeiro, @"entity": @"musicArtist", @"limit": @"5" })) {
+            if (![a isKindOfClass:[NSDictionary class]] || ![a[@"artistName"] isKindOfClass:[NSString class]]
+                || [a[@"artistName"] compare:primeiro options:dobrar] != NSOrderedSame || !a[@"artistId"]) continue;
+            NSString *url = melhorCapa(pedir(@"lookup", @{ @"id": [a[@"artistId"] description], @"entity": @"album",
+                                                           @"limit": @"200" }));
+            if (url || ++vistos >= 3) return url;
+        }
+        return nil;
+    };
+
     __weak typeof(self) fraco = self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        NSString *url = capaExacta([NSString stringWithFormat:@"%@ %@", primeiro, album], @"album", @"10");
+        NSString *url = capaPeloArtista();
+        if (!url) url = capaExacta([NSString stringWithFormat:@"%@ %@", primeiro, album], @"album", @"10");
         if (!url && titulo.length > 0) {
             url = capaExacta([NSString stringWithFormat:@"%@ %@", primeiro, titulo], @"song", @"50");
         }
