@@ -2409,6 +2409,7 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
 // nada a decidir.
 - (void)avisarFimDaGravacaoDoAlbum:(NSString *)album {
     UNMutableNotificationContent *conteudo = [[UNMutableNotificationContent alloc] init];
+    conteudo.sound = [UNNotificationSound defaultSound];   // se estiver ligado nos Ajustes do Sistema
     conteudo.title = NSLocalizedString(@"rec_album_end_title", @"Gravação terminada: fim do álbum");
     conteudo.body = album ?: @"";
     UNNotificationRequest *pedido = [UNNotificationRequest requestWithIdentifier:@"GravacaoTerminada"
@@ -9227,6 +9228,7 @@ static NSArray<NSString *> *ZPPastasParaRegistar(NSSet<NSString *> *caminhos, NS
 // sem ela, um problema só se via abrindo o registar.log.
 - (void)avisarProblemaNoRegisto:(NSArray<NSString *> *)pastas estado:(int)estado log:(NSString *)log {
     UNMutableNotificationContent *conteudo = [[UNMutableNotificationContent alloc] init];
+    conteudo.sound = [UNNotificationSound defaultSound];   // se estiver ligado nos Ajustes do Sistema
     conteudo.title = NSLocalizedString(estado == 1 ? @"fonoteca_register_problems_title"
                                                    : @"fonoteca_register_failed_title",
                                        @"Registo na fonoteca: problemas / falhou");
@@ -9357,6 +9359,7 @@ static NSString *const kZPAvisoDasLigacoes = @"LigacoesDoMusica";
 
 - (void)avisarFaixasPorLigar:(NSInteger)n {
     UNMutableNotificationContent *conteudo = [[UNMutableNotificationContent alloc] init];
+    conteudo.sound = [UNNotificationSound defaultSound];   // se estiver ligado nos Ajustes do Sistema
     conteudo.title = NSLocalizedString(@"music_links_notify_title", @"Faixas do Música por ligar");
     conteudo.body = [NSString stringWithFormat:NSLocalizedString(@"music_links_notify_body", @"%ld faixas esperam por uma escolha."),
                      (long)n];
@@ -9377,6 +9380,21 @@ static NSString *const kZPAvisoDasLigacoes = @"LigacoesDoMusica";
     [self.ligacoesDoMusica showWindow:self];
     [self.ligacoesDoMusica.window makeKeyAndOrderFront:self];
     [NSApp activate];
+}
+
+// Com o tocaTintas à frente, o macOS não mostra os avisos dele: só os põe no
+// Centro de Notificações, a não ser que se peça aqui. Pede-se para todos menos o
+// da faixa a tocar, que a janela já mostra.
+- (void)userNotificationCenter:(UNUserNotificationCenter *)centro
+       willPresentNotification:(UNNotification *)aviso
+         withCompletionHandler:(void (^)(UNNotificationPresentationOptions))mostrar {
+    if ([aviso.request.identifier isEqualToString:@"NowPlaying"]) {
+        mostrar(UNNotificationPresentationOptionNone);
+    } else {
+        // O som decide-se nos Ajustes do Sistema (Notificações › tocaTintas).
+        mostrar(UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionList |
+                UNNotificationPresentationOptionSound);
+    }
 }
 
 // Só o aviso das ligações faz alguma coisa ao ser clicado; os outros (a faixa
