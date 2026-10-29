@@ -7756,6 +7756,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     __block NSImage *coverArtImage = nil;
     __block NSURL *trackURL = nil;
     __block NSNumber *playCount = nil;
+    __block NSString *contagemDoMusica = nil;
 
     // Access UI elements on the main thread
     dispatch_sync(dispatch_get_main_queue(), ^{
@@ -7763,6 +7764,12 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
         albumName = self.albumLabel.stringValue ?: @"";
         songTitle = self.titleLabel.stringValue ?: @"";
         coverArtImage = self.coverArtView.image;
+        // Com o Música na janela, a contagem é a que ela mostra (a dele, ou a
+        // da base para as faixas do catálogo), «tocou 0 vezes» incluído.
+        if (self.aMostrarOMusica) {
+            contagemDoMusica = self.playCountLabel.stringValue;
+            return;
+        }
         trackURL = self.currentTrackURL;
         // As contagens só se lêem no thread principal.
         NSURL *originalTrackURL = self.shuffledToOriginalMap[trackURL] ?: trackURL;
@@ -7985,7 +7992,9 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     if (songTitle.length > 0) {
         [htmlContent appendFormat:@"<!-- SONG -->\n<h3>%@</h3>\n", songTitle];
     }
-    if (playCount && playCount.intValue > 0) {
+    if (contagemDoMusica.length > 0) {
+        [htmlContent appendFormat:@"<p class=\"play-count\">%@</p>\n", contagemDoMusica];
+    } else if (playCount && playCount.intValue > 0) {
         NSString *playCountLabel = playCount.intValue == 1
             ? NSLocalizedString(@"Played 1 time", @"Play count label when played at least once")
             : [NSString stringWithFormat:NSLocalizedString(@"Played %@ times", @"Play count label when played more than once"), playCount];
@@ -11175,7 +11184,8 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
 
     NSString *titulo = ZPTituloDoMusica(m);
     NSString *chave = ZPChaveDoMusica(m);
-    if (!self.aMostrarOMusica || ![chave isEqualToString:self.musicaFaixaMostrada]) {
+    BOOL faixaNova = !self.aMostrarOMusica || ![chave isEqualToString:self.musicaFaixaMostrada];
+    if (faixaNova) {
         self.musicaFaixaMostrada = chave;
         [self.artistLabel setStringValue:m[@"artista"]];
         [self.albumLabel setStringValue:m[@"album"]];
@@ -11212,6 +11222,7 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
     // seguinte. Uma do catálogo mostra a da base, que chega à parte.
     NSNumber *ouvida = doCatalogo ? self.contagemDoCatalogo : m[@"ouvida"];
     if (ouvida) [self escreverContagemDoMusica:ouvida.integerValue];
+    if (faixaNova) [self actualizarAPaginaDoMusica];
 
     self.aMostrarOMusica = YES;
     self.musicaATocar = [m[@"estado"] isEqualToString:@"playing"];
@@ -11324,8 +11335,18 @@ static NSInteger ZPMesmoNomeDeAlbum(NSString *a, NSString *b) {
             __strong typeof(fraco) forte = fraco;
             if (forte.aMostrarOMusica && [forte.musicaFaixaMostrada isEqualToString:chave]) {
                 forte.coverArtView.image = capa;
+                [forte actualizarAPaginaDoMusica];
             }
         });
+    });
+}
+
+// A página «a tocar» também acompanha o Música: escreve-se a cada faixa nova,
+// e outra vez quando chegam a capa do catálogo ou a contagem da base, que vêm
+// depois. Sai do que está à vista, como a do tocaTintas.
+- (void)actualizarAPaginaDoMusica {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        [self generateNowPlayingPage];
     });
 }
 
@@ -11410,6 +11431,7 @@ static NSInteger ZPMesmoNomeDeAlbum(NSString *a, NSString *b) {
             if (!self.aMostrarOMusica || ![chave isEqualToString:self.musicaFaixaMostrada]) return;
             self.contagemDoCatalogo = n ?: @0;
             [self escreverContagemDoMusica:self.contagemDoCatalogo.integerValue];
+            [self actualizarAPaginaDoMusica];
         });
     });
 }
