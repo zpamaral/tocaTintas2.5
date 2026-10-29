@@ -443,6 +443,9 @@ static WavpackStreamReader memoryReader = {
 @property (assign, nonatomic) BOOL catalogoATocar;
 @property (strong, nonatomic) NSDate *catalogoDesde;
 @property (strong, nonatomic) NSNumber *contagemDoCatalogo;
+// A última capa que o Música deu e de que álbum era (ver -actualizarOMusicaNaJanela).
+@property (strong, nonatomic) NSData *capaDoMusicaDados;
+@property (copy, nonatomic) NSString *capaDoMusicaAlbum;
 
 // AirPlay-related properties
 @property (strong) NSButton *airPlayButton;
@@ -11132,7 +11135,20 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
         self.playCountLabel.stringValue = @"";
         self.contagemDoCatalogo = nil;
         if (doCatalogo) [self lerContagemDoCatalogo:m];
-        NSData *dados = ZPMusicCurrentArtworkData();
+        // Das faixas do catálogo e das estações («URL track») o Música dá a capa
+        // da faixa anterior, durante a faixa inteira (visto em 2026-10: um DIIV
+        // com a do Pygmalion dos Slowdive, a seguir um Beach House com a do
+        // Oshin dos DIIV). A delas vem só do catálogo. Das outras, a mesma capa,
+        // byte a byte, num álbum que é outro também é dessas: não se mostra.
+        BOOL urlTrack = [m[@"classe"] isEqualToString:@"URL track"];
+        NSData *dados = urlTrack ? nil : ZPMusicCurrentArtworkData();
+        if (dados && [dados isEqualToData:self.capaDoMusicaDados] &&
+            ![m[@"album"] isEqualToString:self.capaDoMusicaAlbum ?: @""]) {
+            dados = nil;
+        } else if (dados) {
+            self.capaDoMusicaDados = dados;
+            self.capaDoMusicaAlbum = m[@"album"];
+        }
         NSImage *capa = dados ? [[NSImage alloc] initWithData:dados] : nil;
         if (capa.size.width > 0) {
             self.coverArtView.image = capa;
@@ -11185,11 +11201,33 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
 // artworks» é 0, por mais que se espere (visto em 2026-10, num Trifonov). Vai-se
 // então buscá-la ao catálogo da Apple pela pesquisa pública do iTunes, na loja
 // do país do Mac (é dela que o Música tira os nomes), a 600 px: primeiro o
-// álbum pelo artista e pelo nome; se nenhum tiver exactamente esse nome, a
-// faixa pelo artista e pelo título, e dela o álbum com esse nome. Sem
-// correspondência exacta fica a imagem genérica: uma capa de outro disco
-// engana mais do que nenhuma. Chega mais tarde: só se põe se a faixa à vista
-// ainda for a mesma.
+// álbum pelo artista e pelo nome; se nenhum tiver esse nome, a faixa pelo
+// artista e pelo título, e dela o álbum com esse nome. O nome compara-se sem
+// maiúsculas nem acentos e, se assim não houver, também sem os sufixos de
+// edição («(Deluxe Version)», «- EP», «- Single»); entre os que servem, o do
+// mesmo artista passa à frente (há «Bloom» de mais de um). Sem nenhum fica a
+// imagem genérica: uma capa de outro disco engana mais do que nenhuma. Chega
+// mais tarde: só se põe se a faixa à vista ainda for a mesma.
+static const NSStringCompareOptions dobrar = NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch;
+
+// 2 se o nome do álbum é o mesmo (sem contar maiúsculas e acentos), 1 se só o
+// é sem os sufixos de edição, 0 se não.
+static NSInteger ZPMesmoNomeDeAlbum(NSString *a, NSString *b) {
+    if ([a compare:b options:dobrar] == NSOrderedSame) return 2;
+    NSString *(^simples)(NSString *) = ^NSString *(NSString *n) {
+        NSRegularExpression *sufixo = [NSRegularExpression regularExpressionWithPattern:
+            @"\\s*(?:[\\(\\[][^\\(\\)\\[\\]]*[\\)\\]]|-\\s*(?:EP|Single))\\s*$" options:NSRegularExpressionCaseInsensitive error:NULL];
+        for (NSUInteger i = 0; i < 3; i++) {
+            NSString *m = [sufixo stringByReplacingMatchesInString:n options:0 range:NSMakeRange(0, n.length) withTemplate:@""];
+            if ([m isEqualToString:n]) break;
+            n = m;
+        }
+        return n;
+    };
+    NSString *sa = simples(a), *sb = simples(b);
+    return sa.length && [sa compare:sb options:dobrar] == NSOrderedSame ? 1 : 0;
+}
+
 - (void)procurarCapaDoMusicaNoCatalogo:(NSString *)artista album:(NSString *)album
                                 titulo:(NSString *)titulo faixa:(NSString *)chave {
     if (album.length == 0) return;
@@ -11209,14 +11247,18 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
         NSData *d = [NSData dataWithContentsOfURL:c.URL];
         NSArray *res = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:NULL][@"results"] : nil;
         if (![res isKindOfClass:[NSArray class]]) return nil;
+        NSString *melhor = nil;
+        NSInteger melhorPontos = 0;
         for (NSDictionary *a in res) {
-            if ([a isKindOfClass:[NSDictionary class]] && [a[@"collectionName"] isKindOfClass:[NSString class]]
-                && [a[@"collectionName"] caseInsensitiveCompare:album] == NSOrderedSame
-                && [a[@"artworkUrl100"] isKindOfClass:[NSString class]]) {
-                return a[@"artworkUrl100"];
-            }
+            if (![a isKindOfClass:[NSDictionary class]] || ![a[@"collectionName"] isKindOfClass:[NSString class]]
+                || ![a[@"artworkUrl100"] isKindOfClass:[NSString class]]) continue;
+            NSInteger pontos = ZPMesmoNomeDeAlbum(a[@"collectionName"], album);
+            if (pontos == 0) continue;
+            NSString *dele = [a[@"artistName"] isKindOfClass:[NSString class]] ? a[@"artistName"] : @"";
+            if (primeiro.length && [dele rangeOfString:primeiro options:dobrar].location != NSNotFound) pontos += 2;
+            if (pontos > melhorPontos) { melhor = a[@"artworkUrl100"]; melhorPontos = pontos; }
         }
-        return nil;
+        return melhor;
     };
 
     __weak typeof(self) fraco = self;
