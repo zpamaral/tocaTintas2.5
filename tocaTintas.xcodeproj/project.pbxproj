@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		1F04EB2E2E5BBA9500323023 /* audio_stuff_info in Resources */ = {isa = PBXBuildFile; fileRef = 1F04EB2D2E5BBA9500323023 /* audio_stuff_info */; };
 		1F10D08C308A484A005ADBA1 /* tocaTintas.sdef in Resources */ = {isa = PBXBuildFile; fileRef = 1F10D08B308A484A005ADBA1 /* tocaTintas.sdef */; };
+		1FA7D0C1E2B34A5600A0C002 /* Ajuda in Resources */ = {isa = PBXBuildFile; fileRef = 1FA7D0C1E2B34A5600A0C001 /* Ajuda */; };
 		1F12F2AA2C7C85480064C694 /* ViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F12F2A92C7C85480064C694 /* ViewController.m */; };
 		1F12F2AC2C7C854C0064C694 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1F12F2AB2C7C854C0064C694 /* Assets.xcassets */; };
 		1F12F2AF2C7C854C0064C694 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 1F12F2AD2C7C854C0064C694 /* Main.storyboard */; };
@@ -104,6 +105,7 @@
 		17E8DA888F4D64ACE9A45A1E /* libPods-tocaTintas.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-tocaTintas.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		1F04EB2D2E5BBA9500323023 /* audio_stuff_info */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = audio_stuff_info; path = /Users/amaral/Applications/audio_stuff_info; sourceTree = "<absolute>"; };
 		1F10D08B308A484A005ADBA1 /* tocaTintas.sdef */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = tocaTintas.sdef; sourceTree = "<group>"; };
+		1FA7D0C1E2B34A5600A0C001 /* Ajuda */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Ajuda; sourceTree = "<group>"; };
 		1F12F2A22C7C85480064C694 /* tocaTintas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = tocaTintas.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1F12F2A82C7C85480064C694 /* ViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ViewController.h; sourceTree = "<group>"; };
 		1F12F2A92C7C85480064C694 /* ViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ViewController.m; sourceTree = "<group>"; };
@@ -284,6 +286,7 @@
 				1F2614552C809B140041651D /* Localizable.strings */,
 				1F12F2B22C7C854C0064C694 /* tocaTintas.entitlements */,
 				1F10D08B308A484A005ADBA1 /* tocaTintas.sdef */,
+				1FA7D0C1E2B34A5600A0C001 /* Ajuda */,
 				1F12F2AB2C7C854C0064C694 /* Assets.xcassets */,
 			);
 			path = tocaTintas;
@@ -506,6 +509,7 @@
 				1F75D8E02EE994110005EE27 /* bs2b_bridge in Resources */,
 				1FC8C3EE2CE4C1A300271175 /* raop_play in Resources */,
 				1F10D08C308A484A005ADBA1 /* tocaTintas.sdef in Resources */,
+				1FA7D0C1E2B34A5600A0C002 /* Ajuda in Resources */,
 				1F37C8C82CD5486600346A66 /* config_fifo in Resources */,
 				1F37C8C52CD5446700346A66 /* cava in Resources */,
 				1F12F2B92C7C86D60064C694 /* Property List.plist in Resources */,

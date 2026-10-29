@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tocaTintas (manual)</title>
+<link rel="icon" type="image/png" href="imagens/icone.png">
+<style>
+:root{--fundo:#fbfaf8;--fundo2:#f2efe9;--fundo3:#e8e3da;--texto:#23201c;--texto2:#5b5449;
+ --risco:#d8d2c6;--realce:#8a4b1e;--cod:#f2efe9;--codt:#3a3128;
+ --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+ --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+ --fundo:#171614;--fundo2:#201e1b;--fundo3:#2b2824;--texto:#e6e1d8;--texto2:#a49b8d;
+ --risco:#3a352f;--realce:#e2a06a;--cod:#201e1b;--codt:#ddd6ca}}
+:root[data-theme="dark"]{--fundo:#171614;--fundo2:#201e1b;--fundo3:#2b2824;--texto:#e6e1d8;
+ --texto2:#a49b8d;--risco:#3a352f;--realce:#e2a06a;--cod:#201e1b;--codt:#ddd6ca}
+*{box-sizing:border-box}
+body{margin:0;background:var(--fundo);color:var(--texto);font-family:var(--serif);
+ font-size:17px;line-height:1.65;-webkit-text-size-adjust:100%}
+.envolve{max-width:1160px;margin:0 auto;padding:0 24px;display:flex;gap:48px;align-items:flex-start}
+nav{position:sticky;top:0;flex:0 0 220px;max-height:100vh;overflow-y:auto;padding:40px 0;
+ font-family:var(--mono);font-size:12.5px;line-height:1.5}
+nav a{display:block;color:var(--texto2);text-decoration:none;padding:3px 0 3px 10px;
+ border-left:2px solid transparent}
+nav a:hover{color:var(--realce);border-left-color:var(--realce)}
+main{flex:1 1 auto;min-width:0;padding:40px 0 100px}
+h1{font-size:38px;margin:0 0 6px;letter-spacing:-.015em}
+.sub{color:var(--texto2);font-size:16px;margin:0 0 4px;font-family:var(--mono)}
+h2{font-size:25px;margin:52px 0 14px;padding-top:14px;border-top:1px solid var(--risco)}
+h3{font-size:19px;margin:30px 0 8px;color:var(--realce)}
+p{margin:0 0 14px}
+p.rotulo{margin:22px 0 2px;font-family:var(--mono);font-size:14px;color:var(--realce)}
+a{color:var(--realce)}
+code{font-family:var(--mono);font-size:.86em;background:var(--cod);color:var(--codt);
+ padding:1.5px 5px;border-radius:4px}
+pre{background:var(--cod);color:var(--codt);padding:16px 18px;border-radius:8px;
+ overflow-x:auto;border:1px solid var(--risco);margin:0 0 18px}
+pre code{background:none;padding:0;font-size:12.5px;line-height:1.5}
+ul,ol{margin:0 0 16px;padding-left:24px}li{margin-bottom:7px}
+strong{font-weight:600}
+table{border-collapse:collapse;margin:0 0 18px;font-size:15.5px}
+th,td{text-align:left;vertical-align:top;padding:6px 14px 6px 0;border-bottom:1px solid var(--risco)}
+th{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--texto2)}
+header.topo{border-bottom:1px solid var(--risco);padding-bottom:20px;margin-bottom:10px;
+ display:flex;gap:22px;align-items:center}
+header.topo img{width:96px;height:96px;flex:0 0 auto}
+figure{margin:22px 0 26px}
+figure img{display:block;max-width:100%;height:auto;border-radius:10px;
+ border:1px solid var(--risco);box-shadow:0 6px 24px rgba(0,0,0,.18)}
+figure.estreita img{max-width:250px}
+figcaption{font-family:var(--mono);font-size:12.5px;color:var(--texto2);margin-top:10px}
+svg.esquema{display:block;width:100%;height:auto;max-width:720px}
+.esquema rect{fill:var(--fundo2);stroke:var(--risco);stroke-width:1.2}
+.esquema rect.realce{stroke:var(--realce)}
+.esquema text{font-family:var(--mono);font-size:12.5px;fill:var(--texto)}
+.esquema text.nota{font-size:11px;fill:var(--texto2)}
+.esquema path{fill:none;stroke:var(--texto2);stroke-width:1.3}
+.esquema .seta{fill:var(--texto2);stroke:none}
+@media (max-width:900px){nav{display:none}.envolve{padding:0 16px}body{font-size:16px}h1{font-size:30px}
+ header.topo img{width:64px;height:64px}table{font-size:14.5px}}
+</style>
+</head>
+<body>
+<div class="envolve">
+<nav><a href="#nome">Nome</a><a href="#sinopse">Sinopse</a><a href="#descricao">Descrição</a><a href="#janela-principal">Janela principal</a><a href="#formatos">Formatos</a><a href="#capas">Capas</a><a href="#fonoteca">Fonoteca</a><a href="#base-da-fonoteca">Base de dados da fonoteca</a><a href="#audicoes-do-musica">Audições do Música</a><a href="#listas-m3u">Listas M3U e M3U8</a><a href="#cd-de-audio">CD de áudio</a><a href="#caminho-do-som">O caminho do som</a><a href="#auscultadores">Auscultadores</a><a href="#airplay">AirPlay</a><a href="#sincronizacao">Sincronização</a><a href="#emparelhamento">Emparelhamento</a><a href="#gravacao">Gravação</a><a href="#applescript">AppleScript</a><a href="#histograma">Histograma</a><a href="#notificacoes">Notificações</a><a href="#pagina-a-tocar">Página «a tocar»</a><a href="#extensoes">Extensões do Finder</a><a href="#acerca">Acerca e versão</a><a href="#ficheiros">Ficheiros</a><a href="#requisitos">Requisitos</a><a href="#ver-tambem">Ver também</a></nav>
+<main>
+<header class="topo">
+<img src="imagens/icone.png" alt="Ícone do tocaTintas" width="96" height="96">
+<div>
+<h1>tocaTintas</h1>
+<p class="sub">tocaTintas 4.0.0 (Manual do utente)</p>
+<p class="sub">Outubro de 2026</p>
+</div>
+</header>
+
+<h2 id="nome">Nome</h2>
+<p>tocaTintas: leitor de música para macOS, com crossfeed, AirPlay e gravação.</p>
+
+<h2 id="sinopse">Sinopse</h2>
+<p><strong>tocaTintas</strong></p>
+<p><strong>Ficheiro</strong> ▸ <strong>Abrir…</strong> <em>lista.m3u</em> | <em>lista.m3u8</em></p>
+<p><strong>Ficheiro</strong> ▸ <strong>Tocar o CD</strong></p>
+<p><strong>Ficheiro</strong> ▸ <strong>Ligar faixas do Música…</strong></p>
+<p><strong>Ficheiro</strong> ▸ <strong>Sincronizar com o Música</strong></p>
+<p><strong>Ficheiro</strong> ▸ <strong>Sair do modo corrente</strong> (⇧⌘P)</p>
+<p><strong>Ajuda</strong> ▸ <strong>Ajuda do tocaTintas</strong> (⌘?)</p>
+<p><code>osascript -e 'tell application "tocaTintas" to</code> <em>comando</em><code>'</code></p>
+
+<h2 id="descricao">Descrição</h2>
+<p>O <strong>tocaTintas</strong> toca a fonoteca guardada em disco, milhares de faixas em FLAC, WavPack, Monkey’s Audio, ALAC e outros formatos, sem a importar para lado nenhum. Percorre a pasta de música, por mais subpastas que tenha, e toca o que lá encontra pela ordem, ao acaso ou em repetição.</p>
+<p>Cada faixa toca com a sua <strong>capa</strong>, a que vem embutida no ficheiro ou, se não houver, a imagem da pasta do álbum. A mesma capa aparece na janela, na notificação, na página «a tocar» e, nos ficheiros WavPack, no próprio ícone do Finder. Um CD metido no leitor recebe a capa do mesmo álbum na fonoteca ou a do Cover Art Archive (ver <a href="#capas"><strong>CAPAS</strong></a>).</p>
+<p>Além disso, faz o que os leitores correntes não fazem:</p>
+<ul>
+<li>crossfeed <a href="https://bs2b.sourceforge.net/">bs2b</a> e equalização <a href="https://github.com/jaakkopasanen/AutoEq">AutoEQ</a> para os auscultadores;</li>
+<li>transmissão para receptores AirPlay e AirPlay 2, como o HomePod e a Apple TV;</li>
+<li>leitura de CDs, com os nomes vindos do <a href="https://musicbrainz.org/">MusicBrainz</a> e do <a href="https://gnudb.org/">gnudb</a>;</li>
+<li>contagem das audições numa base de dados da fonoteca, que junta também o que se ouve na aplicação Música;</li>
+<li>gravação do que o Mac toca, bit a bit e à frequência do original, incluindo o Dolby Atmos binaural da aplicação Música;</li>
+<li>um histograma de frequências em tempo real;</li>
+<li>um dicionário AppleScript, para ser comandado de fora.</li>
+</ul>
+
+<h2 id="janela-principal">Janela principal</h2>
+<figure>
+<img src="imagens/janela.png" alt="Janela principal do tocaTintas a tocar Figure Eights, de Buddy Rich e Max Roach" width="750" height="282">
+<figcaption>Fig. 1 — a janela principal, a tocar «Figure Eights» de <em>Rich Versus Roach</em>.</figcaption>
+</figure>
+<p>À esquerda fica a capa. Ao centro estão o artista, o álbum e a faixa, em etiquetas que deslizam quando o texto não cabe, e à direita o histograma. Por baixo de tudo fica a barra de progresso.</p>
+
+<p class="rotulo"><strong>etiquetas deslizantes</strong></p>
+<p>Um texto que não cabe aparece cortado a meio com «…» (<em>Bach: Goldberg…BWV 988</em>), como em qualquer etiqueta do macOS. De tempos a tempos, desliza da direita para a esquerda até se ver todo, seguido de uma cópia que traz o princípio de volta ao lugar. No fim, volta à forma cortada. As bordas esbatem-se, para que o texto não entre nem saia de repente.</p>
+<p>As três etiquetas revezam-se, e só uma desliza de cada vez, pela ordem artista, álbum e faixa. As que cabem são saltadas. Quando começa uma faixa nova, tudo fica parado 2 s antes da primeira passagem, e entre duas passagens há 8 s. O texto anda a 50 pt/s, cerca de quatro caracteres e meio por segundo. Uma passagem só começa se a faixa durar até ela acabar, para que um título não fique a meio caminho quando a faixa seguinte o substitui.</p>
+<p>O movimento é feito pelo Core Animation, no servidor de composição. O texto desenha-se uma vez por passagem, e a aplicação só acorda duas vezes, no princípio e no fim. Redesenhar a 60 Hz custava cerca de 4 % do processador; assim, quase não custa nada.</p>
+
+<p class="rotulo"><strong>escolher a música</strong></p>
+<p>O menu em baixo, à esquerda, lista as faixas da pasta corrente, cada uma com o formato entre parênteses: <code>(flac)</code>, <code>(wv)</code> e, nos <code>.m4a</code>, <code>(aac)</code> ou <code>(alac)</code>, conforme o que a fonoteca diz que lá está. Pode escrever-se o princípio do nome para o completar. Os acentos contam como se escrevem no teclado, e um título que comece por um número («12 Études») também se encontra por esse número.</p>
+
+<p class="rotulo"><strong>⏮ ▶ ⏸ ⏹ ⏭</strong></p>
+<p>Anterior, tocar, pausa, parar e seguinte. Quando a janela mostra o que a aplicação Música está a tocar, os botões comandam o Música (ver a seguir).</p>
+
+<p class="rotulo"><strong>repetir</strong>, <strong>baralhar</strong></p>
+<p>O botão de repetir volta a tocar a faixa em curso quando ela chega ao fim, sem parar, até ser desligado. Cada repetição conta como uma audição nova. O botão de baralhar baralha a lista em vigor uma vez, e a ordem mantém-se até ser desligado. Nenhuma faixa se repete antes de todas terem tocado.</p>
+
+<p class="rotulo"><strong>⏺</strong></p>
+<p>Grava para WAV (ver <a href="#gravacao"><strong>GRAVAÇÃO</strong></a>).</p>
+
+<p class="rotulo"><strong>⏏</strong></p>
+<p>Ejecta o CD. Só fica activo quando há um disco no leitor.</p>
+
+<p class="rotulo"><strong>auscultadores</strong> (à esquerda, por baixo da capa)</p>
+<p>Liga e desliga o tratamento dos auscultadores, o crossfeed e a equalização, <strong>sem mexer no volume</strong>, para se poder comparar o som com e sem ele. Azul quer dizer ligado e branco desligado. Sem auscultadores ligados, o botão apita e nada muda.</p>
+
+<p class="rotulo"><strong>AirPlay</strong> (à direita, por baixo do histograma)</p>
+<p>Escolhe o receptor. Com <strong>⌘-clique</strong>, a sessão com o receptor corrente é reaberta, o que resolve os casos em que ele adormeceu ou a rede falhou por instantes.</p>
+
+<h3>O que a aplicação Música toca</h3>
+<p>Quando o tocaTintas está parado, nem a tocar nem em pausa, a janela mostra o que a aplicação Música estiver a tocar: a capa, o artista, o álbum, o título e a barra de progresso. O título leva ♫ à frente, para se saber de onde vem. Isto serve sobretudo para gravar, porque se vê ali o que está a entrar no ficheiro. Logo que o tocaTintas toque alguma coisa sua, a janela volta a ser dele.</p>
+<p>O Música avisa cada faixa nova, cada pausa e cada paragem. Entre avisos, a barra avança sozinha e é acertada pela posição verdadeira a cada cinco segundos. Se o Música não responder, a janela mantém o que mostra e volta a perguntar daí a cinco segundos. Só desiste à terceira falha seguida, até ao aviso seguinte do Música.</p>
+<p class="rotulo"><strong>os botões</strong></p>
+<p>Com o Música na janela, os botões ⏮ ▶ ⏸ ⏹ ⏭ comandam o Música. O ⏸ alterna entre pausa e reprodução, como no tocaTintas. O ⏮ vai sempre à faixa anterior, também como no tocaTintas, e não ao princípio da faixa, como o botão do próprio Música. O ⏹ pára o Música e devolve a janela ao tocaTintas. Para tocar uma faixa do tocaTintas com o Música à vista, escolhe-se a faixa na lista ou pára-se primeiro o Música. Se o Música não responder, nada acontece: tocar de repente outra coisa seria mais estranho do que um clique sem efeito. Os comandos AppleScript continuam a ser só do tocaTintas.</p>
+<p class="rotulo"><strong>a contagem</strong></p>
+<p>Por baixo, à direita, aparece quantas vezes a faixa já tocou, incluindo «tocou 0 vezes», que é a forma de saber que é a primeira. Para as faixas da biblioteca do Música, a contagem é a do próprio Música. Para as faixas do catálogo do Apple Music que não estão na biblioteca, e para as das estações, o Música não guarda contagem nenhuma. Nesse caso, a contagem é a da base da fonoteca, que inclui as audições da mesma música nos ficheiros e nos CDs (ver <a href="#audicoes-do-musica"><strong>AUDIÇÕES DO MÚSICA</strong></a>).</p>
+<p class="rotulo"><strong>a capa</strong></p>
+<p>Para as faixas da biblioteca, a capa é a que o Música dá. Para as do catálogo e das estações, o Música entrega pelo AppleScript a capa da faixa anterior, ou nenhuma, embora o seu minileitor mostre a certa. Por isso, o tocaTintas vai buscar a capa dessas faixas ao catálogo da Apple, pela pesquisa pública do iTunes, na loja do país do Mac, a 600 px. Procura primeiro o álbum pelo artista e pelo nome. Se não o encontrar, procura a faixa pelo artista e pelo título, e dela tira o álbum. O nome do álbum compara-se sem contar maiúsculas e acentos e, se for preciso, sem sufixos de edição como «(Deluxe Version)», «- EP» ou «- Single». Entre os álbuns que servem, o do mesmo artista tem prioridade, porque há, por exemplo, mais de um «Bloom». Sem correspondência fica a imagem genérica, porque a capa de outro disco engana mais do que nenhuma. A capa chega uns instantes depois do resto.</p>
+
+<h2 id="formatos">Formatos</h2>
+<p><a href="https://xiph.org/flac/">FLAC</a>, <a href="https://www.wavpack.com/">WavPack</a> (<code>.wv</code>), <a href="https://www.monkeysaudio.com/">Monkey’s Audio</a> (<code>.ape</code>), <a href="https://github.com/macosforge/alac">ALAC</a> e AAC (<code>.m4a</code>), AIFF, MP3 e <a href="https://opus-codec.org/">Opus</a>. Quando a mesma faixa existe em vários formatos, a preferência segue a ordem desta lista.</p>
+<p>As etiquetas lêem-se do próprio ficheiro: comentários Vorbis no FLAC e no Opus, e APEv2 no fim do ficheiro no WavPack e no Monkey’s Audio.</p>
+
+<h2 id="capas">Capas</h2>
+<p class="rotulo"><strong>Ficheiros</strong></p>
+<p>Primeiro procura-se a capa embutida, que é o bloco PICTURE do FLAC ou o item <code>Cover Art (Front)</code> do APEv2. Se não houver, procura-se na pasta do álbum, por esta ordem:</p>
+<ol>
+<li><code>albumart_backup/cover.jpg</code> ou <code>.png</code>, onde o <strong>abcde</strong>(1) guarda a capa de cada álbum;</li>
+<li><code>cover.jpg</code>, <code>folder.jpg</code>, <code>front.jpg</code>, <code>cover.png</code> e <code>folder.png</code>;</li>
+<li>qualquer imagem da pasta, por ordem alfabética.</li>
+</ol>
+<p>O terceiro passo existe por causa do abcde. Ao embutir a capa nos vários formatos, ele chega a apagar a <code>cover.jpg</code> e a deixar só as <code>cover-resized-NNNN.jpg</code>. Os <code>.ape</code> que produz não trazem capa nenhuma.</p>
+<p class="rotulo"><strong>CDs</strong></p>
+<p>As fontes consultam-se pela ordem escolhida no separador <strong>CD</strong>: a imagem da pasta do mesmo álbum na fonoteca ou a do <a href="https://coverartarchive.org/">Cover Art Archive</a>. Neste último, tenta-se primeiro a capa da edição que o MusicBrainz identificou, depois a de outra edição do mesmo disco e, por fim, a do grupo de lançamento, que pode ser a de outra edição do mesmo álbum, mesmo noutro formato. O gnudb não tem capas.</p>
+<p class="rotulo"><strong>Aplicação Música</strong></p>
+<p>Ver <a href="#janela-principal">o que a aplicação Música toca</a>, na janela principal.</p>
+<p class="rotulo"><strong>Sem capa</strong></p>
+<p>Um CD sem capa em nenhuma fonte e uma faixa cujas etiquetas não se consigam ler ficam com a imagem genérica do tocaTintas.</p>
+
+<h2 id="fonoteca">Fonoteca</h2>
+<p>A pasta de música escolhe-se nas Preferências, no separador <strong>Música</strong>. O tocaTintas percorre todas as subpastas e encontra sozinho os ficheiros de áudio.</p>
+<p>Dentro dessa pasta pode estar <code>CDs/.fonoteca.sqlite</code>, a base de dados mantida pelo <strong>verificar_md5IV.sh</strong> e pelo <strong>fonoteca.py</strong>. Cada música tem um UUID, que é o mesmo na etiqueta <code>FONOTECA_ID</code> do ficheiro e na faixa do CD de onde veio. O tocaTintas acrescenta-lhe as audições, que dão o «tocou 7 vezes» da janela, e os discos que tocou antes de terem sido riporinados. Quando preenche um campo, só o faz se ele estiver vazio, e nunca apaga nem substitui nada (ver <a href="#base-da-fonoteca"><strong>A BASE DE DADOS DA FONOTECA</strong></a>).</p>
+<p>A base pode estar num disco externo a dormir. Todo o acesso passa por uma fila própria, fora do thread principal, e se a base não existir, o tocaTintas tenta outra vez da vez seguinte, porque o disco pode ainda não estar montado.</p>
+<h3>Registo automático</h3>
+<p>Um álbum novo, ou uma pasta que mudou de nome ou de sítio, entra na base sem ser preciso correr o verificar_md5IV.sh. O tocaTintas acompanha a pasta de música pelo FSEvents do macOS e, quando ela fica um minuto sem mudanças, corre o <code>fonoteca.py registar</code> sobre as pastas que mudaram. O minuto de espera existe porque um rip ou um corte escrevem durante muito tempo, e o registo pode gravar o <code>FONOTECA_ID</code> nos ficheiros, o que nunca deve acontecer num ficheiro a meio.</p>
+<p>O registo trata dos ficheiros novos, dos que mudaram de sítio (reconhecidos pelo MD5 do áudio e pelo <code>FONOTECA_ID</code>), dos que desapareceram e das audições que tinham ficado sem ficheiro. Não verifica o áudio, que continua a ser trabalho do verificar_md5IV.sh. A saída fica em <code>registar.log</code>. Se houver ficheiros com problemas, ou se o registo não chegar a correr, aparece uma notificação.</p>
+
+<h2 id="base-da-fonoteca">A base de dados da fonoteca</h2>
+<figure>
+<img src="imagens/fonoteca.png" alt="DB Browser for SQLite com a vista fonoteca aberta, ordenada pela última audição" width="1582" height="967" loading="lazy">
+<figcaption>Fig. 3 — a vista <code>fonoteca</code> no DB Browser for SQLite, ordenada pela última audição, antes de lá estarem as músicas que só existem na aplicação Música.</figcaption>
+</figure>
+<p>A base separa três coisas que um leitor de música costuma confundir: a <strong>música</strong> (uma gravação), o <strong>ficheiro</strong> (onde ela está agora, num dado formato) e o <strong>disco</strong> (o CD de onde veio). Uma música pode ter vários ficheiros, por exemplo um FLAC e um AAC da mesma gravação, e pode estar em vários discos, como uma compilação e o álbum original. As audições contam-se na música, e por isso não se perdem quando um ficheiro muda de nome, de pasta ou de formato. A aplicação Música entra como uma quarta fonte, com as suas próprias faixas.</p>
+<p>Os números entre parênteses são os de 29 de Outubro de 2026.</p>
+<h3>Tabelas</h3>
+<p class="rotulo"><strong>musicas</strong> (37&nbsp;675)</p>
+<p>Uma linha por gravação. A chave é um UUID v4, o mesmo que está na etiqueta <code>FONOTECA_ID</code> dos ficheiros. Guarda o título, o artista, o álbum, o disco, a faixa e a duração, e, como referência, os identificadores do MusicBrainz da gravação e do lançamento. Cerca de metade são músicas que só existem na aplicação Música.</p>
+<p class="rotulo"><strong>ficheiros</strong> (19&nbsp;471)</p>
+<p>Uma linha por ficheiro de áudio, com a música a que pertence, o <strong>MD5 do áudio</strong>, o formato, o caminho e a última vez que o caminho foi confirmado. O MD5 é o das tramas ou dos pacotes de áudio tal como estão, sem etiquetas nem capa, para que mudá-las não o altere. Só o Monkey’s Audio é descodificado para PCM. Um ficheiro que desapareça fica com o caminho a NULL em vez de ser apagado. Assim, a sua história continua na base, e o MD5 permite reconhecê-lo se voltar a aparecer noutro sítio.</p>
+<p class="rotulo"><strong>discos</strong> (1&nbsp;237)</p>
+<p>Os CDs, pelo identificador CDDB de oito dígitos e, quando se conhecem, pela TOC completa e pelo disc ID do MusicBrainz. O CDDB sozinho não basta, porque discos diferentes podem partilhá-lo. Por isso, o que é único é o par CDDB e TOC.</p>
+<p class="rotulo"><strong>faixas_cd</strong> (15&nbsp;991)</p>
+<p>A ligação entre discos e músicas: a faixa <em>n</em> do disco <em>d</em> é a música <em>m</em>. É por aqui que um CD metido no leitor encontra os nomes, a capa e o ganho na fonoteca, e que uma audição do CD conta para a mesma música que o ficheiro riporinado.</p>
+<p class="rotulo"><strong>faixas_musica</strong> (37&nbsp;896)</p>
+<p>As faixas da aplicação Música, pelo persistent ID que o Música lhes dá, cada uma ligada à sua música. O estado diz como foi ligada: automaticamente, por escolha, com uma música própria criada para ela, ou ainda pendente de escolha. Guarda também o que o Música mostra (artista, álbum, faixa, título e duração), a contagem que o Música tinha quando a faixa entrou na base e a última contagem já registada. As faixas do catálogo tocadas fora da biblioteca têm uma chave tirada da própria faixa, porque o persistent ID delas muda a cada reprodução. Ver <a href="#audicoes-do-musica"><strong>AUDIÇÕES DO MÚSICA</strong></a>.</p>
+<p class="rotulo"><strong>candidatas_musica</strong> (5&nbsp;098)</p>
+<p>Para cada faixa pendente, as músicas a que pode corresponder, pela ordem de preferência, com o critério que as encontrou e a diferença de duração.</p>
+<p class="rotulo"><strong>audicoes</strong> (992)</p>
+<p>Uma linha por audição, com a música, a data e hora (ISO 8601, em UTC), a origem (<code>ficheiro</code>, <code>cd</code> ou <code>musica</code>) e o ficheiro, o disco ou a faixa do Música que tocou. Uma faixa do tocaTintas conta ao fim de 5 segundos de audição efectiva. As pausas não contam, nem avançar antes disso, e cada reprodução conta uma vez. As regras da aplicação Música estão em <a href="#audicoes-do-musica"><strong>AUDIÇÕES DO MÚSICA</strong></a>.</p>
+<p class="rotulo"><strong>contagens_importadas</strong> (14&nbsp;616)</p>
+<p>As contagens que o tocaTintas guardava antes de haver base, em <code>~/Library/Application Support/tocaTintas/contagens.json</code>. Foram trazidas uma única vez pelo <code>fonoteca.py importar</code>, que recusa repetir a importação. Somam-se às audições, mas não têm datas: só as audições novas as têm.</p>
+<h3>Vistas</h3>
+<p class="rotulo"><strong>contagens</strong></p>
+<p>Por música, o total de audições e a data da última. O total soma as contagens importadas, as que o Música tinha quando as suas faixas foram ligadas à música e as audições registadas.</p>
+<p class="rotulo"><strong>ficheiros_contagens</strong></p>
+<p>Por ficheiro, quantas vezes a música tocou ao todo e quantas tocou <strong>este</strong> ficheiro. É o que permite comparar o FLAC com o AAC da mesma música.</p>
+<p class="rotulo"><strong>fonoteca</strong></p>
+<p>A vista de leitura, a da Fig. 3. Tem uma linha por música, com as audições, a última, quantos ficheiros tem, os formatos (<code>aac+flac</code>), o caminho preferido (o do FLAC, se houver) e os CDs onde está, no formato <code>cddb:faixa</code>.</p>
+<p class="rotulo"><strong>audicoes_locais</strong></p>
+<p>As audições à hora local, a mais recente primeiro. Mostra a hora (WET ou WEST, conforme a data), o artista, o álbum, o título, quantas vezes a música já tocou ao todo (a contagem que a janela mostra) e o que tocou: <code>flac</code>, <code>aac</code>, <code>alac</code>, <code>mp3</code>, <code>cd</code> ou <code>música</code>. A tabela guarda as horas em UTC, para que a ordem e as contas não se baralhem na mudança de hora. A conversão faz-se na leitura e acompanha a hora de Verão de cada audição.</p>
+<h3>Quem escreve o quê</h3>
+<p>O <strong>verificar_md5IV.sh</strong> e o <strong>fonoteca.py</strong> mantêm as músicas, os ficheiros, os discos e as faixas dos CDs. O <code>fonoteca.py sincronizar-musica</code> mantém as faixas do Música e regista as audições que o Música contou. O tocaTintas acrescenta:</p>
+<ul>
+<li>uma linha em <strong>audicoes</strong> por cada faixa ouvida;</li>
+<li>uma linha em <strong>musicas</strong> só com o UUID, quando toca um ficheiro com <code>FONOTECA_ID</code> que o fonoteca.py ainda não viu, e que este completa da vez seguinte;</li>
+<li>o disco e as suas faixas, quando toca um CD que a base ainda não conhece. Os nomes vêm do MusicBrainz ou do gnudb e ficam à espera do ficheiro que um dia for riporinado;</li>
+<li>a TOC e o disc ID de um disco conhecido só pelo CDDB, e o título, o artista e o álbum de uma faixa que não os tinha;</li>
+<li>as escolhas feitas na janela <strong>Ligar faixas do Música</strong>, e as audições das faixas do catálogo, pelo <code>fonoteca.py ouvir-musica</code>.</li>
+</ul>
+<p>Os campos da quarta alínea só se escrevem quando estão vazios. O que os scripts da fonoteca lá puseram nunca é substituído.</p>
+<h3>Exemplos</h3>
+<pre><code>sqlite3 -readonly CDs/.fonoteca.sqlite \
+  "SELECT audicoes, artista, titulo FROM fonoteca
+   ORDER BY audicoes DESC LIMIT 10"</code></pre>
+<p>As dez músicas mais ouvidas. Com <code>-readonly</code>, a consulta não interfere com o tocaTintas a correr.</p>
+<pre><code>sqlite3 -readonly -header -column CDs/.fonoteca.sqlite \
+  "SELECT * FROM audicoes_locais LIMIT 20"</code></pre>
+<p>As últimas vinte audições, à hora local.</p>
+
+<h2 id="audicoes-do-musica">Audições da aplicação Música</h2>
+<p>O que se ouve na aplicação Música também conta na base da fonoteca, e conta na música certa. Se a mesma gravação existir num ficheiro ou num CD, as audições juntam-se às dessa música. Se não existir, a faixa do Música fica com uma música própria.</p>
+<h3>As três regras</h3>
+<table>
+<tr><th>O que toca</th><th>Quando conta</th><th>Quem conta</th></tr>
+<tr><td>Um ficheiro ou um CD, no tocaTintas</td><td>aos 5 s de audição</td><td>o tocaTintas</td></tr>
+<tr><td>Uma faixa da biblioteca do Música</td><td>quando a faixa chega ao fim</td><td>o Música, com o seu «played count»</td></tr>
+<tr><td>Uma faixa do catálogo fora da biblioteca, ou de uma estação</td><td>aos 5 s de audição</td><td>o tocaTintas</td></tr>
+</table>
+<p>A terceira regra existe porque o Música não guarda contagem para as faixas que não estão na biblioteca: para ele, ficam sempre a zero. Nesse caso, quem conta é o tocaTintas, pela mesma regra dos seus ficheiros, enquanto mostra o Música na janela. As pausas não contam, e cada reprodução conta uma vez. Se a faixa for depois acrescentada à biblioteca, o tocaTintas deixa de a contar e a contagem passa a ser a do Música.</p>
+<h3>Sincronização</h3>
+<p>O <code>fonoteca.py sincronizar-musica</code> lê a biblioteca do Música de uma vez, em poucos segundos, e só se o Música estiver aberto. O tocaTintas corre-o um minuto depois de arrancar e depois de meia em meia hora. Também se pode correr à mão em <strong>Ficheiro</strong> ▸ <strong>Sincronizar com o Música</strong>.</p>
+<p>A cada sincronização:</p>
+<ul>
+<li>cada faixa nova é ligada à sua música, fica pendente de escolha ou recebe uma música própria. A contagem que o Música já tinha passa a contar logo que a faixa está ligada;</li>
+<li>cada aumento da contagem do Música numa faixa ligada passa a ser uma audição, com a data da última reprodução que o Música guardou;</li>
+<li>as faixas pendentes são reavaliadas, porque entretanto pode ter aparecido a versão certa;</li>
+<li>uma música própria funde-se com a versão local logo que esta apareça sem dúvida, por exemplo depois de se gravar o álbum a partir do Música.</li>
+</ul>
+<p>Se o Música passar a mostrar uma contagem mais baixa, por exemplo porque a faixa foi apagada e reposta, o que já estava registado fica.</p>
+<h3>Como se liga uma faixa</h3>
+<p>Uma faixa do Música liga-se sozinha a uma música da base quando há uma única candidata, com uma duração que não difere mais de 2 s, segundo um destes critérios, do mais estreito para o mais largo:</p>
+<ol>
+<li>o artista, o álbum, o disco, a faixa e o título iguais;</li>
+<li>o artista principal e o título iguais;</li>
+<li>o artista principal e o título iguais, sem contar sufixos de remasterização como «(2015 Remaster)».</li>
+</ol>
+<p>Há ainda um caso que se liga sozinho: o mesmo artista, o mesmo álbum e o mesmo título, com uma diferença de duração até 5 s. É o mesmo disco noutra masterização, ou com pausas diferentes no início e no fim. O «Sea, Swallow Me» do CD dura 191,4 s e o do Música 189,0 s. No título só se ignora a remasterização: «(Mono Mix)», «(EP Version)» ou «(Alternate Mix)» são outras misturas e não se ligam assim.</p>
+<p>Uma candidata que só exista na aplicação Música nunca passa à frente de uma versão local possível. Nesse caso, a faixa fica para escolha.</p>
+<p>Ficam pendentes as faixas com candidatas mas sem nenhuma certa. São encontradas pelo título sem sufixos de versão («Live», «Mix», «Edit»…), pelo álbum e número da faixa, muito usado na música clássica, em que o Música e o MusicBrainz escrevem o artista de maneiras diferentes, ou pelo título com outra duração. Uma faixa pendente ainda não conta. O que o Música tiver contado entretanto entra quando ela for ligada.</p>
+<h3>A janela «Ligar faixas do Música»</h3>
+<p>Abre-se em <strong>Ficheiro</strong> ▸ <strong>Ligar faixas do Música…</strong>, ou clicando na notificação «Faixas do Música por ligar», que aparece quando o número de pendentes aumenta. É o mesmo género de escolha que o Música propõe quando um CD tem várias entradas.</p>
+<p>À esquerda estão as faixas pendentes, com um campo para filtrar por artista, álbum ou título. À direita estão as candidatas da faixa escolhida, com a sugestão já seleccionada, a diferença de duração, onde está cada uma (o formato, o CD ou «só no Música») e o critério que a encontrou. A última opção é sempre <strong>Nenhuma — fica como música própria</strong>.</p>
+<p class="rotulo"><strong>Ligar</strong> (↩, ou duplo clique)</p>
+<p>Liga a faixa à candidata escolhida e passa à seguinte.</p>
+<p class="rotulo"><strong>Saltar</strong></p>
+<p>Deixa a faixa pendente e passa à seguinte.</p>
+<p class="rotulo"><strong>Aceitar o álbum</strong></p>
+<p>Aceita as sugestões de todas as faixas pendentes do mesmo álbum, depois de uma confirmação que diz quantas ficam ligadas e quantas ficam como músicas próprias. É a forma rápida de tratar os discos de música clássica.</p>
+<p class="rotulo"><strong>▶︎ Ouvir 10 s</strong></p>
+<p>Toca dez segundos da versão local, a partir de 30 % da duração, para comparar de ouvido. Não conta como audição. Só funciona com os formatos que o macOS lê sozinho (FLAC, ALAC, AAC e MP3).</p>
+<p>A sugestão é a primeira candidata, excepto quando só se encontrou uma pelo título com outra duração. Nesse caso, a sugestão é <strong>Nenhuma</strong>.</p>
+
+<h2 id="listas-m3u">Listas M3U e M3U8</h2>
+<p class="rotulo"><strong>Ficheiro</strong> ▸ <strong>Abrir…</strong> (⌘O)</p>
+<p>Aceita listas <code>.m3u</code> e <code>.m3u8</code>, que para o macOS são o mesmo tipo de ficheiro (<code>public.m3u-playlist</code>). As listas abertas ficam em <strong>Ficheiro</strong> ▸ <strong>Abrir recentes</strong>.</p>
+<p class="rotulo"><strong>Ficheiro</strong> ▸ <strong>Sair do modo corrente</strong> (⇧⌘P)</p>
+<p>Volta à fonoteca e mantém a faixa que está a tocar.</p>
+<h3>O que se lê da lista</h3>
+<ul>
+<li>Uma faixa por linha. O caminho pode ser <strong>absoluto</strong>, começar por <code>~</code>, ser um endereço <code>file://</code> ou ser <strong>relativo</strong>. Neste caso, conta a partir da pasta onde está a lista, como nos outros leitores.</li>
+<li>As linhas que começam por <code>#</code> são ignoradas, incluindo <code>#EXTM3U</code> e <code>#EXTINF</code>. O título e a duração vêm sempre das etiquetas do próprio ficheiro, nunca da lista.</li>
+<li>O ficheiro lê-se em <strong>UTF-8</strong>, que é o que o <code>.m3u8</code> garante, com ou sem a marca de ordem dos octetos no início. Se não for UTF-8, lê-se em <strong>Windows-1252</strong> e, por fim, em <strong>Latin-1</strong>, as codificações dos <code>.m3u</code> antigos. Um ficheiro em Windows-1252 com acentos quase nunca é UTF-8 válido, e por isso as tentativas sucessivas não se confundem.</li>
+</ul>
+<h3>Ao abrir</h3>
+<p>A lista passa a ser o que toca, e a fonoteca fica onde estava. Abrir uma lista <strong>não interrompe</strong> o que se está a ouvir. Se a faixa em curso fizer parte da lista, continua a tocar, já dentro dela. Se não fizer, acaba de tocar e a seguinte é a primeira da lista. Com o leitor parado, nada arranca sozinho, e o ▶ começa pela primeira faixa. Com o baralhamento ligado, a lista é baralhada.</p>
+<h3>Limitações</h3>
+<ul>
+<li>Os endereços de rede (<code>http://…</code>) não são suportados.</li>
+<li>O tocaTintas lê listas, mas não as grava.</li>
+</ul>
+
+<h2 id="cd-de-audio">CD de áudio</h2>
+<p>Quando se mete um CD, o tocaTintas pergunta se o deve tocar. Se sim, as faixas do disco passam a ser a lista em vigor, como uma lista M3U, e <strong>Sair do modo corrente</strong> volta à fonoteca.</p>
+<p>Os nomes e a capa procuram-se pela ordem escolhida no separador <strong>CD</strong> das Preferências:</p>
+<ul>
+<li><strong>na fonoteca</strong>, pelo identificador CDDB ou pelo disc ID do MusicBrainz guardado nos FLAC desse disco;</li>
+<li><strong>na internet</strong>, primeiro no MusicBrainz (TOC completa, <a href="https://musicbrainz.org/doc/Disc_ID_Calculation">disc ID</a> e gravações) e, para os discos que ele não conheça, no gnudb, o antigo freedb. O gnudb exige um endereço de email, e sem ele não é usado. Também não tem capas.</li>
+</ul>
+<p>As respostas da internet ficam guardadas, e cada disco só se pede uma vez. O ganho ReplayGain vem sempre da fonoteca, quando o álbum lá está.</p>
+<h3>O arranque do leitor</h3>
+<p>O <strong>cddafs</strong> do macOS não guarda cache, e duas leituras simultâneas atrasam-se uma à outra. Ao arrancar, o leitor físico fica parado entre 4 e 6 segundos. Durante esse tempo a janela diz «A preparar o leitor de CD…». Não é uma falha.</p>
+
+<h2 id="caminho-do-som">O caminho do som</h2>
+<p>A saída do sistema é o <a href="https://existential.audio/blackhole/"><strong>BlackHole</strong></a>, um aparelho de áudio virtual. Tudo o que o Mac toca entra nele, e dele parte para três sítios:</p>
+<figure>
+<svg class="esquema" viewBox="0 0 720 250" role="img" aria-label="Esquema: o tocaTintas toca para o BlackHole, que alimenta o bs2b_bridge para os auscultadores, o raop_play para o AirPlay e o cava para o histograma">
+<defs><marker id="ponta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="seta" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect x="10" y="100" width="130" height="50" rx="7" class="realce"/><text x="75" y="130" text-anchor="middle">tocaTintas</text>
+<rect x="190" y="100" width="130" height="50" rx="7"/><text x="255" y="123" text-anchor="middle">BlackHole</text><text x="255" y="139" text-anchor="middle" class="nota">saída do sistema</text>
+<rect x="390" y="15" width="150" height="50" rx="7"/><text x="465" y="38" text-anchor="middle">bs2b_bridge</text><text x="465" y="54" text-anchor="middle" class="nota">crossfeed + EQ</text>
+<rect x="390" y="100" width="150" height="50" rx="7"/><text x="465" y="123" text-anchor="middle">raop_play</text><text x="465" y="139" text-anchor="middle" class="nota">ReplayGain</text>
+<rect x="390" y="185" width="150" height="50" rx="7"/><text x="465" y="208" text-anchor="middle">cava</text><text x="465" y="224" text-anchor="middle" class="nota">FFT</text>
+<text x="575" y="45">auscultadores</text>
+<text x="575" y="130">AirPlay</text>
+<text x="575" y="215">histograma</text>
+<path d="M140,125 H184" marker-end="url(#ponta)"/>
+<path d="M320,125 C355,125 355,40 384,40" marker-end="url(#ponta)"/>
+<path d="M320,125 H384" marker-end="url(#ponta)"/>
+<path d="M320,125 C355,125 355,210 384,210" marker-end="url(#ponta)"/>
+<path d="M540,40 H568" marker-end="url(#ponta)"/>
+<path d="M540,125 H568" marker-end="url(#ponta)"/>
+<path d="M540,210 H568" marker-end="url(#ponta)"/>
+</svg>
+<figcaption>Fig. 2 — a topologia de áudio. Os três programas auxiliares vêm dentro do <code>tocaTintas.app</code>.</figcaption>
+</figure>
+<p>Por isso, o tratamento dos auscultadores não afecta o que vai para o AirPlay, e a normalização do AirPlay não afecta o que vai para os auscultadores. Nas colunas do Mac, o som passa sempre sem tratamento.</p>
+<p class="rotulo"><strong>frequência de amostragem</strong></p>
+<p>O BlackHole trabalha a uma única frequência, a que estiver definida na <strong>Configuração de Áudio MIDI</strong>, e tudo o que o Mac toca é convertido para ela antes de lá entrar. A <strong>44,1 kHz</strong>, a frequência dos CDs, a fonoteca passa sem conversão nenhuma, e é essa a frequência para o uso de todos os dias. As outras servem para gravar (ver <a href="#gravacao"><strong>GRAVAÇÃO</strong></a>).</p>
+<p>Os três auxiliares seguem a frequência do BlackHole. O <strong>bs2b_bridge</strong> lê-a ao arrancar e escreve-a na configuração do CamillaDSP, que de outro modo forçaria o BlackHole para a sua própria frequência e desfaria qualquer mudança. O <strong>cava</strong> abre o BlackHole à frequência dele. O caminho do AirPlay converte-a para a do receptor (ver <a href="#airplay"><strong>AIRPLAY</strong></a>). Mudar a frequência com o tocaTintas aberto obriga a ponte a reiniciar, e o som dos auscultadores cala-se por um instante.</p>
+
+<h2 id="auscultadores">Auscultadores</h2>
+<h3>Crossfeed</h3>
+<p>O <a href="https://en.wikipedia.org/wiki/Crossfeed">crossfeed</a> mistura em cada ouvido um pouco do canal oposto, filtrado, como a cabeça faria ao ouvir colunas. Isso desfaz a sensação de o som estar dentro da cabeça. Há três intensidades, no separador <strong>DSP</strong>:</p>
+<p class="rotulo"><strong>Suave</strong></p>
+<p>700 Hz / 4,5 dB. É o perfil por omissão do bs2b.</p>
+<p class="rotulo"><strong>Médio</strong></p>
+<p>700 Hz / 6,0 dB, o perfil de Chu Moy.</p>
+<p class="rotulo"><strong>Forte</strong></p>
+<p>650 Hz / 9,5 dB, o perfil de Jan Meier.</p>
+<p>A mudança tem efeito imediato. O som cala-se por um instante enquanto o filtro reinicia.</p>
+<h3>Equalização</h3>
+<p>O crossfeed imita a cabeça, e a equalização corrige os auscultadores. No separador <strong>Auscultadores</strong> escolhem-se a marca e o modelo entre 523 correcções do <a href="https://github.com/jaakkopasanen/AutoEq">projecto AutoEQ</a>, de 106 marcas, para o alvo Harman over-ear. Todas foram medidas por <a href="https://github.com/jaakkopasanen/AutoEq/tree/master/results/oratory1990">oratory1990</a>, excepto a do Sony MDR-V600, que vem da Innerfidelity. A do Sony MDR-7506 vem embutida.</p>
+<p>Para acrescentar outra, põe-se o ficheiro <code>ParametricEQ.txt</code> em <code>~/Library/Application Support/tocaTintas/eq</code>, na raiz ou numa subpasta com o nome da marca. A linha <strong>Preamp</strong> é lida e respeitada, e é ela que impede o reforço de graves de saturar a saída.</p>
+
+<h2 id="airplay">AirPlay</h2>
+<p>A transmissão é feita pelo <strong>raop_play</strong>, que vem dentro da aplicação e fala os dois protocolos: o AirPlay 1, para os receptores antigos, e o AirPlay 2, para os que só aceitam esse, como o HomePod desde o seu sistema 27. O tocaTintas escolhe o protocolo pelo que o receptor anuncia em <code>/info</code>.</p>
+<p>A API de AirPlay da Apple não está disponível para programas de terceiros, porque exige autorizações restritas. É por isso que o caminho é este.</p>
+<p class="rotulo"><strong>44,1 kHz e 16 bits, sempre</strong></p>
+<p>O protocolo transporta ALAC a 44,1 kHz e 16 bits, e o raop_play não aceita outra coisa. Se o BlackHole estiver a outra frequência, por exemplo a 48 kHz para gravar um master do Apple Music, o tocaTintas converte o som para 44,1 kHz antes de o entregar, com o conversor do macOS na qualidade máxima. Não se ouve diferença, mas só a 44,1 kHz é que o que chega à aparelhagem é, bit a bit, o que está no ficheiro.</p>
+<h3>Normalização do volume</h3>
+<p>No separador <strong>AirPlay</strong>, a partir das etiquetas <a href="https://pt.wikipedia.org/wiki/ReplayGain">ReplayGain</a>:</p>
+<p class="rotulo"><strong>Nenhuma</strong></p>
+<p>O som vai como está no ficheiro.</p>
+<p class="rotulo"><strong>Por faixa, limitado pelo pico</strong></p>
+<p>Todas as faixas vão ao mesmo volume, com o ganho reduzido ao máximo que cada faixa aguenta sem ser ceifada.</p>
+<p class="rotulo"><strong>Por faixa, ganho integral</strong></p>
+<p>Aplica o ganho que a etiqueta indica, mesmo que os picos passem de 0 dBFS e sejam ceifados.</p>
+<p class="rotulo"><strong>Por álbum, limitado pelo pico</strong></p>
+<p>Iguala os discos entre si e mantém as diferenças de nível dentro de cada um, que um disco tem de propósito. Se não houver etiquetas de álbum, usa as de faixa.</p>
+<p>As faixas sem etiquetas tocam como estão.</p>
+<p class="rotulo"><strong>Compensar a atenuação do volume do sistema</strong></p>
+<p>O cursor de volume do BlackHole atenua o áudio antes de tudo o resto, incluindo a transmissão. Com esta opção, o que sai para o AirPlay vai sempre ao nível do ficheiro, e o cursor do Mac passa a controlar só os auscultadores. O volume da aparelhagem controla-se na própria aparelhagem.</p>
+<h3>Atraso do histograma</h3>
+<p>O histograma acompanha o que se ouve na sala. Ver <a href="#sincronizacao"><strong>SINCRONIZAÇÃO DO HISTOGRAMA COM O AIRPLAY</strong></a>.</p>
+
+<h2 id="sincronizacao">Sincronização do histograma com o AirPlay</h2>
+<p>O <strong>cava</strong> lê o BlackHole, no início da cadeia, e mostra o áudio no instante em que é capturado. O receptor AirPlay toca esse mesmo áudio alguns segundos depois. Sem correcção, as barras andariam adiantadas em relação ao que se ouve, e o bombo apareceria antes de soar.</p>
+<p>A correcção tem duas partes: medir o atraso e atrasar o histograma outro tanto.</p>
+<h3>Medir: o relógio do raop_play</h3>
+<p>O <strong>raop_play</strong> é lançado com <strong>-f</strong> <em>FIFO</em> e escreve aí uma linha por segundo, tirada do seu controlador de sincronismo:</p>
+<pre><code>&lt;blocos enviados&gt; &lt;head_ts&gt;</code></pre>
+<p>O primeiro número conta os blocos de áudio <strong>novo</strong> que já foram para a rede, a partir de zero. Cada bloco tem 352 tramas, o máximo que o protocolo permite. Do lado do tocaTintas, sabe-se quantas tramas foram capturadas e quantas a correcção de deriva deitou fora. O que foi capturado e ainda não foi enviado está em trânsito, no tampão circular, no encadeamento do sistema ou já entregue ao raop_play. Somando-lhe a latência pedida ao receptor (<strong>-l</strong>, um segundo por omissão), obtém-se o atraso total:</p>
+<pre><code>Δ = (capturadas − cortadas − enviadas + latência) / 44100</code></pre>
+<p>A conta parte do que foi capturado, e não do que foi entregue ao raop_play, para incluir o tampão circular. Normalmente está quase vazio, mas a deriva entre o relógio do Mac e o do receptor pode enchê-lo até seis segundos, e é precisamente aí que interessa saber o atraso.</p>
+<p class="rotulo"><strong>Porque não o head_ts</strong></p>
+<p>O segundo número, a marca temporal RTP, avança com tudo, incluindo os reenvios. Parece útil, mas não serve. É recalculado a partir do relógio NTP a cada arranque de fluxo, e por isso uma diferença de head_ts que atravesse uma pausa mede o tempo que passou, e não tramas. O contador de blocos não conta o áudio reenviado ao retomar, que não é novo, e por isso é a fonte certa. Isto foi verificado no código do rust-raop-player (<code>raop_client.rs</code>).</p>
+<h3>Atrasar: a linha de atraso</h3>
+<p>As tramas do cava, cerca de 25 por segundo, entram numa fila com a hora a que foram lidas, e só se desenham quando passaram Δ segundos. O Δ actualiza-se uma vez por segundo, que é a cadência a que o raop_play o fornece.</p>
+<ul>
+<li><strong>Quando o atraso cai de repente</strong>, porque a correcção de deriva cortou áudio, a fila inteira pode ficar vencida de uma vez. Nesse caso, desenha-se só a trama mais recente, porque mostrá-las todas seria reproduzi-las aceleradas. O áudio também salta, e o histograma salta com ele.</li>
+<li><strong>Quando o atraso cresce</strong>, ao ligar o AirPlay, a fila tem de encher antes de haver alguma trama vencida. Se passarem 200 ms sem nada para desenhar, as colunas apagam-se. Deixar a última à vista seria mostrar o passado como se fosse o presente. O ecrã vazio é o correcto, porque ainda não soou nada que lhe corresponda.</li>
+<li><strong>O atraso nunca passa de 8 segundos.</strong> A correcção de deriva não deixa o áudio em trânsito passar dos seis, e a latência é de um. Acima disso, é mais provável o relógio estar errado do que o áudio estar tanto tempo a caminho.</li>
+</ul>
+<h3>Quando se aplica</h3>
+<p><strong>Só sem auscultadores.</strong> Com auscultadores ligados, ouve-se o som local, sem atraso, e o histograma acompanha esse, mesmo com o AirPlay a transmitir ao mesmo tempo. Sem auscultadores, o que se ouve é o receptor, e o histograma atrasa-se o Δ medido.</p>
+<p>Um Δ igual a zero quer dizer «não sei», e não «estão sincronizados». Se o raop_play não tiver escrito nenhuma linha, o histograma não se atrasa. Ao fim de cinco segundos de transmissão sem linhas, o tocaTintas regista o problema.</p>
+<h3>Limitação</h3>
+<p>A soma da latência pressupõe que o receptor guarda exactamente as tramas que lhe foram pedidas. Um aparelho que guarde menos faz o Δ sair grande de mais, e o som chega antes das barras. É um desvio fixo de cada aparelho. Distingue-se de um erro de contagem pela forma: no registo é constante, enquanto um erro de contagem varia com o que se passou no fluxo.</p>
+
+<h2 id="emparelhamento">Emparelhamento</h2>
+<p>A Apple TV 4K só aceita som de quem tiver feito um emparelhamento com ela. Faz-se uma vez, no separador <strong>Emparelhamento</strong>. Escolhe-se o aparelho, carrega-se em <strong>Emparelhar</strong> e escreve-se o código de quatro dígitos que aparece no ecrã da televisão.</p>
+<p>As credenciais ficam no porta-chaves do Mac. Se o aparelho for reposto, o emparelhamento perde-se e é preciso fazê-lo de novo. O HomePod e a Apple TV antiga não precisam disto e não aparecem na lista.</p>
+<p>Se se escolher um aparelho que ainda não foi emparelhado, o tocaTintas avisa e oferece-se para abrir o separador.</p>
+
+<h2 id="gravacao">Gravação</h2>
+<p>O botão <strong>⏺</strong> grava para WAV em vírgula flutuante de 32 bits, em <code>~/Library/Application Support/tocaTintas</code>. A fonte escolhe-se no separador <strong>Gravação</strong>:</p>
+<p class="rotulo"><strong>O que o Mac toca (BlackHole)</strong></p>
+<p>Tudo o que passa pela saída do sistema, à frequência do BlackHole. Se a saída não for o BlackHole, o tocaTintas avisa que a gravação vai sair em silêncio.</p>
+<p class="rotulo"><strong>A aplicação Música (Dolby Atmos binaural)</strong></p>
+<p>Só o som do Música, captado directamente do processo. Quando o Música toca para os AirPods com o áudio espacial em <strong>Fixo</strong>, faz ele próprio o binaural do Atmos, e é isso que fica gravado, em estéreo a 48 kHz.</p>
+<p>Os ficheiros chamam-se <code>Recording_</code><em>UUID</em><code>.wav</code> e <code>Recording_Music_</code><em>UUID</em><code>.wav</code>. A vírgula flutuante não é um capricho. Com o volume do Mac abaixo do máximo, o sinal chega atenuado, e em 16 bits perderia resolução que nenhuma normalização posterior recupera. Em vírgula flutuante, a atenuação não custa nada.</p>
+
+<h3>Gravar o Apple Music bit a bit</h3>
+<p>O som só passa do Música para o BlackHole sem ser alterado se se verificarem três condições: o volume do Música no máximo, nenhum efeito ligado (equalizador, <strong>Sound Check</strong> ou transição entre faixas) e o BlackHole <strong>à mesma frequência do master</strong>. Se a última falhar, o Música reamostra o som sem avisar. A gravação ouve-se bem, mas já não é o master.</p>
+<p>A frequência do master varia de álbum para álbum: 44,1 kHz num disco digital dos anos 90, 48 kHz em muitas edições recentes. As preferências do Música não a indicam, porque «Sem perdas, até 24 bits/48 kHz» é o máximo que ele aceita, e não o que cada álbum é. Quem a sabe é o próprio Música, e o tocaTintas pergunta-lha.</p>
+<p class="rotulo"><strong>a frequência acerta-se sozinha</strong></p>
+<p>Para gravar pelo BlackHole, carrega-se no ⏺ e depois toca-se o álbum no Música, como sempre. Enquanto grava, o tocaTintas acompanha o Música:</p>
+<ol>
+<li>ao carregar no ⏺, se o Música já tiver uma faixa escolhida, o tocaTintas põe o BlackHole à frequência dela;</li>
+<li>quando o Música começa a tocar uma faixa a outra frequência e ainda não entrou som nenhum na gravação, o tocaTintas recomeça tudo à frequência certa. Pára a ponte dos auscultadores, muda o BlackHole, relança a ponte, recomeça a gravação num ficheiro limpo e volta a faixa ao início. Não se perde nada, porque o Música leva uns segundos a ter som depois de começar a tocar, e o que havia no ficheiro era esse silêncio. O Música não é posto em pausa, e isso é de propósito: ao sair de uma pausa, ele sobe o volume aos poucos durante cerca de 7 s, e essa subida ficaria no início da gravação;</li>
+<li>logo depois de uma faixa começar, o Música pode ainda não saber a frequência e responder «missing value». Nesse caso, a gravação começa já, e o tocaTintas volta a perguntar de meio em meio segundo, durante 10 s no máximo. Quando a resposta chega, acerta o BlackHole e recomeça a faixa, desde que o som gravado seja ainda só o da primeira faixa;</li>
+<li>com som já gravado, a frequência não muda a meio, porque um WAV só tem uma. Num álbum com faixas a frequências diferentes, que é raro, o aviso da grelha diz qual saiu reamostrada.</li>
+</ol>
+<p>Cada mudança de frequência, e cada desistência, fica registada em <code>frequencia.log</code>. Sem isso, uma gravação à frequência errada não deixaria rasto do motivo.</p>
+<p class="rotulo"><strong>pára no fim do álbum</strong></p>
+<p>Quando um álbum acaba, o Música costuma passar sozinho a outra coisa, ao acaso, e a gravação continuaria por ela dentro, muitas vezes a outra frequência e já reamostrada. Por isso, quando se grava pelo BlackHole, o tocaTintas toma nota do álbum da faixa que o Música tem, a tocar ou em pausa. Quando o Música passa a uma faixa de outro álbum, ou pára, a gravação acaba sozinha um segundo depois, como se se tivesse carregado no ⏺, e uma notificação diz «Gravação terminada: fim do álbum». A pausa não faz a gravação parar. Para gravar de seguida uma lista com faixas de vários álbuns, desliga-se <strong>Parar a gravação no fim do álbum</strong>, no separador <strong>Gravação</strong>.</p>
+<p class="rotulo"><strong>e volta ao que estava</strong></p>
+<p>No fim, ao parar a gravação, ao sair do tocaTintas com ela a decorrer ou se ela não chegar a arrancar, o BlackHole volta à frequência que tinha antes, normalmente os 44,1 kHz dos CDs. A frequência anterior fica guardada nas preferências enquanto se grava, e só é apagada depois de o BlackHole a ter de facto. A reposição tenta três vezes, com um segundo de intervalo. Se falhar, o tocaTintas avisa e volta a tentar no arranque seguinte, como também acontece se a aplicação for abaixo. Com o AirPlay a transmitir, cada mudança de frequência reabre a sessão com o receptor, como o ⌘-clique, porque a transmissão podia ficar a falhar. Sair do tocaTintas a meio de uma gravação fecha o ficheiro como se se tivesse carregado no ⏺.</p>
+<p>Na primeira gravação, o macOS pede autorização para o tocaTintas controlar o Música. Se for recusada, a gravação faz-se como antes, à frequência que o BlackHole tiver.</p>
+<p class="rotulo"><strong>a grelha</strong></p>
+<p>O som digital são números, e o de um master de 16 bits só pode tomar 65&nbsp;536 valores, que são os degraus da grelha. Gravada em vírgula flutuante sem ser alterada, cada amostra cai exactamente num desses degraus: multiplicada por 2<sup>15</sup>, dá um número inteiro. Num master de 24 bits, multiplica-se por 2<sup>23</sup>. Uma reamostragem, um volume abaixo do máximo ou um equalizador recalculam as amostras, e quase todas saem dos degraus. É assim que se sabe, só a partir do ficheiro, se a gravação é o master.</p>
+<p>O tocaTintas verifica-o enquanto grava, em janelas de um segundo de som. O silêncio digital não conta, porque o zero está em todas as grelhas. O resultado vê-se pela cor do ⏺ durante a gravação:</p>
+<ul>
+<li><strong>vermelho</strong>: bit a bit, sem nenhuma amostra fora da grelha até agora;</li>
+<li><strong>amarelo</strong>: houve algumas amostras fora da grelha, ou esteve mal e já não está. Não volta a vermelho, porque há um pedaço do ficheiro que não é o master, e isso não se desfaz;</li>
+<li><strong>laranja</strong>: está mal agora, com mais de metade da última janela fora da grelha de 24 bits. Da primeira vez que isto acontece aparece também um aviso com as causas habituais.</li>
+</ul>
+<p>O Música aplica uma rampa de cerca de 25 ms ao começar a tocar e ao saltar de faixa. Essas rampas saem sempre fora da grelha, mas ficam encostadas a silêncio digital (a de entrada depois dele, a de saída antes) e caem fora da música. Por isso, até 50 ms de cada lado de um silêncio, não contam. O registo diz ainda se a gravação é de 16 ou de 24 bits.</p>
+
+<h3>Avisos durante a gravação</h3>
+<ul>
+<li><strong>A gravação vai sair em silêncio.</strong> A saída do sistema não é o BlackHole. A gravação continua.</li>
+<li><strong>A gravação não é bit-exacta.</strong> As amostras saíram da grelha, porque o volume do Música está abaixo do máximo, há um efeito ligado ou a frequência está errada. O aviso aparece uma vez por gravação, quando o ⏺ fica laranja pela primeira vez. A partir daí, é a cor do botão que diz se continua mal. A gravação continua, mas vale a pena pará-la, corrigir o problema e recomeçar.</li>
+<li><strong>Não foi possível mudar a frequência do BlackHole.</strong> O BlackHole não aceita a frequência do master, ou recusou a mudança. Pode mudar-se à mão na Configuração de Áudio MIDI.</li>
+<li><strong>O Música não está a tocar.</strong> Só na fonte «A aplicação Música». O Música tem de estar aberto e a tocar antes de se carregar no ⏺.</li>
+<li><strong>Isto não é o Dolby Atmos binaural.</strong> Para uma saída que não sejam os AirPods, o Música entrega a mistura estéreo comum. A gravação continua.</li>
+<li><strong>O seguimento da cabeça está a ficar gravado.</strong> Com ele ligado, os movimentos da cabeça ficam no ficheiro. É preciso escolher «Fixo» e gravar outra vez.</li>
+</ul>
+<p>Na primeira gravação a partir do Música, o macOS pede autorização para gravar o áudio do sistema e para ler o movimento dos AirPods.</p>
+
+<h2 id="applescript">AppleScript</h2>
+<p>O tocaTintas tem um dicionário AppleScript, que o Editor de Scripts mostra em <strong>Ficheiro</strong> ▸ <strong>Abrir dicionário…</strong> e que serve também aos Atalhos e ao <code>osascript</code>. Os comandos fazem o mesmo que os botões da janela, pelos mesmos caminhos, e os botões acompanham-nos. Ao contrário dos botões, os comandos agem sempre sobre o tocaTintas, mesmo quando a janela mostra a aplicação Música.</p>
+<p class="rotulo"><strong>Comandos</strong></p>
+<ul>
+<li><code>play</code>: o ▶. Toca a faixa escolhida, ou retoma-a se estiver em pausa.</li>
+<li><code>pause</code>: pausa. Ao contrário do ⏸, nunca retoma, e em pausa não faz nada.</li>
+<li><code>playpause</code>: pausa se estiver a tocar e toca nos outros casos.</li>
+<li><code>stop</code>: o ⏹.</li>
+<li><code>next track</code>, <code>previous track</code>: o ⏭ e o ⏮.</li>
+<li><code>start recording</code>, <code>stop recording</code>: o ⏺. Cada um só faz alguma coisa se a gravação não estiver já no estado pedido.</li>
+</ul>
+<p class="rotulo"><strong>Propriedades da aplicação</strong></p>
+<ul>
+<li><code>player state</code>: <code>stopped</code>, <code>playing</code> ou <code>paused</code>.</li>
+<li><code>player position</code>, <code>current duration</code>: em segundos. Em pausa, nos formatos tocados pela AudioQueue (WavPack, Monkey’s Audio e Opus), a posição dá 0 até se retomar, tal como a barra de progresso.</li>
+<li><code>current title</code>, <code>current artist</code>, <code>current album</code>: o que a janela mostra.</li>
+<li><code>current path</code>: o caminho do ficheiro que está a tocar, ou vazio com o leitor parado.</li>
+<li><code>shuffle enabled</code>, <code>repeat enabled</code>, <code>recording</code>: os botões 🔀, 🔁 e ⏺. Podem ler-se e mudar-se, e mudá-los para o valor que já têm não faz nada.</li>
+</ul>
+<p class="rotulo"><strong>Exemplos</strong></p>
+<pre><code>osascript -e 'tell application "tocaTintas" to get {player state, current title}'
+osascript -e 'tell application "tocaTintas" to next track'
+osascript -e 'tell application "tocaTintas" to set shuffle enabled to true'
+osascript -e 'tell application "tocaTintas" to start recording'</code></pre>
+<p>Da primeira vez, o macOS pede ao programa que envia os comandos (o Terminal, o Editor de Scripts ou os Atalhos) autorização para controlar o tocaTintas.</p>
+
+<h2 id="histograma">Histograma</h2>
+<p>O histograma é desenhado a partir do <a href="https://github.com/karlstav/cava"><strong>cava</strong></a> 1.0.0, que vem dentro da aplicação, lê o BlackHole e entrega as barras por um FIFO. Tem uma alteração: o <code>portaudio.c</code> abre o aparelho com dois canais, porque os 16 canais do BlackHole estragariam o desenho.</p>
+
+<h2 id="notificacoes">Notificações</h2>
+<p>O tocaTintas publica quatro notificações:</p>
+<ul>
+<li>a faixa que começou a tocar, com a capa anexada;</li>
+<li>o fim de uma gravação, por exemplo no fim do álbum;</li>
+<li>um problema no registo automático na fonoteca;</li>
+<li>faixas do Música por ligar, quando o número de pendentes aumenta. Clicar nesta abre a janela <strong>Ligar faixas do Música</strong>.</li>
+</ul>
+<p>O macOS não mostra as notificações da aplicação que está à frente, a menos que esta o peça. Com o tocaTintas à frente, as três últimas aparecem na mesma. A da faixa a tocar fica só no Centro de Notificações, porque a janela já mostra essa faixa.</p>
+<p>Todas pedem o som de aviso do sistema. Se o som estiver desligado em Ajustes do Sistema ▸ Notificações ▸ tocaTintas, todas aparecem em silêncio.</p>
+
+<h2 id="pagina-a-tocar">Página «a tocar»</h2>
+<p>A cada faixa nova, o tocaTintas escreve <a href="../now_playing.html">now_playing.html</a> e <code>cover.png</code> em <code>~/Sites</code>, com o título, o álbum, o artista e a capa, para quem quiser ver de outra máquina o que está a tocar.</p>
+
+<h2 id="extensoes">Extensões do Finder</h2>
+<p>A aplicação traz três extensões para os ficheiros WavPack, que o macOS não conhece:</p>
+<p class="rotulo"><strong>ZPQLiconwv</strong></p>
+<p>Miniaturas. Os ícones dos <code>.wv</code> no Finder passam a ser a capa do disco.</p>
+<p class="rotulo"><strong>ZPQLverwv</strong></p>
+<p>Pré-visualização Quick Look. A barra de espaços mostra a capa, o título, o artista e o álbum.</p>
+<p class="rotulo"><strong>ZPSpotLightwv</strong></p>
+<p>Importador do Spotlight. O título, o artista, o álbum e a duração passam a poder ser pesquisados.</p>
+<p>Para o FLAC só a miniatura funciona, porque o macOS ignora as pré-visualizações de terceiros para esse formato.</p>
+
+<h2 id="acerca">Acerca e versão</h2>
+<figure class="estreita">
+<img src="imagens/acerca.png" alt="Janela Acerca do tocaTintas, versão 4.0.0, commit b21b3c1" width="250" height="332">
+<figcaption>Fig. 4 — a janela Acerca, com o commit do Git entre parênteses.</figcaption>
+</figure>
+<p>Entre parênteses, a seguir ao nome, está o <strong>commit</strong> do Git a partir do qual a aplicação foi compilada. É gravado no Info.plist por uma fase de script que corre a cada compilação. Um <strong>+</strong> no fim, como em <code>(b21b3c1+)</code>, quer dizer que havia alterações por registar no Git: a aplicação não corresponde exactamente a nenhum estado registado do código.</p>
+<p class="rotulo"><strong>Ajuda</strong> ▸ <strong>Ajuda do tocaTintas</strong> (⌘?)</p>
+<p>Abre este manual no navegador. A cópia que vai dentro da aplicação é a desta página no momento da compilação.</p>
+
+<h2 id="ficheiros">Ficheiros</h2>
+<p class="rotulo"><strong>&lt;pasta de música&gt;/CDs/.fonoteca.sqlite</strong></p>
+<p>A base de dados da fonoteca.</p>
+<p class="rotulo"><strong>~/Library/Application Support/tocaTintas/</strong></p>
+<p>As gravações WAV (<code>Recording_</code><em>UUID</em><code>.wav</code>) e os ficheiros seguintes.</p>
+<p class="rotulo"><strong>…/tocaTintas/eq/</strong></p>
+<p>As correcções AutoEQ, uma pasta por marca.</p>
+<p class="rotulo"><strong>…/tocaTintas/frequencia.log</strong></p>
+<p>Uma linha por cada mudança de frequência do BlackHole que o tocaTintas faz ou tenta fazer, ao gravar, ao repor ou ao reabrir o AirPlay, com a data e o resultado. As desistências também ficam registadas.</p>
+<p class="rotulo"><strong>…/tocaTintas/registar.log</strong></p>
+<p>A saída do registo automático na fonoteca.</p>
+<p class="rotulo"><strong>…/tocaTintas/sincronizar-musica.log</strong></p>
+<p>A saída das sincronizações com o Música e das audições das faixas do catálogo.</p>
+<p class="rotulo"><strong>…/tocaTintas/fonoteca-antes-de-migrar-</strong><em>data</em><strong>.sqlite</strong></p>
+<p>A cópia da base feita pelo <code>fonoteca.py migrar</code> antes de lhe acrescentar as tabelas do Música.</p>
+<p class="rotulo"><strong>preferências, chave ZPLoopbackSampleRateToRestore</strong></p>
+<p>A frequência que o BlackHole tinha antes de uma gravação a mudar. Só existe enquanto se grava, ou depois de a aplicação ter ido abaixo a meio de uma gravação, até ao arranque seguinte.</p>
+<p class="rotulo"><strong>preferências, chave fonotecaPy</strong></p>
+<p>Outro caminho para o <code>fonoteca.py</code>, que por omissão é <code>/usr/local/bin/fonoteca.py</code>. Muda-se com <code>defaults write</code>.</p>
+<p class="rotulo"><strong>~/Sites/now_playing.html</strong>, <strong>~/Sites/cover.png</strong></p>
+<p>A página da faixa a tocar.</p>
+<p class="rotulo"><strong>tocaTintas.app/Contents/Resources/</strong></p>
+<p>O <strong>bs2b_bridge</strong>, o <strong>raop_play</strong>, o <strong>cava</strong> e o <strong>ListAudioDevices</strong>, o <strong>tocaTintas.sdef</strong>, que é o dicionário AppleScript, e a pasta <strong>Ajuda</strong>, com este manual.</p>
+
+<h2 id="requisitos">Requisitos</h2>
+<ul>
+<li>macOS 27 ou posterior.</li>
+<li>O BlackHole como saída do sistema, para o tratamento dos auscultadores, o AirPlay, o histograma e a gravação.</li>
+<li>Acesso à rede local, para descobrir os receptores AirPlay.</li>
+<li>Autorização para controlar o Música, para acertar a frequência do BlackHole ao gravar, mostrar o Música na janela e contar as suas audições.</li>
+<li>O <code>fonoteca.py</code> e o Python 3.14 em <code>/usr/local/bin</code>, para o registo automático na fonoteca e para as audições do Música.</li>
+</ul>
+
+<h2 id="ver-tambem">Ver também</h2>
+<p><a href="../riporinador/riporinador.html"><strong>riporinador</strong>(1)</a>, <a href="https://github.com/karlstav/cava"><strong>cava</strong>(1)</a>, <a href="https://bs2b.sourceforge.net/"><strong>bs2b</strong>(3)</a>, <a href="https://manpages.debian.org/abcde"><strong>abcde</strong>(1)</a> e <a href="https://xiph.org/flac/documentation_tools_metaflac.html"><strong>metaflac</strong>(1)</a></p>
+<h3>Projectos de que o tocaTintas depende</h3>
+<ul>
+<li><a href="https://existential.audio/blackhole/">BlackHole</a>, o aparelho de áudio virtual por onde passa tudo.</li>
+<li><a href="https://bs2b.sourceforge.net/">bs2b</a>, a biblioteca do crossfeed.</li>
+<li><a href="https://github.com/jaakkopasanen/AutoEq">AutoEQ</a>, as correcções dos auscultadores.</li>
+<li><a href="https://github.com/karlstav/cava">cava</a>, a análise de frequências do histograma.</li>
+<li><a href="https://github.com/LinusU/rust-raop-player">rust-raop-player</a>, de Linus Unnebäck, versão do <a href="https://github.com/philippe44/RAOP-Player">RAOP-Player</a> de philippe44, que é a base do raop_play, aqui modificado para o AirPlay 2 e o emparelhamento.</li>
+<li><a href="https://musicbrainz.org/">MusicBrainz</a> e <a href="https://gnudb.org/">gnudb</a>, os nomes e as capas dos CDs.</li>
+<li><a href="https://xiph.org/flac/">FLAC</a>, <a href="https://www.wavpack.com/">WavPack</a>, <a href="https://www.monkeysaudio.com/">Monkey’s Audio</a>, <a href="https://github.com/macosforge/alac">ALAC</a> e <a href="https://opus-codec.org/">Opus</a>, os formatos.</li>
+<li><a href="https://www.sqlite.org/">SQLite</a>, a base de dados da fonoteca.</li>
+</ul>
+</main>
+</div>
+</body>
+</html>

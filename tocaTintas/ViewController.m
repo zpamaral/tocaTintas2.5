@@ -3639,6 +3639,7 @@ static const NSUInteger ZPTentativasDaFrequencia = 20;   // × 0,5 s
     // Para o clique no aviso das faixas do Música abrir a janela delas.
     [UNUserNotificationCenter currentNotificationCenter].delegate = self;
     [self comecarASincronizarComOMusica];
+    [self ligarAAjuda];
 }
 
 - (NSString *)localizedVersionStringWithVersion:(NSString *)version {
@@ -9367,6 +9368,35 @@ static NSString *const kZPAvisoDasLigacoes = @"LigacoesDoMusica";
                                                                          content:conteudo
                                                                          trigger:nil];
     [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:pedido withCompletionHandler:nil];
+}
+
+#pragma mark - Ajuda
+
+// O manual (Ajuda/tocaTintas.html, cópia do de ~/Sites/tocaTintas) vai dentro
+// da aplicação e abre-se no navegador. O item «Ajuda do tocaTintas» do menu
+// manda showHelp: ao primeiro respondedor, e a NSApplication responde-lhe antes
+// do delegado, com «a ajuda não está disponível»: aponta-se o item para aqui.
+- (void)ligarAAjuda {
+    NSMutableArray<NSMenu *> *porVer = [NSMutableArray arrayWithObject:NSApp.mainMenu];
+    while (porVer.count) {
+        NSMenu *menu = porVer.lastObject;
+        [porVer removeLastObject];
+        for (NSMenuItem *item in menu.itemArray) {
+            if (item.action == @selector(showHelp:)) {
+                item.target = self;
+                item.action = @selector(abrirAjuda:);
+            }
+            if (item.submenu) [porVer addObject:item.submenu];
+        }
+    }
+}
+
+- (IBAction)abrirAjuda:(id)sender {
+    NSURL *manual = [[NSBundle mainBundle] URLForResource:@"tocaTintas" withExtension:@"html" subdirectory:@"Ajuda"];
+    if (!manual || ![[NSWorkspace sharedWorkspace] openURL:manual]) {
+        NSLog(@"[Ajuda] Não abri o manual: %@", manual);
+        NSBeep();
+    }
 }
 
 - (IBAction)abrirLigacoesDoMusica:(id)sender {
