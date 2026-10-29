@@ -1,6 +1,7 @@
 [general]
 bars = 30  # Number of bars to display
 sleep_timer = 10
+framerate = 25  # the app only draws ~25 frames per second, see readFifoDirectly
 
 [input]
 method = portaudio
