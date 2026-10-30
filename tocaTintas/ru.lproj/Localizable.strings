@@ -142,6 +142,7 @@
 "rec_rate_restore_failed_title" = "BlackHole не вернулся к прежней частоте";
 "rec_rate_restore_failed_text" = "Частота осталась %.1f кГц вместо %.1f кГц. tocaTintas попробует снова при следующем запуске; её также можно изменить в «Настройке Audio MIDI».";
 "rec_album_end_title" = "Запись завершена: конец альбома";
+"rec_processed_title" = "Запись обработана: FLAC в /var/tmp";
 "fonoteca_register_problems_title" = "Регистрация в фонотеке: были проблемы";
 "fonoteca_register_failed_title" = "Регистрация в фонотеке: не удалась";
 "fonoteca_register_body" = "%@ — см. %@";

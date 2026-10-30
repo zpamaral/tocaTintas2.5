@@ -77,6 +77,12 @@ typedef NS_ENUM(NSInteger, ZPEstadoDaGrelha) {
 /// em ZPEstadoDaGrelhaBitExacta, sem notificação.
 extern NSString * const kZPAudioCaptureGridStateNotification;
 
+/// Publicada no thread principal quando o processamento automático de uma
+/// gravação acaba (ver ZPPosGravacao.h): userInfo[@"pastas"], as pastas de
+/// álbum escritas em /var/tmp, e userInfo[@"relatorio"], cuja primeira linha
+/// é o resumo.
+extern NSString * const kZPAudioCaptureProcessedNotification;
+
 @interface ZPAudioCapture : NSObject
 
 // Grava para um WAV de vírgula flutuante de 32 bits em
@@ -104,6 +110,10 @@ extern NSString * const kZPAudioCaptureGridStateNotification;
 // gravação e o som que se perdeu pelo caminho, para um «Recording_….toc.json»
 // ao lado do WAV, escrito ao fechar.
 - (void)marcarFaixa:(NSDictionary *)faixa;
+
+// A capa que o Música mostra para um álbum, para os FLAC dos álbuns que não
+// estejam no catálogo da Apple. Fica a primeira de cada álbum.
+- (void)guardarCapa:(NSData *)capa doAlbum:(NSString *)album;
 
 @end
 

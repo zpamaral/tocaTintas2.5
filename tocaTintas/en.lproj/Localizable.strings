@@ -134,6 +134,7 @@
 "rec_rate_restore_failed_title" = "BlackHole didn’t go back to its previous sample rate";
 "rec_rate_restore_failed_text" = "It stayed at %.1f kHz instead of %.1f kHz. tocaTintas will try again next time it starts; you can also change it in Audio MIDI Setup.";
 "rec_album_end_title" = "Recording finished: end of the album";
+"rec_processed_title" = "Recording processed: FLAC files in /var/tmp";
 "fonoteca_register_problems_title" = "Library registration: there were problems";
 "fonoteca_register_failed_title" = "Library registration: did not run";
 "fonoteca_register_body" = "%@ — see %@";

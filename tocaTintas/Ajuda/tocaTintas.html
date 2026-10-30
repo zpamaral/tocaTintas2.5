@@ -424,6 +424,16 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 </ul>
 <p>O Música aplica uma rampa de cerca de 25 ms ao começar a tocar e ao saltar de faixa. Essas rampas saem sempre fora da grelha, mas ficam encostadas a silêncio digital (a de entrada depois dele, a de saída antes) e caem fora da música. Por isso, até 50 ms de cada lado de um silêncio, não contam. O registo diz ainda se a gravação é de 16 ou de 24 bits.</p>
 
+<h3>Processamento automático</h3>
+<p>Quando uma gravação pelo BlackHole acaba, o tocaTintas trata dela sozinho, a partir do WAV e do rascunho da TOC, e deixa as faixas em <code>/var/tmp/</code><em>Artista</em><code>/</code><em>Álbum</em><code>/</code>, à espera de aprovação. Uma notificação dá o resumo, e clicá-la mostra a pasta no Finder. O relatório completo fica na pasta, em <code>Processamento.txt</code>. O WAV e a TOC ficam onde estavam.</p>
+<ol>
+<li><strong>Rampas.</strong> Ao arrancar e ao saltar de faixa, o Música sobe ou desce o volume durante cerca de 25 ms, junto ao silêncio. O tocaTintas mede essa curva no próprio ficheiro e desfá-la, mas só se todas as amostras voltarem à grelha de 16 ou de 24 bits, com erro abaixo de 0,01 LSB. Senão, a rampa fica como está, e o relatório diz porquê.</li>
+<li><strong>Cortes.</strong> A primeira faixa começa no primeiro som. Cada uma das seguintes começa onde a põe a soma das durações do catálogo da Apple, ao milissegundo, desde que a marca do Música concorde, com uma margem de 0,25 s. Num álbum sem pausas entre faixas, essas são as fronteiras verdadeiras. Se a marca discordar (uma pausa, um salto de faixa), manda a marca. O som perdido pelo caminho é descontado. Uma faixa a que falte o início ou o fim não sai, mas fica no relatório.</li>
+<li><strong>FLAC.</strong> Os FLAC são de 16 ou de 24 bits, conforme a grelha em que o álbum cai. Quando a gravação é bit-exacta, os FLAC também o são, e o codificador confirma cada um, descodificando-o.</li>
+<li><strong>Etiquetas.</strong> Vêm do catálogo da Apple, da loja americana, que dá os géneros em inglês, como os da fonoteca. Quando há uma edição no MusicBrainz com o mesmo número de faixas e as mesmas durações, juntam-se os títulos dela, os ISRC, a editora e os identificadores. A capa é a do catálogo, a 600 px, ou, fora dele, a que o Música mostrava. O ReplayGain de faixa e de álbum segue a BS.1770, com referência a −18 LUFS. A música erudita fica com as etiquetas da Apple, e o relatório lembra que têm de ser revistas.</li>
+</ol>
+<p>A gravação pela fonte «A aplicação Música» não tem marcas de faixa, por isso não é processada.</p>
+
 <h3>Avisos durante a gravação</h3>
 <ul>
 <li><strong>A gravação vai sair em silêncio.</strong> A saída do sistema não é o BlackHole. A gravação continua.</li>
@@ -465,14 +475,15 @@ osascript -e 'tell application "tocaTintas" to start recording'</code></pre>
 <p>O histograma é desenhado a partir do <a href="https://github.com/karlstav/cava"><strong>cava</strong></a> 1.0.0, que vem dentro da aplicação, lê o BlackHole e entrega as barras por um FIFO. Tem uma alteração: o <code>portaudio.c</code> abre o aparelho com dois canais, porque os 16 canais do BlackHole estragariam o desenho.</p>
 
 <h2 id="notificacoes">Notificações</h2>
-<p>O tocaTintas publica quatro notificações:</p>
+<p>O tocaTintas publica cinco notificações:</p>
 <ul>
 <li>a faixa que começou a tocar, com a capa anexada;</li>
 <li>o fim de uma gravação, por exemplo no fim do álbum;</li>
+<li>o fim do processamento de uma gravação, com o resumo. Clicar nesta mostra os FLAC no Finder;</li>
 <li>um problema no registo automático na fonoteca;</li>
 <li>faixas do Música por ligar, quando o número de pendentes aumenta. Clicar nesta abre a janela <strong>Ligar faixas do Música</strong>.</li>
 </ul>
-<p>O macOS não mostra as notificações da aplicação que está à frente, a menos que esta o peça. Com o tocaTintas à frente, as três últimas aparecem na mesma. A da faixa a tocar fica só no Centro de Notificações, porque a janela já mostra essa faixa.</p>
+<p>O macOS não mostra as notificações da aplicação que está à frente, a menos que esta o peça. Com o tocaTintas à frente, as quatro últimas aparecem na mesma. A da faixa a tocar fica só no Centro de Notificações, porque a janela já mostra essa faixa.</p>
 <p>Todas pedem o som de aviso do sistema. Se o som estiver desligado em Ajustes do Sistema ▸ Notificações ▸ tocaTintas, todas aparecem em silêncio.</p>
 
 <h2 id="pagina-a-tocar">Página «a tocar»</h2>

@@ -27,6 +27,7 @@ SOFTWARE.
 //
 #import "ZPAudioCapture.h"
 #import "PreferencesWindowController.h"
+#import "ZPPosGravacao.h"
 #import <AppKit/AppKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <CoreAudio/CoreAudio.h>
@@ -36,6 +37,7 @@ SOFTWARE.
 #import <CoreMotion/CoreMotion.h>
 
 NSString * const kZPAudioCaptureWarningNotification = @"ZPAudioCaptureWarning";
+NSString * const kZPAudioCaptureProcessedNotification = @"ZPAudioCaptureProcessed";
 
 // Vigia do seguimento da cabeça: janelas de meio segundo, as últimas 40
 // (20 s). Ver -vigiarJanelaComEsquerda:direita:.
@@ -343,6 +345,9 @@ BOOL ZPBindEngineInputToLoopback(AVAudioEngine *engine) {
 @property (assign, nonatomic) NSUInteger recordChannels;
 @property (assign, nonatomic) BOOL isRecording;
 @property (atomic, readwrite) BOOL gravouSom;
+// A gravação vai ser deitada fora (-abandonCapturingAudio): o fecho não
+// escreve a TOC nem a processa.
+@property (atomic, assign) BOOL aAbandonar;
 
 // Reutilizados entre callbacks (criados uma vez por tap)
 @property (strong, nonatomic) AVAudioConverter *recordConverter;
@@ -408,6 +413,7 @@ static void ZPPublicarEstadoDaGrelha(ZPEstadoDaGrelha estado);   // com o vigia 
     ZPVigiaGrelha _grelha;   // só na ioQueue
     // O rascunho da TOC (ver -marcarFaixa:). Tudo só na ioQueue.
     NSMutableArray<NSDictionary *> *_marcasDeFaixa;
+    NSMutableDictionary<NSString *, NSData *> *_capas;   // a do Música, por álbum
     NSMutableArray<NSArray<NSNumber *> *> *_silencios;   // [início, fim) em tramas
     unsigned long long _inicioDoSilencio;
     BOOL _emSilencio;
@@ -474,6 +480,7 @@ static void ZPPublicarEstadoDaGrelha(ZPEstadoDaGrelha estado);   // com o vigia 
     self.recordSampleRate = 0.0;
     self.recordChannels = 2;
     self.gravouSom = NO;
+    self.aAbandonar = NO;
     dispatch_sync(self.ioQueue, ^{
         memset(&self->_grelha, 0, sizeof(self->_grelha));
         self->_marcasDeFaixa = [NSMutableArray array];
@@ -481,6 +488,7 @@ static void ZPPublicarEstadoDaGrelha(ZPEstadoDaGrelha estado);   // com o vigia 
         self->_inicioDoSilencio = 0;
         self->_emSilencio = YES;   // o ficheiro começa sem som
         self->_perdas = [NSMutableArray array];
+        self->_capas = [NSMutableDictionary dictionary];
         self->_tramasPerdidas = 0;
         self->_haTempo = NO;
     });
@@ -564,6 +572,7 @@ static void ZPPublicarEstadoDaGrelha(ZPEstadoDaGrelha estado);   // com o vigia 
         return;
     }
     NSURL *ficheiro = self.recordFileURL;
+    self.aAbandonar = YES;
     [self stopRecording];
     // Na mesma fila, atrás do fecho: quando isto corre o ficheiro já está
     // fechado e não entra mais nada nele.
@@ -643,6 +652,7 @@ static NSData *ZPWavHeader(double sampleRate, NSUInteger channels, unsigned long
         #endif
     }
     [handle closeFile];
+    if (self.aAbandonar) return;   // quem abandona apaga o ficheiro
 
     // Sem uma amostra de som, o ficheiro não serve a ninguém: só confundia
     // quem fosse à pasta (um WAV de 56 bytes, ou um de silêncio).
@@ -654,6 +664,17 @@ static NSData *ZPWavHeader(double sampleRate, NSUInteger channels, unsigned long
         return;
     }
     [self escreverRascunhoDaTOC];
+
+    // E o processamento automático: os FLAC das faixas, à espera de aprovação
+    // (ver ZPPosGravacao.h). Sem faixas marcadas (a captura do Música) não há
+    // nada a cortar, e o WAV fica como está.
+    if (_marcasDeFaixa.count) {
+        ZPProcessarGravacao(self.recordFileURL, ^(NSArray<NSURL *> *pastas, NSString *relatorio) {
+            [[NSNotificationCenter defaultCenter] postNotificationName:kZPAudioCaptureProcessedNotification
+                                                                object:nil
+                                                              userInfo:@{ @"pastas": pastas ?: @[], @"relatorio": relatorio ?: @"" }];
+        });
+    }
 
     #ifdef DEBUG
     NSLog(@"[Audio Capture] Gravação fechada: %llu bytes de amostras, %.0f Hz, %lu canais, float de 32 bits (%@).",
@@ -751,6 +772,30 @@ static NSURL *ZPFicheiroDaTOC(NSURL *wav) {
     _proximoHost = host ? host + [AVAudioTime hostTimeForSeconds:tramas / frequencia] : 0;
 }
 
+- (void)guardarCapa:(NSData *)capa doAlbum:(NSString *)album {
+    if (!self.isRecording || !capa.length || !album) return;
+    dispatch_async(self.ioQueue, ^{
+        if (self.recordFileHandle && !self->_capas[album]) self->_capas[album] = capa;
+    });
+}
+
+// As capas ao lado do WAV, «Recording_….capa-1.jpg»…; para a TOC, a lista de
+// @{ album, ficheiro }. Na ioQueue.
+- (NSArray<NSDictionary *> *)escreverCapas {
+    NSMutableArray *lista = [NSMutableArray array];
+    NSString *base = [self.recordFileURL URLByDeletingPathExtension].lastPathComponent;
+    NSUInteger k = 0;
+    for (NSString *album in _capas) {
+        NSData *capa = _capas[album];
+        const uint8_t *b = capa.bytes;
+        NSString *nome = [NSString stringWithFormat:@"%@.capa-%lu.%@", base, (unsigned long)++k,
+                          capa.length > 4 && b[0] == 0x89 && b[1] == 'P' ? @"png" : @"jpg"];
+        NSURL *destino = [[self.recordFileURL URLByDeletingLastPathComponent] URLByAppendingPathComponent:nome];
+        if ([capa writeToURL:destino atomically:YES]) [lista addObject:@{ @"album": album, @"ficheiro": nome }];
+    }
+    return lista;
+}
+
 - (void)marcarFaixa:(NSDictionary *)faixa {
     if (!self.isRecording || !faixa) return;
     NSDate *quando = [NSDate date];
@@ -786,6 +831,7 @@ static NSURL *ZPFicheiroDaTOC(NSURL *wav) {
         @"faixas":     _marcasDeFaixa ?: @[],
         @"perdas":     _perdas ?: @[],
         @"tramasPerdidas": @(_tramasPerdidas),
+        @"capas":      [self escreverCapas],
     };
     NSError *erro = nil;
     NSData *json = [NSJSONSerialization dataWithJSONObject:toc

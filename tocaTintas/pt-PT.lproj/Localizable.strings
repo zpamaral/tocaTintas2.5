@@ -134,6 +134,7 @@
 "rec_rate_restore_failed_title" = "O BlackHole não voltou à frequência de antes";
 "rec_rate_restore_failed_text" = "Ficou a %.1f kHz em vez de %.1f kHz. O tocaTintas volta a tentar no próximo arranque; também se pode mudar na Configuração de Áudio MIDI.";
 "rec_album_end_title" = "Gravação terminada: fim do álbum";
+"rec_processed_title" = "Gravação processada: FLAC em /var/tmp";
 "fonoteca_register_problems_title" = "Registo na fonoteca: houve problemas";
 "fonoteca_register_failed_title" = "Registo na fonoteca: não correu";
 "fonoteca_register_body" = "%@ — ver %@";

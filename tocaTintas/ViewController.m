@@ -419,6 +419,7 @@ static WavpackStreamReader memoryReader = {
 @property (assign, nonatomic) NSUInteger geracaoDaFrequencia;
 @property (copy, nonatomic) NSString *faixaDaGravacao;
 @property (copy, nonatomic) NSString *faixaMarcadaNaTOC;   // o «pid» de ZPMusicNowPlaying
+@property (strong, nonatomic) NSMutableSet<NSString *> *albunsComCapa;   // os da gravação em curso
 @property (assign, nonatomic) BOOL aindaNaPrimeiraFaixa;
 // O estado da grelha da gravação em curso, que dá a cor ao ⏺.
 @property (assign, nonatomic) ZPEstadoDaGrelha estadoDaGrelha;
@@ -1624,6 +1625,10 @@ CoreAudioPlaybackState playbackState;
                                              selector:@selector(estadoDaGrelhaMudou:)
                                                  name:kZPAudioCaptureGridStateNotification
                                                object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(gravacaoProcessada:)
+                                                 name:kZPAudioCaptureProcessedNotification
+                                               object:nil];
     // Uma gravação que mudou a frequência do BlackHole e não chegou ao fim (a
     // app foi abaixo, ou o Xcode parou-a): repõe-se agora.
     [self reporFrequenciaDoLoopbackRelancandoAPonte:YES];
@@ -2207,6 +2212,7 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
         if (self.isRecording && peloLoopback) {
             // Com o Música já a tocar, não vem aviso «Playing» para esta faixa.
             self.faixaMarcadaNaTOC = nil;
+            self.albunsComCapa = [NSMutableSet set];
             [self marcarFaixaNaTOC:doMusica];
             [self comecarAVigiarOMusica];
             if (frequenciaDoMusica <= 0.0) [self acertarFrequenciaPeloMusica];
@@ -2434,6 +2440,30 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
     if (pid && [pid isEqualToString:self.faixaMarcadaNaTOC]) return;
     self.faixaMarcadaNaTOC = pid;
     [self.audioCapture marcarFaixa:faixa];
+    // A capa, uma vez por álbum, enquanto é a dele que o Música mostra: serve
+    // aos FLAC dos álbuns que não estão no catálogo da Apple.
+    NSString *album = faixa[@"album"];
+    if (album.length && ![self.albunsComCapa containsObject:album]) {
+        [self.albunsComCapa addObject:album];
+        [self.audioCapture guardarCapa:ZPMusicCurrentArtworkData() doAlbum:album];
+    }
+}
+
+// O processamento automático acabou (ver ZPPosGravacao.h): uma notificação
+// com o resumo, como a do fim do álbum. O relatório inteiro fica em cada pasta,
+// como «Processamento.txt».
+- (void)gravacaoProcessada:(NSNotification *)nota {
+    NSString *relatorio = nota.userInfo[@"relatorio"] ?: @"";
+    UNMutableNotificationContent *conteudo = [[UNMutableNotificationContent alloc] init];
+    conteudo.sound = [UNNotificationSound defaultSound];
+    conteudo.title = NSLocalizedString(@"rec_processed_title", @"Gravação processada: FLAC em /var/tmp");
+    conteudo.body = [relatorio componentsSeparatedByString:@"\n"].firstObject ?: @"";
+    NSURL *pasta = [nota.userInfo[@"pastas"] firstObject];
+    if (pasta) conteudo.userInfo = @{ @"pasta": pasta.path };
+    UNNotificationRequest *pedido = [UNNotificationRequest requestWithIdentifier:@"GravacaoProcessada"
+                                                                         content:conteudo
+                                                                         trigger:nil];
+    [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:pedido withCompletionHandler:nil];
 }
 
 - (void)deixarDeVigiarOMusica {
@@ -2505,6 +2535,7 @@ static const NSUInteger ZPTentativasDaFrequencia = 20;   // × 0,5 s
         ZPMusicCommand(@"set player position to 0");
         // Ficheiro novo, TOC nova: a faixa marca-se outra vez, já no princípio.
         self.faixaMarcadaNaTOC = nil;
+        self.albunsComCapa = [NSMutableSet set];
         [self marcarFaixaNaTOC:ZPMusicNowPlaying()];
     } else {
         [self deixarDeVigiarOMusica];
@@ -9458,14 +9489,17 @@ static NSString *const kZPAvisoDasLigacoes = @"LigacoesDoMusica";
     }
 }
 
-// Só o aviso das ligações faz alguma coisa ao ser clicado; os outros (a faixa
-// a tocar, o fim de uma gravação) trazem o tocaTintas para a frente, como antes
-// de haver delegado.
+// O aviso das ligações abre a janela delas, e o da gravação processada mostra
+// os FLAC no Finder; os outros (a faixa a tocar, o fim de uma gravação) trazem
+// o tocaTintas para a frente, como antes de haver delegado.
 - (void)userNotificationCenter:(UNUserNotificationCenter *)centro
 didReceiveNotificationResponse:(UNNotificationResponse *)resposta
          withCompletionHandler:(void (^)(void))acabar {
     if ([resposta.notification.request.identifier isEqualToString:kZPAvisoDasLigacoes]) {
         [self abrirLigacoesDoMusica:nil];
+    } else if ([resposta.notification.request.identifier isEqualToString:@"GravacaoProcessada"]) {
+        NSString *pasta = resposta.notification.request.content.userInfo[@"pasta"];
+        if (pasta) [[NSWorkspace sharedWorkspace] selectFile:nil inFileViewerRootedAtPath:pasta];
     }
     acabar();
 }
