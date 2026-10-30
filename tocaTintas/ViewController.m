@@ -9215,6 +9215,16 @@ static NSArray<NSString *> *ZPPastasParaRegistar(NSSet<NSString *> *caminhos, NS
     return finais;
 }
 
+// Um registo aberto para acrescentar (O_APPEND), criado se não existir. Com
+// «ir para o fim e escrever», dois processos ao mesmo tempo (a sincronização e
+// a verificação diária arrancam juntas) escreviam no mesmo sítio, um por cima
+// do outro; assim cada escrita vai para o fim do que já lá está, e o processo
+// filho herda o modo. nil se não abrir.
+static NSFileHandle *ZPRegistoParaAcrescentar(NSString *caminho) {
+    int fd = open(caminho.fileSystemRepresentation, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
+    return fd < 0 ? nil : [[NSFileHandle alloc] initWithFileDescriptor:fd closeOnDealloc:YES];
+}
+
 - (void)correrRegistoNaFonoteca {
     // Ainda a correr: os caminhos ficam guardados e voltam a ser agendados
     // quando este acabar.
@@ -9249,9 +9259,7 @@ static NSArray<NSString *> *ZPPastasParaRegistar(NSSet<NSString *> *caminhos, NS
     // A saída vai para registar.log, ao lado da cache e das contagens.
     NSString *registo = [[[fm URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject
                           URLByAppendingPathComponent:@"tocaTintas/registar.log"] path];
-    if (![fm fileExistsAtPath:registo]) [fm createFileAtPath:registo contents:nil attributes:nil];
-    NSFileHandle *log = [NSFileHandle fileHandleForWritingAtPath:registo];
-    [log seekToEndOfFile];
+    NSFileHandle *log = ZPRegistoParaAcrescentar(registo);
     NSString *cabecalho = [NSString stringWithFormat:@"\n=== %@ registar %@\n",
                            [NSISO8601DateFormatter stringFromDate:[NSDate date] timeZone:[NSTimeZone localTimeZone]
                                                     formatOptions:NSISO8601DateFormatWithInternetDateTime],
@@ -9402,9 +9410,7 @@ static NSString *const kZPAvisoDasLigacoes = @"LigacoesDoMusica";
 
     NSString *registo = [[[fm URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject
                           URLByAppendingPathComponent:@"tocaTintas/sincronizar-musica.log"] path];
-    if (![fm fileExistsAtPath:registo]) [fm createFileAtPath:registo contents:nil attributes:nil];
-    NSFileHandle *log = [NSFileHandle fileHandleForWritingAtPath:registo];
-    [log seekToEndOfFile];
+    NSFileHandle *log = ZPRegistoParaAcrescentar(registo);
     NSString *cabecalho = [NSString stringWithFormat:@"\n=== %@ %@\n",
                            [NSISO8601DateFormatter stringFromDate:[NSDate date] timeZone:[NSTimeZone localTimeZone]
                                                     formatOptions:NSISO8601DateFormatWithInternetDateTime],
