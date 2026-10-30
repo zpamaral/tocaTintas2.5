@@ -1629,7 +1629,9 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
         const uint32_t highWatermark = bytesPerSecond * 6; // 6 s
         const uint32_t targetLevel   = bytesPerSecond * 2; // 2 s
 
+        #ifdef DEBUG
         NSTimeInterval lastLevelLog = [NSDate timeIntervalSinceReferenceDate];
+        #endif
         NSTimeInterval starvedSince = 0;
 
         while (self.isStreaming) {

@@ -6289,7 +6289,6 @@ static NSData *gWvKeptData = nil;
 
     int numChannels   = WavpackGetNumChannels(playbackState.wpc);
     int sampleRate    = WavpackGetSampleRate(playbackState.wpc);
-    int bitsPerSample = WavpackGetBitsPerSample(playbackState.wpc);
     playbackState.numChannels = numChannels;
 
     // Relógio da faixa, usado pela barra de progresso e pelo salto de silêncios
@@ -6299,7 +6298,7 @@ static NSData *gWvKeptData = nil;
 
     #ifdef DEBUG
     NSLog(@"WAVPack File Info: %d channels, %d Hz, %d bits/sample",
-          numChannels, sampleRate, bitsPerSample);
+          numChannels, sampleRate, WavpackGetBitsPerSample(playbackState.wpc));
     #endif
 
     AudioStreamBasicDescription audioFormat = {0};
