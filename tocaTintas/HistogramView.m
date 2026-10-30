@@ -30,8 +30,8 @@ SOFTWARE.
 #import <QuartzCore/QuartzCore.h>
 
 @interface HistogramView ()
-@property (nonatomic, strong) NSMutableArray<CAShapeLayer *> *leftBarLayers;
-@property (nonatomic, strong) NSMutableArray<CAShapeLayer *> *rightBarLayers;
+@property (nonatomic, strong) NSMutableArray<CALayer *> *leftBarLayers;
+@property (nonatomic, strong) NSMutableArray<CALayer *> *rightBarLayers;
 @end
 
 @implementation HistogramView
@@ -40,12 +40,12 @@ SOFTWARE.
 // -initWithCoder: que corre, e com os arrays a nil o ciclo de criação de
 // camadas em -updateBars nunca termina: [nil addObject:] é um no-op, a
 // contagem fica sempre em zero e a condição nunca deixa de ser verdadeira.
-- (NSMutableArray<CAShapeLayer *> *)leftBarLayers {
+- (NSMutableArray<CALayer *> *)leftBarLayers {
     if (!_leftBarLayers) _leftBarLayers = [NSMutableArray array];
     return _leftBarLayers;
 }
 
-- (NSMutableArray<CAShapeLayer *> *)rightBarLayers {
+- (NSMutableArray<CALayer *> *)rightBarLayers {
     if (!_rightBarLayers) _rightBarLayers = [NSMutableArray array];
     return _rightBarLayers;
 }
@@ -132,11 +132,42 @@ SOFTWARE.
     });
 }
 
+// As barras são CALayers simples, com a altura nos bounds. Antes eram
+// CAShapeLayers com um CGPath novo por barra e por trama, e o servidor de
+// composição tinha de rasterizar cada path de novo, 25 vezes por segundo; um
+// rectângulo com cor de fundo não se rasteriza. Uma barra que não mudou não se
+// toca, para não entrar na transacção.
+- (void)acertarBarras:(NSMutableArray<CALayer *> *)camadas
+              valores:(NSArray<NSNumber *> *)valores
+             primeira:(NSUInteger)primeira
+                  cor:(NSColor *)cor
+          columnWidth:(CGFloat)columnWidth
+             barWidth:(CGFloat)barWidth
+            maxHeight:(CGFloat)maxHeight {
+    while (camadas.count < valores.count) {
+        CALayer *barLayer = [CALayer layer];
+        barLayer.anchorPoint = CGPointZero;
+        barLayer.actions = @{@"bounds": [NSNull null], @"position": [NSNull null]};   // nunca animar as barras
+        barLayer.backgroundColor = cor.CGColor;
+        [self.layer addSublayer:barLayer];
+        [camadas addObject:barLayer];
+    }
+
+    for (NSUInteger i = 0; i < valores.count; i++) {
+        CGFloat height = round(valores[i].floatValue / 1000.0 * maxHeight * 2.0) / 2.0;   // ao píxel
+        CALayer *barLayer = camadas[i];
+        CGPoint posicao = CGPointMake((i + primeira) * columnWidth, 0);
+        CGRect limites = CGRectMake(0, 0, barWidth, height);
+        if (!CGPointEqualToPoint(barLayer.position, posicao)) barLayer.position = posicao;
+        if (!CGRectEqualToRect(barLayer.bounds, limites)) barLayer.bounds = limites;
+    }
+}
+
 - (void)updateBars {
     CGFloat totalBars = self.leftChannelValues.count + self.rightChannelValues.count;
     if (totalBars < 1.0) return;   // evita columnWidth infinito
 
-    // Sem isto, cada atribuição de -path dispara a animação implícita de 0,25 s do
+    // Sem isto, cada mudança de tamanho dispara a animação implícita de 0,25 s do
     // CoreAnimation. Com 30 barras a mudar 20 vezes por segundo ficam sempre 30
     // animações a interpolar em simultâneo — é a maior fatia do CPU e é o que dá
     // às barras aquele arrastamento elástico.
@@ -145,56 +176,25 @@ SOFTWARE.
 
     CGFloat columnWidth = self.bounds.size.width / totalBars;
     CGFloat maxHeight = self.bounds.size.height;
-    // Com muitas barras numa vista estreita, columnWidth - 2 fica negativo e o
-    // CGPath sai vazio: as barras desapareciam sem aviso.
+    // Com muitas barras numa vista estreita, columnWidth - 2 fica negativo e a
+    // barra sai sem largura: as barras desapareciam sem aviso.
     CGFloat barWidth = MAX(columnWidth - 2.0, 1.0);
 
-    // Ensure leftBarLayers has enough layers
-    while (self.leftBarLayers.count < self.leftChannelValues.count) {
-        CAShapeLayer *barLayer = [CAShapeLayer layer];
-        barLayer.actions = @{@"path": [NSNull null]};   // nunca animar as barras
-        barLayer.fillColor = [[NSColor colorWithCalibratedRed:0.2 green:0.2 blue:0.2 alpha:1.0] CGColor];
-        [self.layer addSublayer:barLayer];
-        [self.leftBarLayers addObject:barLayer];
-    }
-
-    // Update left channel bars
-    for (NSUInteger i = 0; i < self.leftChannelValues.count; i++) {
-        NSNumber *value = self.leftChannelValues[i];
-        CGFloat height = value.floatValue / 1000.0 * maxHeight;
-
-        CAShapeLayer *barLayer = self.leftBarLayers[i];
-        CGRect barFrame = CGRectMake(i * columnWidth, 0, barWidth, height);
-        CGPathRef path = CGPathCreateWithRect(barFrame, NULL);
-        barLayer.path = path;
-        CGPathRelease(path);
-    }
-
-    // Ensure rightBarLayers has enough layers
-    while (self.rightBarLayers.count < self.rightChannelValues.count) {
-        CAShapeLayer *barLayer = [CAShapeLayer layer];
-        barLayer.actions = @{@"path": [NSNull null]};   // nunca animar as barras
-        barLayer.fillColor = [[NSColor colorWithCalibratedRed:0.5 green:0.5 blue:0.5 alpha:1.0] CGColor];
-        [self.layer addSublayer:barLayer];
-        [self.rightBarLayers addObject:barLayer];
-    }
-
-    // Update right channel bars
-    for (NSUInteger i = 0; i < self.rightChannelValues.count; i++) {
-        NSNumber *value = self.rightChannelValues[i];
-        CGFloat height = value.floatValue / 1000.0 * maxHeight;
-
-        CAShapeLayer *barLayer = self.rightBarLayers[i];
-        CGRect barFrame = CGRectMake((i + self.leftChannelValues.count) * columnWidth, 0, barWidth, height);
-        CGPathRef path = CGPathCreateWithRect(barFrame, NULL);
-        barLayer.path = path;
-        CGPathRelease(path);
-    }
+    [self acertarBarras:self.leftBarLayers
+                 valores:self.leftChannelValues
+                primeira:0
+                     cor:[NSColor colorWithCalibratedRed:0.2 green:0.2 blue:0.2 alpha:1.0]
+             columnWidth:columnWidth barWidth:barWidth maxHeight:maxHeight];
+    [self acertarBarras:self.rightBarLayers
+                 valores:self.rightChannelValues
+                primeira:self.leftChannelValues.count
+                     cor:[NSColor colorWithCalibratedRed:0.5 green:0.5 blue:0.5 alpha:1.0]
+             columnWidth:columnWidth barWidth:barWidth maxHeight:maxHeight];
 
     // Remove extra layers if counts have decreased
     if (self.leftBarLayers.count > self.leftChannelValues.count) {
         for (NSUInteger i = self.leftChannelValues.count; i < self.leftBarLayers.count; i++) {
-            CAShapeLayer *barLayer = self.leftBarLayers[i];
+            CALayer *barLayer = self.leftBarLayers[i];
             [barLayer removeFromSuperlayer];
         }
         [self.leftBarLayers removeObjectsInRange:NSMakeRange(self.leftChannelValues.count, self.leftBarLayers.count - self.leftChannelValues.count)];
@@ -202,7 +202,7 @@ SOFTWARE.
 
     if (self.rightBarLayers.count > self.rightChannelValues.count) {
         for (NSUInteger i = self.rightChannelValues.count; i < self.rightBarLayers.count; i++) {
-            CAShapeLayer *barLayer = self.rightBarLayers[i];
+            CALayer *barLayer = self.rightBarLayers[i];
             [barLayer removeFromSuperlayer];
         }
         [self.rightBarLayers removeObjectsInRange:NSMakeRange(self.rightChannelValues.count, self.rightBarLayers.count - self.rightChannelValues.count)];

@@ -8581,7 +8581,7 @@ static const NSTimeInterval kCavaEsperaAteApagar = 0.2;
                     [parsedRightValues addObject:@((aDesenhar->barras[i] * 1000) / 65535)];
                 }
 
-                // As barras são CAShapeLayers: basta actualizar os paths. Forçar aqui um
+                // As barras são CALayers: basta actualizar-lhes os tamanhos. Forçar aqui um
                 // -setNeedsDisplay:/-displayIfNeeded redesenhava a view inteira 20 vezes
                 // por segundo só para repintar um fundo que nunca muda.
                 [(HistogramView *)self.histogramView updateHistogramWithLeftChannel:parsedLeftValues
