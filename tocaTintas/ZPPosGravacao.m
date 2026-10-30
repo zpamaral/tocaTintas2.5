@@ -232,15 +232,17 @@ static int ZPProcurarRampas(const ZPGravacao *g, NSArray<NSArray<NSNumber *> *> 
 
 // Um GET síncrono. O MusicBrainz responde 503 («server is currently busy»)
 // quando está carregado — visto em 2026-10-30, numa em cada duas corridas do
-// Low —, e então tenta-se mais três vezes, com esperas de 2, 4 e 6 s. Em
+// Low, e às vezes durante mais de 12 s —, e então tenta-se mais cinco vezes,
+// com esperas de 2, 4, 8, 16 e 30 s: corre em segundo plano, pode esperar. Em
 // `respondeu`, se chegou alguma resposta definitiva (200 ou 404).
 static NSData *ZPPedirUmaVez(NSURL *url, NSInteger *codigo);
 
 static NSData *ZPPedir(NSURL *url, BOOL *respondeu) {
     if (respondeu) *respondeu = NO;
     if (!url) return nil;
-    for (int tentativa = 0; tentativa < 4; ++tentativa) {
-        if (tentativa > 0) [NSThread sleepForTimeInterval:2.0 * tentativa];
+    static const double esperas[] = { 0.0, 2.0, 4.0, 8.0, 16.0, 30.0 };
+    for (int tentativa = 0; tentativa < 6; ++tentativa) {
+        if (esperas[tentativa] > 0.0) [NSThread sleepForTimeInterval:esperas[tentativa]];
         NSInteger codigo = 0;
         NSData *corpo = ZPPedirUmaVez(url, &codigo);
         if (codigo == 200 || codigo == 404) {
@@ -296,6 +298,16 @@ static NSString *ZPChave(NSString *s) {
         if ([alnum characterIsMember:ch]) [k appendFormat:@"%C", ch];
     }
     return k;
+}
+
+// A Apple acrescenta « - EP» e « - Single» ao nome dos álbuns, no catálogo e
+// no Música; o MusicBrainz e a fonoteca não («Belly Up - EP» dos Moin, em
+// 2026-10-30, não deu com a edição «Belly Up» do MusicBrainz).
+static NSString *ZPSemSufixoDaApple(NSString *album) {
+    for (NSString *sufixo in @[ @" - EP", @" - Single" ]) {
+        if ([album hasSuffix:sufixo]) return [album substringToIndex:album.length - sufixo.length];
+    }
+    return album;
 }
 
 // O álbum no catálogo da Apple: a loja americana primeiro, que dá os géneros
@@ -461,6 +473,24 @@ static double ZPSonoridade(NSData *blocos) {
 
 #pragma mark - FLAC
 
+// O formato de uma imagem pelos primeiros bytes: @"jpg", @"png", @"gif",
+// @"webp", ou nil se for outro.
+static NSString *ZPFormatoDaImagem(NSData *d) {
+    const uint8_t *b = d.bytes;
+    if (d.length >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF) return @"jpg";
+    if (d.length >= 8 && !memcmp(b, "\x89PNG\r\n\x1a\n", 8)) return @"png";
+    if (d.length >= 6 && (!memcmp(b, "GIF87a", 6) || !memcmp(b, "GIF89a", 6))) return @"gif";
+    if (d.length >= 12 && !memcmp(b, "RIFF", 4) && !memcmp(b + 8, "WEBP", 4)) return @"webp";
+    return nil;
+}
+
+static const char *ZPTipoMIME(NSString *formato) {
+    if ([formato isEqualToString:@"png"]) return "image/png";
+    if ([formato isEqualToString:@"gif"]) return "image/gif";
+    if ([formato isEqualToString:@"webp"]) return "image/webp";
+    return "image/jpeg";
+}
+
 static BOOL ZPEscreverFLAC(NSString *caminho, const ZPGravacao *g, const ZPCorreccao *cs, int nc,
                            long long inicio, long long fim, unsigned bits,
                            NSArray<NSArray<NSString *> *> *etiquetas, NSData *capa, NSString **erro) {
@@ -485,11 +515,9 @@ static BOOL ZPEscreverFLAC(NSString *caminho, const ZPGravacao *g, const ZPCorre
     meta[nm++] = vc;
     if (capa.length) {
         NSBitmapImageRep *imagem = [NSBitmapImageRep imageRepWithData:capa];
-        const uint8_t *b = capa.bytes;
-        BOOL png = capa.length > 4 && b[0] == 0x89 && b[1] == 'P';
         FLAC__StreamMetadata *p = FLAC__metadata_object_new(FLAC__METADATA_TYPE_PICTURE);
         p->data.picture.type = FLAC__STREAM_METADATA_PICTURE_TYPE_FRONT_COVER;
-        FLAC__metadata_object_picture_set_mime_type(p, png ? "image/png" : "image/jpeg", true);
+        FLAC__metadata_object_picture_set_mime_type(p, (char *)ZPTipoMIME(ZPFormatoDaImagem(capa)), true);
         FLAC__metadata_object_picture_set_description(p, (FLAC__byte *)"", true);
         p->data.picture.width = (FLAC__uint32)imagem.pixelsWide;
         p->data.picture.height = (FLAC__uint32)imagem.pixelsHigh;
@@ -544,6 +572,17 @@ static NSString *ZPNomeDeFicheiro(NSString *s) {
 }
 
 static id ZPOuNada(id v) { return (v && v != [NSNull null]) ? v : nil; }
+
+// O artista como o MusicBrainz o credita: «Moin feat. Sophia Al-Maria & Ben
+// Vince». Os convidados vão aqui e não no título, ao contrário da Apple.
+static NSString *ZPCreditoDoMusicBrainz(NSArray<NSDictionary *> *credito) {
+    NSMutableString *s = [NSMutableString string];
+    for (NSDictionary *c in credito) {
+        [s appendString:ZPOuNada(c[@"name"]) ?: @""];
+        [s appendString:ZPOuNada(c[@"joinphrase"]) ?: @""];
+    }
+    return s.length ? s : nil;
+}
 
 NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **pastasEscritas) {
     if (pastasEscritas) *pastasEscritas = @[];
@@ -628,7 +667,7 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         NSArray *ms = [ordenadas valueForKey:@"trackTimeMillis"];
         BOOL respondeu = YES;
         NSDictionary *mb = ZPEdicaoNoMusicBrainz(a[@"catalogo"][@"artistName"] ?: a[@"artista"],
-                                                 a[@"catalogo"][@"collectionName"] ?: a[@"nome"], ms, &respondeu);
+                                                 ZPSemSufixoDaApple(a[@"catalogo"][@"collectionName"] ?: a[@"nome"]), ms, &respondeu);
         if (!respondeu) a[@"mbSemResposta"] = @YES;
         if (!mb) continue;
         a[@"mb"] = mb;
@@ -650,6 +689,7 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         if (ms) {
             f[@"duracao"] = @(ms.doubleValue / 1000.0);
             f[@"origemDaDuracao"] = f[@"catalogo"] ? @"catálogo da Apple" : @"MusicBrainz";
+            f[@"duracaoExacta"] = @YES;
         } else {
             f[@"duracao"] = f[@"marca"][@"duracao"] ?: @0;
             f[@"origemDaDuracao"] = @"o Música (pode desviar dezenas de ms)";
@@ -665,6 +705,21 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         return soma;
     };
     const long long meioSegundo = llround(0.5 * g.taxa), tolerancia = llround(kZPToleranciaDaMarca * g.taxa);
+    // Um corte perto de `t`: no fim do silêncio digital que acabe a menos de
+    // `raio` (o som da faixa seguinte começa aí, exacto); senão em `t`. Nunca
+    // antes de `minimo`. O «primeiro som depois de t − 0,5 s» não serve: num
+    // álbum sem pausas, é logo t − 0,5 s (visto em 2026-10-30, num teste sem
+    // catálogo com o EP dos Moin).
+    NSArray<NSArray<NSNumber *> *> *silencios = toc[@"silencios"] ?: @[];
+    long long (^ancorar)(long long, long long, long long) = ^long long (long long t, long long raio, long long minimo) {
+        long long melhor = -1;
+        for (NSArray<NSNumber *> *sil in silencios) {
+            long long fimDoSilencio = sil[1].longLongValue;
+            if (fimDoSilencio < minimo || fimDoSilencio >= g.n || llabs(fimDoSilencio - t) > raio) continue;
+            if (melhor < 0 || llabs(fimDoSilencio - t) < llabs(melhor - t)) melhor = fimDoSilencio;
+        }
+        return melhor >= 0 ? melhor : MAX(t, minimo);
+    };
     for (NSUInteger i = 0; i < faixas.count; ++i) {
         NSMutableDictionary *f = faixas[i];
         NSDictionary *m = f[@"marca"];
@@ -690,14 +745,21 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
             long long perdidas = perdidasEntre(a0, p);
             p -= perdidas;
             x -= perdidas;
-            if (llabs(p - est) <= tolerancia) {
+            if (![ant[@"duracaoExacta"] boolValue]) {
+                // Sem duração de confiança (fora do catálogo, o Música
+                // arredonda ao segundo: 218,0 s por 218,719), a marca manda.
+                inicio = ancorar(est, meioSegundo, a0 + 1);
+                ant[@"fim"] = @(inicio);
+                f[@"como"] = inicio == est ? @"marca do Música (±0,1 s)" : @"silêncio junto à marca do Música";
+            } else if (llabs(p - est) <= tolerancia) {
                 inicio = p;
                 exacto = x;
                 ant[@"fim"] = @(p);
                 f[@"como"] = [NSString stringWithFormat:@"soma das durações (marca a %+.0f ms)", (est - p) * 1000.0 / g.taxa];
             } else {
-                inicio = ZPPrimeiroSom(&g, MAX(est - meioSegundo, a0 + 1), g.n);
-                f[@"como"] = [NSString stringWithFormat:@"marca do Música (a soma das durações dava %+.3f s)", (p - est) / g.taxa];
+                inicio = ancorar(est, meioSegundo, a0 + 1);
+                f[@"como"] = [NSString stringWithFormat:@"%@ (a soma das durações dava %+.3f s)",
+                              inicio == est ? @"marca do Música" : @"silêncio junto à marca", (p - est) / g.taxa];
                 if (inicio >= 0 && p > inicio) {
                     ant[@"fim"] = @(inicio);
                     if (!ant[@"falta"]) ant[@"falta"] = @"o fim: a faixa seguinte começou antes";
@@ -715,6 +777,14 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         if (i + 1 == faixas.count) {
             long long dur = llround([f[@"duracao"] doubleValue] * g.taxa);
             long long fim = inicio + dur - perdidasEntre(inicio, inicio + dur);
+            if (![f[@"duracaoExacta"] boolValue]) {
+                // Duração ao segundo: o fim no silêncio que houver por perto
+                // (o do fim do álbum, antes da folga que traz o seguinte), e
+                // só falta o fim se a gravação parar bem antes.
+                long long perto = ancorar(fim, llround(1.5 * g.taxa), inicio + 1);
+                if (perto != fim) fim = perto;
+                else if (fim > g.n && fim - g.n <= llround(1.5 * g.taxa)) fim = g.n;
+            }
             if (fim > g.n) {
                 if (!f[@"falta"]) f[@"falta"] = @"o fim: a gravação parou antes";
                 fim = g.n;
@@ -754,7 +824,7 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         NSMutableArray<NSMutableDictionary *> *inteiras = [NSMutableArray array];
         for (NSMutableDictionary *f in todas) if (!f[@"falta"]) [inteiras addObject:f];
 
-        NSString *nomeDoAlbum = ZPOuNada(mb[@"title"]) ?: ZPOuNada(cat[@"collectionName"]) ?: a[@"nome"];
+        NSString *nomeDoAlbum = ZPOuNada(mb[@"title"]) ?: ZPSemSufixoDaApple(ZPOuNada(cat[@"collectionName"]) ?: a[@"nome"]);
         NSString *artistaDoAlbum = ZPOuNada(cat[@"artistName"]) ?: a[@"artista"];
         [rel addObject:@""];
         [rel addObject:[NSString stringWithFormat:@"%@ — %@", artistaDoAlbum, nomeDoAlbum]];
@@ -811,9 +881,39 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
             continue;
         }
         [pastas addObject:pasta];
+
+        // A capa também solta, em albumart_backup/, como nas pastas da
+        // fonoteca: os mesmos bytes que vão embutidos, em cover.jpg ou
+        // cover.png, que é onde o tocaTintas a procura. Só um formato que ele
+        // aí não lê (GIF, WebP, HEIC…) passa a PNG, que não perde nada. Uma
+        // que lá esteja (uma faixa regravada para um álbum já feito) fica.
+        NSString *notaDaCapa = @" Sem capa.";
+        if (capa) {
+            NSURL *copias = [pasta URLByAppendingPathComponent:@"albumart_backup" isDirectory:YES];
+            NSString *formato = ZPFormatoDaImagem(capa);
+            NSData *solta = capa;
+            if (![formato isEqualToString:@"jpg"] && ![formato isEqualToString:@"png"]) {
+                formato = @"png";
+                solta = [[NSBitmapImageRep imageRepWithData:capa] representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+            }
+            NSString *nome = [@"cover" stringByAppendingPathExtension:formato];
+            NSURL *destino = [copias URLByAppendingPathComponent:nome];
+            BOOL jaHa = NO;
+            for (NSString *outro in @[ @"cover.jpg", @"cover.png" ]) {
+                if ([[NSFileManager defaultManager] fileExistsAtPath:[copias URLByAppendingPathComponent:outro].path]) jaHa = YES;
+            }
+            if (jaHa) {
+                notaDaCapa = @" A capa que já estava em albumart_backup ficou.";
+            } else if (solta && [[NSFileManager defaultManager] createDirectoryAtURL:copias withIntermediateDirectories:YES attributes:nil error:NULL]
+                       && [solta writeToURL:destino atomically:YES]) {
+                notaDaCapa = [NSString stringWithFormat:@" Capa em albumart_backup/%@.", nome];
+            } else {
+                notaDaCapa = [NSString stringWithFormat:@" Não consegui escrever albumart_backup/%@.", nome];
+            }
+        }
         [rel addObject:[NSString stringWithFormat:@"%u bits, %@. ReplayGain do álbum %+.2f dB, pico %.6f.%@", bits,
                         exacto ? @"bit-exacto" : [NSString stringWithFormat:@"NÃO bit-exacto (%lld tramas fora da grelha de 24 bits, arredondadas)", fora24],
-                        ganhoDoAlbum, picoDoAlbum, capa ? @"" : @" Sem capa."]];
+                        ganhoDoAlbum, picoDoAlbum, notaDaCapa]];
 
         NSUInteger escritas = 0;
         for (NSUInteger i = 0; i < todas.count; ++i) {
@@ -844,7 +944,10 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
                 NSString *s = [ZPOuNada(v) description];
                 if (s.length) [et addObject:@[ k, s ]];
             };
-            por(@"ARTIST", ZPOuNada(t[@"artistName"]) ?: m[@"artista"]);
+            // Com o título do MusicBrainz, o artista também: senão os
+            // convidados, que a Apple põe no título, perdiam-se.
+            NSString *creditado = mt ? ZPCreditoDoMusicBrainz(ZPOuNada(mt[@"artist-credit"]) ?: ZPOuNada(mt[@"recording"][@"artist-credit"])) : nil;
+            por(@"ARTIST", creditado ?: ZPOuNada(t[@"artistName"]) ?: m[@"artista"]);
             por(@"ALBUMARTIST", artistaDoAlbum);
             por(@"ALBUM", nomeDoAlbum);
             por(@"DATE", ano);
@@ -891,7 +994,7 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         if (erudita) [rel addObject:@"Erudita: os compositores, os intérpretes e os títulos vêm da Apple e têm de ser revistos (convenção da fonoteca)."];
         BOOL duracoesDoMusica = NO;
         for (NSMutableDictionary *f in inteiras) if (!f[@"catalogo"] && !f[@"mb"]) duracoesDoMusica = YES;
-        if (duracoesDoMusica) [rel addObject:@"Há faixas sem catálogo: cortadas pelas durações do Música, que podem desviar dezenas de ms."];
+        if (duracoesDoMusica) [rel addObject:@"Há faixas sem catálogo nem MusicBrainz: cortadas nas marcas do Música (±0,1 s), ou nos silêncios junto a elas. Convém rever essas fronteiras."];
         [resumos addObject:[NSString stringWithFormat:@"%@ — %@: %lu de %lu faixas, %u bits%@", artistaDoAlbum, nomeDoAlbum,
                             (unsigned long)escritas, (unsigned long)todas.count, bits, exacto ? @", bit-exacto" : @", não bit-exacto"]];
     }
