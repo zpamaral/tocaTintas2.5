@@ -11452,6 +11452,13 @@ static NSInteger ZPMesmoNomeDeAlbum(NSString *a, NSString *b) {
 // Uma faixa do catálogo conta pela regra das do tocaTintas: kPlayCountThreshold
 // segundos a tocar (as pausas não contam), uma vez por cada vez que se toca. O
 // tempo soma-se a cada pergunta ao Música e a cada segundo do relógio da barra.
+//
+// A audição em curso fica também nas preferências, a cada segundo: o Música
+// continua a tocar quando o tocaTintas reinicia, e sem isto a mesma audição
+// contava outra vez 5 s depois (visto em 2026-10). Reiniciar é como uma pausa:
+// a mesma faixa, sem ter voltado atrás, continua a audição que lá está — o que
+// já tinha tocado soma, e o que já tinha contado não volta a contar.
+static NSString * const kZPAudicaoDoCatalogoKey = @"ZPAudicaoDoCatalogo";
 
 // m é a faixa do catálogo que está a tocar, ou nil se não é nenhuma. Chama-se
 // antes de musicaPosicao/musicaQuando mudarem: ainda dizem onde ia a anterior.
@@ -11468,6 +11475,7 @@ static NSInteger ZPMesmoNomeDeAlbum(NSString *a, NSString *b) {
         self.faixaDoCatalogo = m;
         self.catalogoOuvido = 0.0;
         self.catalogoContado = NO;
+        [self retomarAudicaoDoCatalogo:m];
     }
     self.catalogoATocar = m && [m[@"estado"] isEqualToString:@"playing"];
     self.catalogoDesde = [NSDate date];
@@ -11479,14 +11487,40 @@ static NSInteger ZPMesmoNomeDeAlbum(NSString *a, NSString *b) {
     return p;
 }
 
+// A audição guardada, se for a desta faixa e ela não tiver voltado ao
+// princípio (a mesma tolerância de 10 s do «deVolta» de -acompanharOCatalogo:).
+// A da faixa anterior, ou de uma repetição, não serve: começa-se do zero.
+- (void)retomarAudicaoDoCatalogo:(NSDictionary *)m {
+    NSDictionary *a = [[NSUserDefaults standardUserDefaults] dictionaryForKey:kZPAudicaoDoCatalogoKey];
+    if (![a[@"pid"] isEqual:m[@"pid"]] || [m[@"posicao"] doubleValue] + 10.0 < [a[@"posicao"] doubleValue]) return;
+    self.catalogoOuvido = [a[@"ouvido"] doubleValue];
+    self.catalogoContado = [a[@"contado"] boolValue];
+    #ifdef DEBUG
+    NSLog(@"[Fonoteca] %@ — %@ continua a audição de antes (%.1f s, %@)", m[@"artista"], m[@"titulo"],
+          self.catalogoOuvido, self.catalogoContado ? @"já contada" : @"por contar");
+    #endif
+}
+
+- (void)guardarAudicaoDoCatalogo {
+    NSDictionary *f = self.faixaDoCatalogo;
+    if (![f[@"pid"] length]) return;
+    [[NSUserDefaults standardUserDefaults] setObject:@{ @"pid": f[@"pid"],
+                                                        @"posicao": @([self posicaoEstimadaDoMusica]),
+                                                        @"ouvido": @(self.catalogoOuvido),
+                                                        @"contado": @(self.catalogoContado) }
+                                              forKey:kZPAudicaoDoCatalogoKey];
+}
+
 // Junta o que tocou desde a última vez e, ao passar o limiar, conta.
 - (void)somarAoCatalogo {
     NSDictionary *f = self.faixaDoCatalogo;
     if (!f) return;
     if (self.catalogoATocar && self.catalogoDesde) self.catalogoOuvido += -[self.catalogoDesde timeIntervalSinceNow];
     self.catalogoDesde = [NSDate date];
-    if (self.catalogoContado || self.catalogoOuvido < kPlayCountThreshold) return;
-    self.catalogoContado = YES;
+    BOOL conta = !self.catalogoContado && self.catalogoOuvido >= kPlayCountThreshold;
+    if (conta) self.catalogoContado = YES;
+    [self guardarAudicaoDoCatalogo];
+    if (!conta) return;
     #ifdef DEBUG
     NSLog(@"[Fonoteca] %@ — %@ conta (%.1f s a tocar)", f[@"artista"], f[@"titulo"], self.catalogoOuvido);
     #endif
@@ -11502,6 +11536,12 @@ static NSInteger ZPMesmoNomeDeAlbum(NSString *a, NSString *b) {
 // A contagem da faixa na base (a da música, se já estiver ligada a uma; a que
 // ela juntou, se estiver pendente), e escreve-a se a faixa ainda estiver à
 // vista. As colunas são as que o ouvir-musica gravou, tal como o Música as dá.
+//
+// A música procura-se por qualquer faixa do Música ligada a ela, não só pelas
+// do catálogo: antes da primeira audição pelo catálogo não há linha dessas, e
+// uma música que se tem, e já se ouviu, aparecia com 0 (o «Sicilia» de Nídia &
+// Valentina, com 41, em 2026-10-30). O número da faixa não entra: nas do
+// catálogo o Música dá 0, nas da biblioteca o verdadeiro.
 - (void)lerContagemDoCatalogo:(NSDictionary *)f {
     NSString *chave = ZPChaveDoMusica(f);
     NSArray *args = @[f[@"artista"] ?: @"", f[@"album"] ?: @"", f[@"titulo"] ?: @"", @([f[@"faixa"] integerValue]),
@@ -11509,9 +11549,12 @@ static NSInteger ZPMesmoNomeDeAlbum(NSString *a, NSString *b) {
     dispatch_async(self.filaDaFonoteca, ^{
         if (![self abrirFonoteca]) return;
         NSNumber *n = ZPFonotecaValor(self.fonoteca,
-            "SELECT COALESCE((SELECT n FROM contagens WHERE musica = fm.musica), fm.contagem_inicial)"
-            " FROM faixas_musica fm WHERE fm.tipo = 'catalogo' AND fm.artista = ?1 AND fm.album = ?2"
-            " AND fm.titulo = ?3 AND fm.faixa = ?4 AND ABS(fm.duracao - ?5) < 1.0 LIMIT 1", args);
+            "SELECT COALESCE("
+            " (SELECT c.n FROM faixas_musica fm JOIN contagens c ON c.musica = fm.musica"
+            "   WHERE fm.artista = ?1 AND fm.album = ?2 AND fm.titulo = ?3 AND ABS(fm.duracao - ?5) < 1.0"
+            "   ORDER BY fm.tipo = 'catalogo' DESC LIMIT 1),"
+            " (SELECT fm.contagem_inicial FROM faixas_musica fm WHERE fm.tipo = 'catalogo' AND fm.artista = ?1"
+            "   AND fm.album = ?2 AND fm.titulo = ?3 AND fm.faixa = ?4 AND ABS(fm.duracao - ?5) < 1.0 LIMIT 1))", args);
         dispatch_async(dispatch_get_main_queue(), ^{
             if (!self.aMostrarOMusica || ![chave isEqualToString:self.musicaFaixaMostrada]) return;
             self.contagemDoCatalogo = n ?: @0;
