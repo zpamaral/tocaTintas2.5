@@ -37,6 +37,7 @@
 		1F7D75272C9642000046E0AC /* libopusfile.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F7D75252C9642000046E0AC /* libopusfile.a */; };
 		1F7E10B030432FCF00C86ED4 /* eq_autoeq.tgz in Resources */ = {isa = PBXBuildFile; fileRef = 1F7E10AE30432D7E00C86ED4 /* eq_autoeq.tgz */; };
 		1FA3F84830940D8500ACF01D /* ZPBarraDeProgresso.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FA3F84730940D8500ACF01D /* ZPBarraDeProgresso.m */; };
+		1FA3F84B30949C2000ACF01D /* ZPPosGravacao.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FA3F84A30949C2000ACF01D /* ZPPosGravacao.m */; };
 		1FA7D0C1E2B34A5600A0C002 /* Ajuda in Resources */ = {isa = PBXBuildFile; fileRef = 1FA7D0C1E2B34A5600A0C001 /* Ajuda */; };
 		1FAA50772E436F2E00DB68C7 /* QuickLookThumbnailing.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FEC26C92E33C1EB0099225A /* QuickLookThumbnailing.framework */; };
 		1FAA50782E436F2E00DB68C7 /* Quartz.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F7D8B562E32D815009D8628 /* Quartz.framework */; };
@@ -145,6 +146,8 @@
 		1F7E10AE30432D7E00C86ED4 /* eq_autoeq.tgz */ = {isa = PBXFileReference; lastKnownFileType = file; path = eq_autoeq.tgz; sourceTree = "<group>"; };
 		1FA3F84630940D8500ACF01D /* ZPBarraDeProgresso.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPBarraDeProgresso.h; sourceTree = "<group>"; };
 		1FA3F84730940D8500ACF01D /* ZPBarraDeProgresso.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPBarraDeProgresso.m; sourceTree = "<group>"; };
+		1FA3F84930949C2000ACF01D /* ZPPosGravacao.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPPosGravacao.h; sourceTree = "<group>"; };
+		1FA3F84A30949C2000ACF01D /* ZPPosGravacao.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPPosGravacao.m; sourceTree = "<group>"; };
 		1FA7D0C1E2B34A5600A0C001 /* Ajuda */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Ajuda; sourceTree = "<group>"; };
 		1FAA50762E436F2E00DB68C7 /* ZPQLiconwv.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ZPQLiconwv.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		1FAA507A2E436F2F00DB68C7 /* ThumbnailProvider.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ThumbnailProvider.h; sourceTree = "<group>"; };
@@ -268,6 +271,8 @@
 				1F12F2A92C7C85480064C694 /* ViewController.m */,
 				1FA3F84630940D8500ACF01D /* ZPBarraDeProgresso.h */,
 				1FA3F84730940D8500ACF01D /* ZPBarraDeProgresso.m */,
+				1FA3F84930949C2000ACF01D /* ZPPosGravacao.h */,
+				1FA3F84A30949C2000ACF01D /* ZPPosGravacao.m */,
 				1FBE64BB2CE37FD90092C6FA /* ZPAirPlay.h */,
 				1FBE64BC2CE37FD90092C6FA /* ZPAirPlay.m */,
 				1FC8C3EB2CE4254400271175 /* ZPAudioCapture.h */,
@@ -600,6 +605,7 @@
 				1FA3F84830940D8500ACF01D /* ZPBarraDeProgresso.m in Sources */,
 				1F7D75202C95DCAF0046E0AC /* M3UPlaylist.m in Sources */,
 				1FC8C3F22CE63CE500271175 /* ZPAirPlayStreamer.m in Sources */,
+				1FA3F84B30949C2000ACF01D /* ZPPosGravacao.m in Sources */,
 				1F12F2AA2C7C85480064C694 /* ViewController.m in Sources */,
 				1F12F2B12C7C854C0064C694 /* main.m in Sources */,
 				1F7D75232C963F600046E0AC /* ZPOpusDecoder.m in Sources */,
