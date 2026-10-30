@@ -2641,14 +2641,14 @@ static const NSUInteger ZPTentativasDaFrequencia = 20;   // × 0,5 s
     #ifdef DEBUG
     NSLog(@"Terminating any existing cava instances…");
     #endif
-    NSString *killCommand = @"pkill -f cava";
+    NSString *killCommand = @"/usr/bin/pkill -f cava";
     system([killCommand UTF8String]);
 
     // Step 2: Check if cava is already running
     #ifdef DEBUG
     NSLog(@"Checking if cava is running…");
     #endif
-    NSString *checkCommand = @"pgrep -f cava";
+    NSString *checkCommand = @"/usr/bin/pgrep -f cava";
     FILE *pipe = popen([checkCommand UTF8String], "r");
     if (!pipe) {
         #ifdef DEBUG
