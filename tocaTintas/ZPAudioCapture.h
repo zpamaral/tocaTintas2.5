@@ -68,7 +68,7 @@ extern NSString * const kZPAudioCaptureWarningNotification;
 /// para as gravações pelo BlackHole.
 typedef NS_ENUM(NSInteger, ZPEstadoDaGrelha) {
     ZPEstadoDaGrelhaBitExacta = 0,    // nada fora da grelha até agora
-    ZPEstadoDaGrelhaHouveFalhas = 1,  // algumas tramas fora, ou esteve mal e já não está
+    ZPEstadoDaGrelhaHouveFalhas = 1,  // algumas tramas fora, ou esteve mal e já não está, ou perdeu-se som
     ZPEstadoDaGrelhaMal = 2,          // mais de metade da última janela fora
 };
 
@@ -80,7 +80,7 @@ extern NSString * const kZPAudioCaptureGridStateNotification;
 @interface ZPAudioCapture : NSObject
 
 // Grava para um WAV de vírgula flutuante de 32 bits em
-// ~/Library/Application Support/tocaTintas. A fonte é a escolhida nas
+// /var/tmp, até o álbum ser aprovado. A fonte é a escolhida nas
 // preferências (ZPCurrentRecordSource): o BlackHole, ou o som do app Música por
 // captura de processo. Quem trata do AirPlay é o ZPAirPlayStreamer — esta
 // classe só grava.
@@ -97,6 +97,13 @@ extern NSString * const kZPAudioCaptureGridStateNotification;
 // Já entrou no ficheiro alguma amostra diferente de zero. Até lá, o que há é
 // o silêncio de antes de o Música tocar, e recomeçar não perde nada.
 @property (atomic, readonly) BOOL gravouSom;
+
+// Junta ao rascunho da TOC da gravação a ficha de uma faixa do Música, tal como
+// ZPMusicNowPlaying a dá, com a trama do ficheiro em que chegou e o início que
+// daí se tira (trama − posição × frequência). Vai, com os silêncios digitais da
+// gravação e o som que se perdeu pelo caminho, para um «Recording_….toc.json»
+// ao lado do WAV, escrito ao fechar.
+- (void)marcarFaixa:(NSDictionary *)faixa;
 
 @end
 

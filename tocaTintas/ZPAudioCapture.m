@@ -401,9 +401,22 @@ static const unsigned long long kZPTramasDeRampa = 2400;
 
 NSString * const kZPAudioCaptureGridStateNotification = @"ZPAudioCaptureGridState";
 
+static void ZPPublicarEstadoDaGrelha(ZPEstadoDaGrelha estado);   // com o vigia da grelha, mais abaixo
+
 @implementation ZPAudioCapture {
     ZPVigiaCabeca _vigia;    // só na ioQueue
     ZPVigiaGrelha _grelha;   // só na ioQueue
+    // O rascunho da TOC (ver -marcarFaixa:). Tudo só na ioQueue.
+    NSMutableArray<NSDictionary *> *_marcasDeFaixa;
+    NSMutableArray<NSArray<NSNumber *> *> *_silencios;   // [início, fim) em tramas
+    unsigned long long _inicioDoSilencio;
+    BOOL _emSilencio;
+    // O som perdido (ver -registarTempo:host:tramas:). Também só na ioQueue.
+    NSMutableArray<NSDictionary *> *_perdas;
+    long long _tramasPerdidas;
+    BOOL _haTempo;              // já chegou um bloco com tempo
+    double _proximoTempo;       // o tempo em amostras esperado no bloco seguinte, ou < 0
+    uint64_t _proximoHost;      // o tempo do anfitrião esperado, ou 0
 }
 
 - (instancetype)init {
@@ -445,23 +458,9 @@ NSString * const kZPAudioCaptureGridStateNotification = @"ZPAudioCaptureGridStat
 
     self.isRecording = YES;
 
-    // Get the Application Support directory
-    NSArray<NSURL *> *appSupportURLs = [[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask];
-    NSURL *appSupportURL = [appSupportURLs firstObject];
-
-    // Append your app's directory
-    NSURL *appDirectory = [appSupportURL URLByAppendingPathComponent:@"tocaTintas" isDirectory:YES];
-
-    // Ensure the directory exists
-    NSError *error = nil;
-    if (![[NSFileManager defaultManager] fileExistsAtPath:[appDirectory path]]) {
-        [[NSFileManager defaultManager] createDirectoryAtURL:appDirectory withIntermediateDirectories:YES attributes:nil error:&error];
-        if (error) {
-            #ifdef DEBUG
-            NSLog(@"[Audio Capture] Error creating directory: %@", error.localizedDescription);
-            #endif
-        }
-    }
+    // Em /var/tmp, com a TOC ao lado, até o álbum ser aprovado: são ficheiros
+    // de passagem, e ao contrário do /tmp a pasta sobrevive a um reinício.
+    NSURL *appDirectory = [NSURL fileURLWithPath:@"/var/tmp" isDirectory:YES];
 
     // Create a unique file name
     NSString *fileName = [NSString stringWithFormat:doMusica ? @"Recording_Music_%@.wav" : @"Recording_%@.wav",
@@ -477,6 +476,13 @@ NSString * const kZPAudioCaptureGridStateNotification = @"ZPAudioCaptureGridStat
     self.gravouSom = NO;
     dispatch_sync(self.ioQueue, ^{
         memset(&self->_grelha, 0, sizeof(self->_grelha));
+        self->_marcasDeFaixa = [NSMutableArray array];
+        self->_silencios = [NSMutableArray array];
+        self->_inicioDoSilencio = 0;
+        self->_emSilencio = YES;   // o ficheiro começa sem som
+        self->_perdas = [NSMutableArray array];
+        self->_tramasPerdidas = 0;
+        self->_haTempo = NO;
     });
 
     NSMutableData *reserva = [NSMutableData dataWithLength:kZPWavHeaderSize];
@@ -563,6 +569,7 @@ NSString * const kZPAudioCaptureGridStateNotification = @"ZPAudioCaptureGridStat
     // fechado e não entra mais nada nele.
     dispatch_sync(self.ioQueue, ^{
         [[NSFileManager defaultManager] removeItemAtURL:ficheiro error:NULL];
+        [[NSFileManager defaultManager] removeItemAtURL:ZPFicheiroDaTOC(ficheiro) error:NULL];
     });
     #ifdef DEBUG
     NSLog(@"[Audio Capture] Gravação abandonada antes de haver som: %@", ficheiro.lastPathComponent);
@@ -637,10 +644,156 @@ static NSData *ZPWavHeader(double sampleRate, NSUInteger channels, unsigned long
     }
     [handle closeFile];
 
+    // Sem uma amostra de som, o ficheiro não serve a ninguém: só confundia
+    // quem fosse à pasta (um WAV de 56 bytes, ou um de silêncio).
+    if (!self.gravouSom) {
+        [[NSFileManager defaultManager] removeItemAtURL:self.recordFileURL error:NULL];
+        #ifdef DEBUG
+        NSLog(@"[Audio Capture] Gravação sem som, apagada: %@", [self.recordFileURL lastPathComponent]);
+        #endif
+        return;
+    }
+    [self escreverRascunhoDaTOC];
+
     #ifdef DEBUG
     NSLog(@"[Audio Capture] Gravação fechada: %llu bytes de amostras, %.0f Hz, %lu canais, float de 32 bits (%@).",
           self.recordDataBytes, taxa, (unsigned long)self.recordChannels, [self.recordFileURL lastPathComponent]);
     #endif
+}
+
+#pragma mark - Rascunho da TOC
+
+// Para cortar as faixas depois, e analisar as rampas do Música, sem um registo
+// feito por fora. Num álbum sem pausas (o Double Negative dos Low, 2026-10) os
+// silêncios não chegam: o único silêncio digital era o do princípio. O que o
+// Música diz de cada faixa, mais a trama do ficheiro em que o disse, dá onde
+// ela começou (com a latência do Apple Event, uns milissegundos); as durações
+// dele, ao milissegundo, afinam o resto. Os silêncios digitais servem para as
+// rampas, que encostam sempre a eles (ver kZPTramasDeRampa).
+//
+// Fica num JSON ao lado do WAV, «Recording_….toc.json», escrito ao fechar.
+
+// Silêncios digitais mais curtos do que isto são zeros a meio da música (há
+// tramas soltas a zero nos dois canais, mesmo em som forte) e não interessam.
+static const unsigned long long kZPTramasDeSilencioMinimo = 64;
+
+static NSURL *ZPFicheiroDaTOC(NSURL *wav) {
+    return [[wav URLByDeletingPathExtension] URLByAppendingPathExtension:@"toc.json"];
+}
+
+// Chamada antes de o bloco somar a recordDataBytes: a trama da primeira
+// amostra do bloco é a contagem que lá está.
+- (void)registarSilencios:(const float *)par tramas:(UInt32)tramas {
+    unsigned long long base = self.recordDataBytes / (2 * sizeof(float));
+    for (UInt32 i = 0; i < tramas; ++i) {
+        BOOL zero = par[2*i] == 0.0f && par[2*i+1] == 0.0f;
+        if (zero && !_emSilencio) {
+            _emSilencio = YES;
+            _inicioDoSilencio = base + i;
+        } else if (!zero && _emSilencio) {
+            _emSilencio = NO;
+            [self fecharSilencioEm:base + i];
+        }
+    }
+}
+
+- (void)fecharSilencioEm:(unsigned long long)fim {
+    if (fim - _inicioDoSilencio < kZPTramasDeSilencioMinimo) return;
+    [_silencios addObject:@[ @(_inicioDoSilencio), @(fim) ]];
+}
+
+// Som perdido: cada bloco traz o instante da primeira amostra, no relógio do
+// dispositivo; o bloco seguinte devia começar exactamente onde este acaba. Um
+// salto é som que o BlackHole (ou o Música) entregou e não chegou cá: o processo
+// suspenso pelo lldb (2026-10, no Respighi: duas emendas, 7 s, só vistas depois
+// e por acaso), o thread de áudio atrasado, uma reconfiguração da engine. O
+// ficheiro não tem buraco nenhum — as amostras de um lado e do outro ficam
+// encostadas —, por isso só por aqui se sabe.
+//
+// Quando o tempo em amostras recomeça (a engine reinstalada depois de uma
+// mudança de dispositivo), a falta estima-se pelo relógio do anfitrião, e
+// abaixo de 1 ms não se conta: esse relógio não é exacto à amostra.
+//
+// Chamada antes de o bloco somar a recordDataBytes, como -registarSilencios:.
+- (void)registarTempo:(double)tempo host:(uint64_t)host tramas:(UInt32)tramas frequencia:(double)frequencia {
+    if (frequencia <= 0.0 || tramas == 0) return;
+    if (_haTempo) {
+        long long falta = 0;
+        NSString *pelo = nil;
+        if (tempo >= 0.0 && _proximoTempo >= 0.0 && tempo >= _proximoTempo) {
+            falta = llround(tempo - _proximoTempo);
+            pelo = @"amostras";
+        } else if (host && _proximoHost) {
+            double segundos = [AVAudioTime secondsForHostTime:host] - [AVAudioTime secondsForHostTime:_proximoHost];
+            falta = llround(segundos * frequencia);
+            if (llabs(falta) < (long long)(frequencia / 1000.0)) falta = 0;
+            pelo = @"relógio";
+        }
+        if (falta != 0) {
+            unsigned long long trama = self.recordDataBytes / (2 * sizeof(float));
+            [_perdas addObject:@{ @"trama": @(trama), @"perdidas": @(falta),
+                                  @"segundos": @(falta / frequencia), @"pelo": pelo }];
+            if (falta > 0) {
+                _tramasPerdidas += falta;
+                // O laranja fica: diz mais do que o amarelo, e passa a amarelo
+                // sozinho quando a grelha voltar.
+                if (_grelha.estado == ZPEstadoDaGrelhaBitExacta) {
+                    _grelha.estado = ZPEstadoDaGrelhaHouveFalhas;
+                    ZPPublicarEstadoDaGrelha(ZPEstadoDaGrelhaHouveFalhas);
+                }
+            }
+            NSLog(@"[Audio Capture] Perderam-se %lld tramas (%.3f s) aos %.3f s do ficheiro (pelo %@).",
+                  falta, falta / frequencia, trama / frequencia, pelo);
+        }
+    }
+    _haTempo = YES;
+    _proximoTempo = tempo >= 0.0 ? tempo + tramas : -1.0;
+    _proximoHost = host ? host + [AVAudioTime hostTimeForSeconds:tramas / frequencia] : 0;
+}
+
+- (void)marcarFaixa:(NSDictionary *)faixa {
+    if (!self.isRecording || !faixa) return;
+    NSDate *quando = [NSDate date];
+    dispatch_async(self.ioQueue, ^{
+        if (!self.recordFileHandle) return;
+        NSMutableDictionary *marca = [faixa mutableCopy];
+        unsigned long long trama = self.recordDataBytes / (2 * sizeof(float));
+        marca[@"trama"] = @(trama);
+        marca[@"quando"] = @(quando.timeIntervalSince1970);
+        double posicao = [faixa[@"posicao"] doubleValue];
+        if (self.recordSampleRate > 0.0) {
+            long long inicio = (long long)trama - llround(posicao * self.recordSampleRate);
+            marca[@"inicioEstimado"] = @(inicio);
+        }
+        [self->_marcasDeFaixa addObject:marca];
+    });
+}
+
+// Corre na ioQueue, depois do fecho do WAV.
+- (void)escreverRascunhoDaTOC {
+    if (!self.gravouSom) return;
+    unsigned long long tramas = self.recordDataBytes / (2 * sizeof(float));
+    if (_emSilencio) {
+        [self fecharSilencioEm:tramas];
+        _emSilencio = NO;
+    }
+    NSDictionary *toc = @{
+        @"ficheiro":   self.recordFileURL.lastPathComponent ?: @"",
+        @"frequencia": @(self.recordSampleRate),
+        @"canais":     @(self.recordChannels),
+        @"tramas":     @(tramas),
+        @"silencios":  _silencios ?: @[],
+        @"faixas":     _marcasDeFaixa ?: @[],
+        @"perdas":     _perdas ?: @[],
+        @"tramasPerdidas": @(_tramasPerdidas),
+    };
+    NSError *erro = nil;
+    NSData *json = [NSJSONSerialization dataWithJSONObject:toc
+                                                   options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
+                                                     error:&erro];
+    if (!json || ![json writeToURL:ZPFicheiroDaTOC(self.recordFileURL) options:NSDataWritingAtomic error:&erro]) {
+        NSLog(@"[Audio Capture] Não consegui escrever o rascunho da TOC: %@", erro.localizedDescription);
+    }
 }
 
 #pragma mark - Captura do app Música
@@ -727,6 +880,11 @@ static OSStatus ZPIOProcMusica(AudioObjectID dispositivo, const AudioTimeStamp *
     UInt32 tramas = b0->mDataByteSize / (UInt32)(sizeof(float) * canais0);
     if (tramas == 0 || !b0->mData) return noErr;
 
+    double tempo = (instanteEntrada && (instanteEntrada->mFlags & kAudioTimeStampSampleTimeValid))
+                   ? instanteEntrada->mSampleTime : -1.0;
+    uint64_t host = (instanteEntrada && (instanteEntrada->mFlags & kAudioTimeStampHostTimeValid))
+                    ? instanteEntrada->mHostTime : 0;
+
     NSMutableData *par = [NSMutableData dataWithLength:tramas * 2 * sizeof(float)];
     float *d = par.mutableBytes;
     const float *x0 = b0->mData;
@@ -749,7 +907,16 @@ static OSStatus ZPIOProcMusica(AudioObjectID dispositivo, const AudioTimeStamp *
             #endif
             return;
         }
+        [eu registarTempo:tempo host:host tramas:tramas frequencia:eu.recordSampleRate];
+        [eu registarSilencios:par.bytes tramas:tramas];
         eu.recordDataBytes += par.length;
+        // Pelo BlackHole é o vigia da grelha que dá por isto; aqui não há.
+        if (!eu.gravouSom) {
+            const float *a = par.bytes;
+            for (UInt32 i = 0; i < 2 * tramas; ++i) {
+                if (a[i] != 0.0f) { eu.gravouSom = YES; break; }
+            }
+        }
         [eu vigiarAmostras:par.bytes tramas:tramas];
     });
     return noErr;
@@ -1032,11 +1199,13 @@ static OSStatus ZPIOProcMusica(AudioObjectID dispositivo, const AudioTimeStamp *
 //
 //   bit-exacta              nada fora da grelha até agora           vermelho
 //   houve falhas            algumas tramas fora, ou esteve mal       amarelo
-//                           e já não está
+//                           e já não está, ou perdeu-se som
 //   mal                     mais de metade da janela fora            laranja
 //
 // O amarelo não volta a vermelho: quer dizer que há um pedaço do ficheiro que
-// não é o master, e isso não se desfaz. A primeira vez que fica laranja há
+// não é o master, e isso não se desfaz. Som perdido também é isso — falta um
+// pedaço, e as amostras dos dois lados ficam encostadas — e por isso também dá
+// amarelo (ver -registarTempo:host:tramas:frequencia:). A primeira vez que fica laranja há
 // também um aviso, que diz porquê. As rampas do Música junto ao silêncio
 // (kZPTramasDeRampa) não contam: davam amarelo em todas as gravações.
 
@@ -1255,6 +1424,10 @@ static void ZPPublicarEstadoDaGrelha(ZPEstadoDaGrelha estado) {
         // Copiar os bytes antes de sair do thread de áudio
         NSData *floatData = [NSData dataWithBytes:strongSelf.recordBuffer.floatChannelData[0]
                                            length:recLength];
+        double tempo = when.isSampleTimeValid ? (double)when.sampleTime : -1.0;
+        uint64_t host = when.isHostTimeValid ? when.hostTime : 0;
+        AVAudioFrameCount tramasDeEntrada = buffer.frameLength;
+        double frequenciaDeEntrada = buffer.format.sampleRate;
 
         dispatch_async(strongSelf.ioQueue, ^{
             // O descritor é posto a nil no -finalizeRecordingFile, nesta mesma
@@ -1269,9 +1442,11 @@ static void ZPPublicarEstadoDaGrelha(ZPEstadoDaGrelha estado) {
                 #endif
                 return;
             }
+            UInt32 tramas = (UInt32)(floatData.length / (2 * sizeof(float)));
+            [strongSelf registarTempo:tempo host:host tramas:tramasDeEntrada frequencia:frequenciaDeEntrada];
+            [strongSelf registarSilencios:floatData.bytes tramas:tramas];
             strongSelf.recordDataBytes += floatData.length;
-            [strongSelf vigiarGrelha:floatData.bytes
-                              tramas:(UInt32)(floatData.length / (2 * sizeof(float)))];
+            [strongSelf vigiarGrelha:floatData.bytes tramas:tramas];
         });
     }];
 

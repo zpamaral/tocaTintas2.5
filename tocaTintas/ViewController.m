@@ -418,6 +418,7 @@ static WavpackStreamReader memoryReader = {
 // ainda é a primeira dizem se o som já gravado se pode deitar fora.
 @property (assign, nonatomic) NSUInteger geracaoDaFrequencia;
 @property (copy, nonatomic) NSString *faixaDaGravacao;
+@property (copy, nonatomic) NSString *faixaMarcadaNaTOC;   // o «pid» de ZPMusicNowPlaying
 @property (assign, nonatomic) BOOL aindaNaPrimeiraFaixa;
 // O estado da grelha da gravação em curso, que dá a cor ao ⏺.
 @property (assign, nonatomic) ZPEstadoDaGrelha estadoDaGrelha;
@@ -2204,6 +2205,9 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
         NSLog(@"[Audio recording] Audio recording %@.", self.isRecording ? @"started" : @"did not start");
         #endif
         if (self.isRecording && peloLoopback) {
+            // Com o Música já a tocar, não vem aviso «Playing» para esta faixa.
+            self.faixaMarcadaNaTOC = nil;
+            [self marcarFaixaNaTOC:doMusica];
             [self comecarAVigiarOMusica];
             if (frequenciaDoMusica <= 0.0) [self acertarFrequenciaPeloMusica];
         } else if (!self.isRecording) {
@@ -2357,6 +2361,7 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
                 forte.aindaNaPrimeiraFaixa = NO;
             }
             if (faixa) forte.faixaDaGravacao = faixa;
+            [forte marcarFaixaNaTOC:ZPMusicNowPlaying()];
             [forte acertarFrequenciaPeloMusica];
         }
     }];
@@ -2417,6 +2422,18 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
                                                                          content:conteudo
                                                                          trigger:nil];
     [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:pedido withCompletionHandler:nil];
+}
+
+// O rascunho da TOC (ver -[ZPAudioCapture marcarFaixa:]): uma marca por faixa,
+// e só a tocar. A ficha em pausa daria um início errado (a posição não anda);
+// retomar a mesma faixa depois de uma pausa não marca outra vez. Compara-se o
+// «pid» do AppleScript, e não o PersistentID do aviso, que vem noutro formato.
+- (void)marcarFaixaNaTOC:(NSDictionary *)faixa {
+    if (![faixa[@"estado"] isEqualToString:@"playing"]) return;
+    NSString *pid = [faixa[@"pid"] length] ? faixa[@"pid"] : nil;
+    if (pid && [pid isEqualToString:self.faixaMarcadaNaTOC]) return;
+    self.faixaMarcadaNaTOC = pid;
+    [self.audioCapture marcarFaixa:faixa];
 }
 
 - (void)deixarDeVigiarOMusica {
@@ -2486,6 +2503,9 @@ static const NSUInteger ZPTentativasDaFrequencia = 20;   // × 0,5 s
     [self updateRecordButtonAppearance:self.isRecording];
     if (self.isRecording) {
         ZPMusicCommand(@"set player position to 0");
+        // Ficheiro novo, TOC nova: a faixa marca-se outra vez, já no princípio.
+        self.faixaMarcadaNaTOC = nil;
+        [self marcarFaixaNaTOC:ZPMusicNowPlaying()];
     } else {
         [self deixarDeVigiarOMusica];
         [self reporFrequenciaDoLoopbackRelancandoAPonte:YES];
@@ -8643,8 +8663,8 @@ static const NSTimeInterval kCavaEsperaAteApagar = 0.2;
 
 // Add visual feedback for when recording is active
 // A gravar, a cor diz como vai a grelha (ver -vigiarGrelha:tramas: no
-// ZPAudioCapture): vermelho bit-exacta, amarelo houve amostras fora, laranja
-// está mal agora. Mesmo que o aviso tenha passado despercebido, o botão fica.
+// ZPAudioCapture): vermelho bit-exacta, amarelo houve amostras fora ou som
+// perdido, laranja está mal agora. Mesmo que o aviso tenha passado despercebido, o botão fica.
 - (void)updateRecordButtonAppearance:(BOOL)isActive {
     NSColor *cor = nil;
     if (isActive) {

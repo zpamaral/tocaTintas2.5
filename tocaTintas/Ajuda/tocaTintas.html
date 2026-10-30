@@ -390,12 +390,12 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <p>Se se escolher um aparelho que ainda não foi emparelhado, o tocaTintas avisa e oferece-se para abrir o separador.</p>
 
 <h2 id="gravacao">Gravação</h2>
-<p>O botão <strong>⏺</strong> grava para WAV em vírgula flutuante de 32 bits, em <code>~/Library/Application Support/tocaTintas</code>. A fonte escolhe-se no separador <strong>Gravação</strong>:</p>
+<p>O botão <strong>⏺</strong> grava para WAV em vírgula flutuante de 32 bits, em <code>/var/tmp</code>, onde fica até o álbum ser aprovado. A fonte escolhe-se no separador <strong>Gravação</strong>:</p>
 <p class="rotulo"><strong>O que o Mac toca (BlackHole)</strong></p>
 <p>Tudo o que passa pela saída do sistema, à frequência do BlackHole. Se a saída não for o BlackHole, o tocaTintas avisa que a gravação vai sair em silêncio.</p>
 <p class="rotulo"><strong>A aplicação Música (Dolby Atmos binaural)</strong></p>
 <p>Só o som do Música, captado directamente do processo. Quando o Música toca para os AirPods com o áudio espacial em <strong>Fixo</strong>, faz ele próprio o binaural do Atmos, e é isso que fica gravado, em estéreo a 48 kHz.</p>
-<p>Os ficheiros chamam-se <code>Recording_</code><em>UUID</em><code>.wav</code> e <code>Recording_Music_</code><em>UUID</em><code>.wav</code>. A vírgula flutuante não é um capricho. Com o volume do Mac abaixo do máximo, o sinal chega atenuado, e em 16 bits perderia resolução que nenhuma normalização posterior recupera. Em vírgula flutuante, a atenuação não custa nada.</p>
+<p>Os ficheiros chamam-se <code>Recording_</code><em>UUID</em><code>.wav</code> e <code>Recording_Music_</code><em>UUID</em><code>.wav</code>. Uma gravação parada sem som nenhum é apagada. Ao lado de cada uma fica um rascunho da TOC, <code>Recording_</code><em>UUID</em><code>.toc.json</code>: as faixas que o Música anunciou, com a trama do ficheiro onde cada uma começou, os silêncios digitais e o som que se tenha perdido pelo caminho. As faixas só ficam na TOC quando se grava pelo BlackHole. Serve para cortar as faixas depois, mesmo num álbum sem pausas entre elas. A vírgula flutuante não é um capricho. Com o volume do Mac abaixo do máximo, o sinal chega atenuado, e em 16 bits perderia resolução que nenhuma normalização posterior recupera. Em vírgula flutuante, a atenuação não custa nada.</p>
 
 <h3>Gravar o Apple Music bit a bit</h3>
 <p>O som só passa do Música para o BlackHole sem ser alterado se se verificarem três condições: o volume do Música no máximo, nenhum efeito ligado (equalizador, <strong>Sound Check</strong> ou transição entre faixas) e o BlackHole <strong>à mesma frequência do master</strong>. Se a última falhar, o Música reamostra o som sem avisar. A gravação ouve-se bem, mas já não é o master.</p>
@@ -419,7 +419,7 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <p>O tocaTintas verifica-o enquanto grava, em janelas de um segundo de som. O silêncio digital não conta, porque o zero está em todas as grelhas. O resultado vê-se pela cor do ⏺ durante a gravação:</p>
 <ul>
 <li><strong>vermelho</strong>: bit a bit, sem nenhuma amostra fora da grelha até agora;</li>
-<li><strong>amarelo</strong>: houve algumas amostras fora da grelha, ou esteve mal e já não está. Não volta a vermelho, porque há um pedaço do ficheiro que não é o master, e isso não se desfaz;</li>
+<li><strong>amarelo</strong>: houve algumas amostras fora da grelha, esteve mal e já não está, ou perdeu-se som pelo caminho (o tocaTintas esteve parado, por exemplo suspenso por um depurador, e o que o BlackHole entregou nesse tempo não chegou ao ficheiro). Não volta a vermelho, porque há um pedaço do ficheiro que não é o master, e isso não se desfaz;</li>
 <li><strong>laranja</strong>: está mal agora, com mais de metade da última janela fora da grelha de 24 bits. Da primeira vez que isto acontece aparece também um aviso com as causas habituais.</li>
 </ul>
 <p>O Música aplica uma rampa de cerca de 25 ms ao começar a tocar e ao saltar de faixa. Essas rampas saem sempre fora da grelha, mas ficam encostadas a silêncio digital (a de entrada depois dele, a de saída antes) e caem fora da música. Por isso, até 50 ms de cada lado de um silêncio, não contam. O registo diz ainda se a gravação é de 16 ou de 24 bits.</p>
@@ -500,8 +500,10 @@ osascript -e 'tell application "tocaTintas" to start recording'</code></pre>
 <h2 id="ficheiros">Ficheiros</h2>
 <p class="rotulo"><strong>&lt;pasta de música&gt;/CDs/.fonoteca.sqlite</strong></p>
 <p>A base de dados da fonoteca.</p>
+<p class="rotulo"><strong>/var/tmp/</strong></p>
+<p>As gravações WAV (<code>Recording_</code><em>UUID</em><code>.wav</code>) e os rascunhos da TOC (<code>Recording_</code><em>UUID</em><code>.toc.json</code>), até o álbum ser aprovado.</p>
 <p class="rotulo"><strong>~/Library/Application Support/tocaTintas/</strong></p>
-<p>As gravações WAV (<code>Recording_</code><em>UUID</em><code>.wav</code>) e os ficheiros seguintes.</p>
+<p>Os ficheiros seguintes.</p>
 <p class="rotulo"><strong>…/tocaTintas/eq/</strong></p>
 <p>As correcções AutoEQ, uma pasta por marca.</p>
 <p class="rotulo"><strong>…/tocaTintas/frequencia.log</strong></p>
