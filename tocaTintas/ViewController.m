@@ -9462,9 +9462,9 @@ static NSString *const kZPAvisoDasLigacoes = @"LigacoesDoMusica";
 
 #pragma mark - Consistência da fonoteca
 
-// O «fonoteca.py consistencia» procura o que ficou entre duas contas: audições
-// presas no contagens.json, ficheiros que a base não tem, faixas do Música por
-// juntar à versão local do seu álbum. Só lê. Corre uma vez por dia, pendurado
+// O «fonoteca.py consistencia» procura o que ficou entre duas contas: ficheiros
+// que a base não tem, faixas do Música por juntar à versão local do seu álbum.
+// Só lê. Corre uma vez por dia, pendurado
 // no relógio da sincronização (mas com o Música fechado também), com a saída
 // no sincronizar-musica.log; avisa só quando encontra alguma coisa.
 static const NSTimeInterval ZPIntervaloDaConsistencia = 20 * 3600.0;
