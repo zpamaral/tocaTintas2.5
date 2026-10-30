@@ -120,14 +120,16 @@ static inline double ZPPolinomio(const double *coef, int grau, double t) {
 // liga esses pontos; dividir por ele tem de devolver inteiros a TODAS as
 // amostras, senão a rampa fica como está. Tenta-se a grelha de 16 bits e
 // depois a de 24. Devolve as amostras corrigidas (para libertar com free) ou
-// NULL; em `erroMax` o erro da melhor tentativa.
+// NULL; em `erroMax` o erro da melhor tentativa, ou −1 se nenhuma chegou a
+// medir. Sem infinitos: o projecto compila com matemática rápida, e com ela o
+// compilador supõe que não os há.
 static float *ZPDesfazerRampa(const float *r, long long n, double *erroMax, int *bits) {
     static const double unidades[2] = { 32768.0, 8388608.0 };
     static const int bitsDe[2] = { 16, 24 };
     double *ts = malloc(sizeof(double) * (size_t)(2 * n));
     double *gs = malloc(sizeof(double) * (size_t)(2 * n));
     float *saida = NULL;
-    *erroMax = INFINITY;
+    *erroMax = -1.0;
     for (int u = 0; u < 2 && !saida; ++u) {
         double U = unidades[u];
         long m = 0;
@@ -163,7 +165,7 @@ static float *ZPDesfazerRampa(const float *r, long long n, double *erroMax, int 
                 c[2*i+k] = (float)(rint(q) / U);
             }
         }
-        if (valido) *erroMax = MIN(*erroMax, pior);
+        if (valido) *erroMax = *erroMax < 0.0 ? pior : MIN(*erroMax, pior);
         if (valido && pior < kZPErroMaximoDaRampa) {
             saida = c;
             *bits = bitsDe[u];
@@ -202,7 +204,7 @@ static int ZPProcurarRampas(const ZPGravacao *g, NSArray<NSArray<NSNumber *> *> 
             }
             if (r0 < 0 || r1 <= r0) continue;
 
-            double erro = INFINITY;
+            double erro = -1.0;
             int bits = 0;
             float *c = ZPDesfazerRampa(g->x + 2 * r0, r1 - r0, &erro, &bits);
             NSString *qual = lado == 0 ? @"entrada" : @"saída";
@@ -217,7 +219,7 @@ static int ZPProcurarRampas(const ZPGravacao *g, NSArray<NSArray<NSNumber *> *> 
             } else {
                 [notas addObject:[NSString stringWithFormat:@"Rampa de %@ aos %@ (%lld tramas): fica como está (%@).",
                                   qual, ZPTempo(r0, g->taxa), r1 - r0,
-                                  isfinite(erro) ? [NSString stringWithFormat:@"erro máximo %.4f LSB", erro]
+                                  erro >= 0.0 ? [NSString stringWithFormat:@"erro máximo %.4f LSB", erro]
                                                  : @"poucos pontos para medir o ganho"]];
             }
         }
@@ -228,8 +230,29 @@ static int ZPProcurarRampas(const ZPGravacao *g, NSArray<NSArray<NSNumber *> *> 
 
 #pragma mark - Rede: catálogo da Apple e MusicBrainz
 
-static NSData *ZPPedir(NSURL *url) {
+// Um GET síncrono. O MusicBrainz responde 503 («server is currently busy»)
+// quando está carregado — visto em 2026-10-30, numa em cada duas corridas do
+// Low —, e então tenta-se mais três vezes, com esperas de 2, 4 e 6 s. Em
+// `respondeu`, se chegou alguma resposta definitiva (200 ou 404).
+static NSData *ZPPedirUmaVez(NSURL *url, NSInteger *codigo);
+
+static NSData *ZPPedir(NSURL *url, BOOL *respondeu) {
+    if (respondeu) *respondeu = NO;
     if (!url) return nil;
+    for (int tentativa = 0; tentativa < 4; ++tentativa) {
+        if (tentativa > 0) [NSThread sleepForTimeInterval:2.0 * tentativa];
+        NSInteger codigo = 0;
+        NSData *corpo = ZPPedirUmaVez(url, &codigo);
+        if (codigo == 200 || codigo == 404) {
+            if (respondeu) *respondeu = YES;
+            return corpo;
+        }
+        if (codigo != 503 && codigo != 0) return nil;   // outro erro: não vale a pena insistir
+    }
+    return nil;
+}
+
+static NSData *ZPPedirUmaVez(NSURL *url, NSInteger *codigoDevolvido) {
     NSMutableURLRequest *pedido = [NSMutableURLRequest requestWithURL:url
                                                           cachePolicy:NSURLRequestUseProtocolCachePolicy
                                                       timeoutInterval:15.0];
@@ -237,19 +260,21 @@ static NSData *ZPPedir(NSURL *url) {
     [pedido setValue:[NSString stringWithFormat:@"tocaTintas/%@ ( https://github.com/zpamaral )", versao]
   forHTTPHeaderField:@"User-Agent"];
     __block NSData *corpo = nil;
+    __block NSInteger codigo = 0;
     dispatch_semaphore_t feito = dispatch_semaphore_create(0);
     [[[NSURLSession sharedSession] dataTaskWithRequest:pedido
                                      completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
-        NSInteger codigo = [r isKindOfClass:[NSHTTPURLResponse class]] ? ((NSHTTPURLResponse *)r).statusCode : 0;
+        codigo = [r isKindOfClass:[NSHTTPURLResponse class]] ? ((NSHTTPURLResponse *)r).statusCode : 0;
         if (!e && codigo == 200) corpo = d;
         dispatch_semaphore_signal(feito);
     }] resume];
     dispatch_semaphore_wait(feito, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(20 * NSEC_PER_SEC)));
+    *codigoDevolvido = codigo;
     return corpo;
 }
 
-static id ZPPedirJSON(NSURL *url) {
-    NSData *d = ZPPedir(url);
+static id ZPPedirJSON(NSURL *url, BOOL *respondeu) {
+    NSData *d = ZPPedir(url, respondeu);
     return d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:NULL] : nil;
 }
 
@@ -282,7 +307,7 @@ static NSDictionary *ZPCatalogoDaApple(NSString *artista, NSString *album) {
     for (NSString *pais in @[ @"us", @"pt" ]) {
         NSDictionary *r = ZPPedirJSON(ZPEndereco(@"https://itunes.apple.com/search",
             @{ @"term": [NSString stringWithFormat:@"%@ %@", artista, album], @"entity": @"album",
-               @"country": pais, @"limit": @"25" }));
+               @"country": pais, @"limit": @"25" }), NULL);
         NSDictionary *escolhido = nil;
         for (NSDictionary *a in r[@"results"]) {
             if (![ZPChave(a[@"collectionName"]) isEqualToString:chaveAlbum]) continue;
@@ -293,7 +318,7 @@ static NSDictionary *ZPCatalogoDaApple(NSString *artista, NSString *album) {
         }
         if (!escolhido) continue;
         NSDictionary *l = ZPPedirJSON(ZPEndereco(@"https://itunes.apple.com/lookup",
-            @{ @"id": [escolhido[@"collectionId"] description], @"entity": @"song", @"country": pais }));
+            @{ @"id": [escolhido[@"collectionId"] description], @"entity": @"song", @"country": pais }), NULL);
         NSMutableArray *faixas = [NSMutableArray array];
         for (NSDictionary *t in l[@"results"]) {
             if ([t[@"wrapperType"] isEqualToString:@"track"] && [t[@"kind"] isEqualToString:@"song"]) [faixas addObject:t];
@@ -307,14 +332,18 @@ static NSDictionary *ZPCatalogoDaApple(NSString *artista, NSString *album) {
 // faixas e todas as durações a menos de 1,5 s das que se conhecem. Entre as
 // que batem, a digital primeiro (é o que o streaming é). Devolve a edição com
 // gravações, ISRC, editoras e grupo, ou nil. O MusicBrainz pede no máximo um
-// pedido por segundo.
-static NSDictionary *ZPEdicaoNoMusicBrainz(NSString *artista, NSString *album, NSArray<NSNumber *> *duracoesMs) {
+// pedido por segundo. Em `respondeu`, NO se algum pedido ficou sem resposta:
+// então «nenhuma bate» pode não ser verdade.
+static NSDictionary *ZPEdicaoNoMusicBrainz(NSString *artista, NSString *album, NSArray<NSNumber *> *duracoesMs, BOOL *respondeu) {
+    BOOL ok = YES;
+    *respondeu = YES;
     NSString *q = [NSString stringWithFormat:@"release:\"%@\" AND artist:\"%@\" AND tracks:%lu",
                    [album stringByReplacingOccurrencesOfString:@"\"" withString:@""],
                    [artista stringByReplacingOccurrencesOfString:@"\"" withString:@""],
                    (unsigned long)duracoesMs.count];
     NSDictionary *r = ZPPedirJSON(ZPEndereco(@"https://musicbrainz.org/ws/2/release/",
-                                             @{ @"query": q, @"fmt": @"json", @"limit": @"10" }));
+                                             @{ @"query": q, @"fmt": @"json", @"limit": @"10" }), &ok);
+    if (!ok) *respondeu = NO;
     NSMutableArray<NSDictionary *> *candidatas = [NSMutableArray array];
     for (NSDictionary *e in r[@"releases"]) {
         if ([e[@"score"] integerValue] < 90) continue;
@@ -327,7 +356,8 @@ static NSDictionary *ZPEdicaoNoMusicBrainz(NSString *artista, NSString *album, N
         if (++pedidos > 4) break;
         [NSThread sleepForTimeInterval:1.1];
         NSDictionary *d = ZPPedirJSON(ZPEndereco([NSString stringWithFormat:@"https://musicbrainz.org/ws/2/release/%@", e[@"id"]],
-                                                 @{ @"inc": @"recordings+isrcs+labels+release-groups+artist-credits", @"fmt": @"json" }));
+                                                 @{ @"inc": @"recordings+isrcs+labels+release-groups+artist-credits", @"fmt": @"json" }), &ok);
+        if (!ok) *respondeu = NO;
         NSMutableArray *faixas = [NSMutableArray array];
         for (NSDictionary *m in d[@"media"]) [faixas addObjectsFromArray:m[@"tracks"] ?: @[]];
         if (faixas.count != duracoesMs.count) continue;
@@ -409,13 +439,16 @@ static NSData *ZPBlocosDeEnergia(const ZPGravacao *g, const ZPCorreccao *cs, int
 
 // A sonoridade integrada (LUFS), com as duas portas da norma: a absoluta de
 // −70 LUFS e a relativa de 10 LU abaixo da média das que passaram a primeira.
+// Sem blocos que passem (silêncio, ou menos de 400 ms), kZPSemSonoridade.
+static const double kZPSemSonoridade = -1000.0;
+
 static double ZPSonoridade(NSData *blocos) {
     const double *z = blocos.bytes;
     long n = (long)(blocos.length / sizeof(double));
     double soma = 0.0;
     long c = 0;
     for (long i = 0; i < n; ++i) if (z[i] > 0 && -0.691 + 10.0 * log10(z[i]) > -70.0) { soma += z[i]; ++c; }
-    if (c == 0) return -INFINITY;
+    if (c == 0) return kZPSemSonoridade;
     double relativa = -0.691 + 10.0 * log10(soma / c) - 10.0;
     soma = 0.0; c = 0;
     for (long i = 0; i < n; ++i) {
@@ -423,7 +456,7 @@ static double ZPSonoridade(NSData *blocos) {
         double l = -0.691 + 10.0 * log10(z[i]);
         if (l > -70.0 && l > relativa) { soma += z[i]; ++c; }
     }
-    return c ? -0.691 + 10.0 * log10(soma / c) : -INFINITY;
+    return c ? -0.691 + 10.0 * log10(soma / c) : kZPSemSonoridade;
 }
 
 #pragma mark - FLAC
@@ -593,8 +626,10 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
             return r != NSOrderedSame ? r : [x[@"trackNumber"] compare:y[@"trackNumber"]];
         }];
         NSArray *ms = [ordenadas valueForKey:@"trackTimeMillis"];
+        BOOL respondeu = YES;
         NSDictionary *mb = ZPEdicaoNoMusicBrainz(a[@"catalogo"][@"artistName"] ?: a[@"artista"],
-                                                 a[@"catalogo"][@"collectionName"] ?: a[@"nome"], ms);
+                                                 a[@"catalogo"][@"collectionName"] ?: a[@"nome"], ms, &respondeu);
+        if (!respondeu) a[@"mbSemResposta"] = @YES;
         if (!mb) continue;
         a[@"mb"] = mb;
         NSMutableArray *dasEdicao = [NSMutableArray array];
@@ -725,7 +760,8 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         [rel addObject:[NSString stringWithFormat:@"%@ — %@", artistaDoAlbum, nomeDoAlbum]];
         [rel addObject:[NSString stringWithFormat:@"Catálogo da Apple: %@. MusicBrainz: %@.",
                         cat ? [NSString stringWithFormat:@"%@ (loja %@)", cat[@"collectionId"], [cat[@"collectionViewUrl"] containsString:@"/pt/"] ? @"pt" : @"us"] : @"não encontrado",
-                        mb ? mb[@"id"] : @"sem edição que bata sem ambiguidade"]];
+                        mb ? mb[@"id"] : a[@"mbSemResposta"] ? @"não respondeu (servidor ocupado); as etiquetas são só as da Apple"
+                                              : @"sem edição que bata sem ambiguidade"]];
         if (!inteiras.count) {
             [rel addObject:@"Nenhuma faixa inteira: nada escrito."];
             for (NSMutableDictionary *f in todas) [rel addObject:[NSString stringWithFormat:@"  «%@»: falta %@.", f[@"marca"][@"titulo"], f[@"falta"]]];
@@ -743,7 +779,8 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         }
         unsigned bits = fora16 == 0 ? 16 : 24;
         BOOL exacto = fora16 == 0 || fora24 == 0;
-        double ganhoDoAlbum = -18.0 - ZPSonoridade(blocosDoAlbum);
+        double sonoridadeDoAlbum = ZPSonoridade(blocosDoAlbum);
+        double ganhoDoAlbum = -18.0 - sonoridadeDoAlbum;
 
         NSString *genero = ZPOuNada(((NSDictionary *)inteiras[0][@"catalogo"])[@"primaryGenreName"]) ?: ZPOuNada(cat[@"primaryGenreName"]);
         BOOL erudita = [genero isEqualToString:@"Classical"] || [genero isEqualToString:@"Clássica"];
@@ -757,7 +794,7 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         // Música tinha, guardada pela gravação.
         NSData *capa = nil;
         NSString *arte = ZPOuNada(cat[@"artworkUrl100"]);
-        if (arte) capa = ZPPedir([NSURL URLWithString:[arte stringByReplacingOccurrencesOfString:@"100x100bb" withString:@"600x600bb"]]);
+        if (arte) capa = ZPPedir([NSURL URLWithString:[arte stringByReplacingOccurrencesOfString:@"100x100bb" withString:@"600x600bb"]], NULL);
         if (!capa) {
             for (NSDictionary *c in capas) {
                 if ([c[@"album"] isEqual:a[@"nome"]]) {
@@ -799,7 +836,8 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
             if (total <= 0) {
                 for (NSDictionary *c in a[@"faixasDoCatalogo"]) if ([c[@"discNumber"] longValue] == disco) ++total;
             }
-            double ganho = -18.0 - ZPSonoridade(f[@"blocos"]);
+            double sonoridade = ZPSonoridade(f[@"blocos"]);
+            double ganho = -18.0 - sonoridade;
 
             NSMutableArray<NSArray<NSString *> *> *et = [NSMutableArray array];
             void (^por)(NSString *, id) = ^(NSString *k, id v) {
@@ -824,11 +862,11 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
             por(@"MUSICBRAINZ_RELEASEGROUPID", mb[@"release-group"][@"id"]);
             por(@"MUSICBRAINZ_TRACKID", mt[@"recording"][@"id"]);
             por(@"MUSICBRAINZ_RELEASETRACKID", mt[@"id"]);
-            if (isfinite(ganho)) {
+            if (sonoridade > kZPSemSonoridade) {
                 por(@"REPLAYGAIN_TRACK_GAIN", [NSString stringWithFormat:@"%+.2f dB", ganho]);
                 por(@"REPLAYGAIN_TRACK_PEAK", [NSString stringWithFormat:@"%.8f", [f[@"pico"] doubleValue]]);
             }
-            if (isfinite(ganhoDoAlbum)) {
+            if (sonoridadeDoAlbum > kZPSemSonoridade) {
                 por(@"REPLAYGAIN_ALBUM_GAIN", [NSString stringWithFormat:@"%+.2f dB", ganhoDoAlbum]);
                 por(@"REPLAYGAIN_ALBUM_PEAK", [NSString stringWithFormat:@"%.8f", picoDoAlbum]);
             }
