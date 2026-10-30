@@ -138,6 +138,7 @@
 "fonoteca_register_problems_title" = "Registo na fonoteca: houve problemas";
 "fonoteca_register_failed_title" = "Registo na fonoteca: não correu";
 "fonoteca_register_body" = "%@ — ver %@";
+"fonoteca_consistency_title" = "Fonoteca: há contas por acertar";
 "prefs_rec_stop_album_end" = "Parar a gravação no fim do álbum";
 "prefs_rec_stop_album_end_tip" = "Quando o Música passa a uma faixa de outro álbum, ou pára, a gravação pára sozinha e o BlackHole volta à frequência de antes. Desliga-se para gravar uma lista com faixas de vários álbuns.";
 "rec_warning_ok" = "OK";

@@ -138,6 +138,7 @@
 "fonoteca_register_problems_title" = "Library registration: there were problems";
 "fonoteca_register_failed_title" = "Library registration: did not run";
 "fonoteca_register_body" = "%@ — see %@";
+"fonoteca_consistency_title" = "Music library: counts to reconcile";
 "prefs_rec_stop_album_end" = "Stop recording at the end of the album";
 "prefs_rec_stop_album_end_tip" = "When Music moves on to a track from another album, or stops, recording stops by itself and BlackHole goes back to its previous sample rate. Turn this off to record a playlist with tracks from several albums.";
 "rec_warning_ok" = "OK";

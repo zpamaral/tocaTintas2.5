@@ -378,6 +378,8 @@ static WavpackStreamReader memoryReader = {
 // As faixas do Música (fonoteca.py sincronizar-musica) — ver «Faixas do Música».
 @property (nonatomic, strong) NSTask *sincronizacaoTask;
 @property (nonatomic, strong) NSTimer *relogioDaSincronizacao;
+// A verificação diária da fonoteca (fonoteca.py consistencia) — ver «Consistência da fonoteca».
+@property (nonatomic, strong) NSTask *consistenciaTask;
 @property (nonatomic, strong) ZPLigacoesDoMusicaWindowController *ligacoesDoMusica;
 @property (nonatomic, assign) BOOL isPlaylistModeActive; // Indicates if an M3U8 playlist is loaded
 
@@ -9287,8 +9289,31 @@ static NSArray<NSString *> *ZPPastasParaRegistar(NSSet<NSString *> *caminhos, NS
     self.registoTask = task;
 }
 
+// A primeira linha com «❗» da última corrida num registo (a seguir ao último
+// cabeçalho «=== »), sem o ícone; nil se não houver. Lê só o fim do ficheiro.
+static NSString *ZPPrimeiroProblemaNoRegisto(NSString *caminho) {
+    NSFileHandle *f = [NSFileHandle fileHandleForReadingAtPath:caminho];
+    if (!f) return nil;
+    unsigned long long fim = [f seekToEndOfFile];
+    [f seekToFileOffset:fim > 262144 ? fim - 262144 : 0];
+    NSData *dados = [f readDataToEndOfFile];
+    [f closeFile];
+    NSString *texto = [[NSString alloc] initWithData:dados encoding:NSUTF8StringEncoding];
+    if (!texto) return nil;   // cortado a meio de um carácter: fica o aviso sem pormenor
+    NSRange cabecalho = [texto rangeOfString:@"\n=== " options:NSBackwardsSearch];
+    if (cabecalho.location != NSNotFound) texto = [texto substringFromIndex:cabecalho.location];
+    for (NSString *linha in [texto componentsSeparatedByString:@"\n"]) {
+        NSRange r = [linha rangeOfString:@"❗"];
+        if (r.location == NSNotFound) continue;
+        return [[linha substringFromIndex:NSMaxRange(r)]
+                stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    }
+    return nil;
+}
+
 // Uma notificação, como no fim de uma gravação: o registo corre sozinho e,
-// sem ela, um problema só se via abrindo o registar.log.
+// sem ela, um problema só se via abrindo o registar.log. Diz o primeiro
+// problema (o «ffmpeg» que faltava de 30-10-2026 só se via no registo).
 - (void)avisarProblemaNoRegisto:(NSArray<NSString *> *)pastas estado:(int)estado log:(NSString *)log {
     UNMutableNotificationContent *conteudo = [[UNMutableNotificationContent alloc] init];
     conteudo.sound = [UNNotificationSound defaultSound];   // se estiver ligado nos Ajustes do Sistema
@@ -9296,7 +9321,8 @@ static NSArray<NSString *> *ZPPastasParaRegistar(NSSet<NSString *> *caminhos, NS
                                                    : @"fonoteca_register_failed_title",
                                        @"Registo na fonoteca: problemas / falhou");
     conteudo.body = [NSString stringWithFormat:NSLocalizedString(@"fonoteca_register_body", @"%@ — ver %@"),
-                     [[pastas valueForKey:@"lastPathComponent"] componentsJoinedByString:@", "],
+                     ZPPrimeiroProblemaNoRegisto(log)
+                         ?: [[pastas valueForKey:@"lastPathComponent"] componentsJoinedByString:@", "],
                      log.stringByAbbreviatingWithTildeInPath];
     UNNotificationRequest *pedido = [UNNotificationRequest requestWithIdentifier:@"RegistoNaFonoteca"
                                                                          content:conteudo
@@ -9325,11 +9351,13 @@ static NSString *const kZPAvisoDasLigacoes = @"LigacoesDoMusica";
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(ZPEsperaDaPrimeiraSincronizacao * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         [fraco sincronizarComOMusica];
+        [fraco verificarConsistenciaSeForAltura];
     });
     self.relogioDaSincronizacao = [NSTimer scheduledTimerWithTimeInterval:ZPIntervaloDaSincronizacao repeats:YES
                                                                     block:^(NSTimer *t) {
         if (!fraco) { [t invalidate]; return; }
         [fraco sincronizarComOMusica];
+        [fraco verificarConsistenciaSeForAltura];
     }];
 }
 
@@ -9427,6 +9455,46 @@ static NSString *const kZPAvisoDasLigacoes = @"LigacoesDoMusica";
     conteudo.body = [NSString stringWithFormat:NSLocalizedString(@"music_links_notify_body", @"%ld faixas esperam por uma escolha."),
                      (long)n];
     UNNotificationRequest *pedido = [UNNotificationRequest requestWithIdentifier:kZPAvisoDasLigacoes
+                                                                         content:conteudo
+                                                                         trigger:nil];
+    [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:pedido withCompletionHandler:nil];
+}
+
+#pragma mark - Consistência da fonoteca
+
+// O «fonoteca.py consistencia» procura o que ficou entre duas contas: audições
+// presas no contagens.json, ficheiros que a base não tem, faixas do Música por
+// juntar à versão local do seu álbum. Só lê. Corre uma vez por dia, pendurado
+// no relógio da sincronização (mas com o Música fechado também), com a saída
+// no sincronizar-musica.log; avisa só quando encontra alguma coisa.
+static const NSTimeInterval ZPIntervaloDaConsistencia = 20 * 3600.0;
+static NSString *const kZPConsistenciaEmKey = @"fonotecaConsistenciaEm";
+
+- (void)verificarConsistenciaSeForAltura {
+    if (self.consistenciaTask) return;
+    NSDate *ultima = [[NSUserDefaults standardUserDefaults] objectForKey:kZPConsistenciaEmKey];
+    if ([ultima isKindOfClass:[NSDate class]] && -ultima.timeIntervalSinceNow < ZPIntervaloDaConsistencia) return;
+    __weak typeof(self) fraco = self;
+    __block __weak NSTask *task = nil;   // fraca: o fim do task guarda este bloco
+    task = [self correrNaFonoteca:@[@"consistencia"] depois:^(int estado) {
+        if (fraco.consistenciaTask == task) fraco.consistenciaTask = nil;
+        [[NSUserDefaults standardUserDefaults] setObject:[NSDate date] forKey:kZPConsistenciaEmKey];
+        if (estado == 1) [fraco avisarFaltaDeConsistencia];
+    }];
+    self.consistenciaTask = task;
+}
+
+- (void)avisarFaltaDeConsistencia {
+    NSString *log = [[[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory
+                                                             inDomains:NSUserDomainMask].firstObject
+                      URLByAppendingPathComponent:@"tocaTintas/sincronizar-musica.log"] path];
+    UNMutableNotificationContent *conteudo = [[UNMutableNotificationContent alloc] init];
+    conteudo.sound = [UNNotificationSound defaultSound];   // se estiver ligado nos Ajustes do Sistema
+    conteudo.title = NSLocalizedString(@"fonoteca_consistency_title", @"Fonoteca: contas por acertar");
+    conteudo.body = [NSString stringWithFormat:NSLocalizedString(@"fonoteca_register_body", @"%@ — ver %@"),
+                     ZPPrimeiroProblemaNoRegisto(log) ?: @"fonoteca.py consistencia",
+                     log.stringByAbbreviatingWithTildeInPath];
+    UNNotificationRequest *pedido = [UNNotificationRequest requestWithIdentifier:@"ConsistenciaDaFonoteca"
                                                                          content:conteudo
                                                                          trigger:nil];
     [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:pedido withCompletionHandler:nil];
