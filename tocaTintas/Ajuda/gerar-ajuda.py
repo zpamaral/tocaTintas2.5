@@ -1,8 +1,10 @@
 #!/usr/local/bin/python3
 """Gera o livro de ajuda do macOS (tocaTintas.help) a partir do manual.
 
-O manual é uma página só, tocaTintas.html, a mesma que está em
-https://sim.zpsou.eu/~amaral/tocaTintas/. O visualizador de Ajuda e o campo de
+O manual é uma página só, tocaTintas.html. A cópia que manda é a do
+servidor, /Volumes/amaral-1/Sites/tocaTintas/tocaTintas.html
+(https://sim.zpsou.eu/~amaral/tocaTintas/): é lá que o texto se edita, e
+esta pasta recebe-a antes de se gerar o livro. O visualizador de Ajuda e o campo de
 pesquisa do menu Ajuda querem outra coisa: um tema por página, com título,
 resumo e palavras-chave, e um índice feito pelo hiutil. Este script parte a
 página pelos <h2>, reescreve as ligações entre secções para as páginas novas e

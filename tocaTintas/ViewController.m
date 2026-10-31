@@ -11282,9 +11282,11 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
     BOOL faixaNova = !self.aMostrarOMusica || ![chave isEqualToString:self.musicaFaixaMostrada];
     if (faixaNova) {
         self.musicaFaixaMostrada = chave;
-        [self.artistLabel setStringValue:m[@"artista"]];
-        [self.albumLabel setStringValue:m[@"album"]];
-        [self.titleLabel setStringValue:titulo];
+        // A tipografia só no que se mostra, como nas faixas dos ficheiros; o m
+        // fica como o Música o deu, que é o que o catálogo e as chaves esperam.
+        [self.artistLabel setStringValue:[self replaceSingleQuoteAndSmartQuotes:m[@"artista"]]];
+        [self.albumLabel setStringValue:[self replaceSingleQuoteAndSmartQuotes:m[@"album"]]];
+        [self.titleLabel setStringValue:[self replaceSingleQuoteAndSmartQuotes:titulo]];
         self.playCountLabel.stringValue = @"";
         self.contagemDoCatalogo = nil;
         if (doCatalogo) [self lerContagemDoCatalogo:m];
