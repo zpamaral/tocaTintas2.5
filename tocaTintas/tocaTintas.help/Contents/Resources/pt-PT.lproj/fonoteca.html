@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fonoteca — tocaTintas</title>
+<meta name="description" content="A pasta de música escolhe-se nas Preferências, no separador Música. O tocaTintas percorre todas as subpastas e encontra sozinho os ficheiros de áudio.">
+<meta name="keywords" content="Registo automático, Verificação diária, pasta de música, registo, FSEvents, MD5, verificação, consistência, verificar_md5IV">
+<meta name="robots" content="index, anchors">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<a name="fonoteca"></a>
+<div class="envolve">
+<nav class="percurso"><span><a href="capas.html">◂ Capas</a></span><span><a href="index.html">Temas</a></span><span><a href="base-da-fonoteca.html">A base de dados da fonoteca ▸</a></span></nav>
+<main>
+<h2 id="fonoteca">Fonoteca</h2>
+<p>A pasta de música escolhe-se nas Preferências, no separador <strong>Música</strong>. O tocaTintas percorre todas as subpastas e encontra sozinho os ficheiros de áudio.</p>
+<p>Dentro dessa pasta pode estar <code>CDs/.fonoteca.sqlite</code>, a base de dados mantida pelo <strong>verificar_md5IV.sh</strong> e pelo <strong>fonoteca.py</strong>. Cada música tem um UUID, que é o mesmo na etiqueta <code>FONOTECA_ID</code> do ficheiro e na faixa do CD de onde veio. O tocaTintas acrescenta-lhe as audições, que dão o «tocou 7 vezes» da janela, e os discos que tocou antes de terem sido riporinados. Quando preenche um campo, só o faz se ele estiver vazio, e nunca apaga nem substitui nada (ver <a href="base-da-fonoteca.html"><strong>A BASE DE DADOS DA FONOTECA</strong></a>).</p>
+<p>A base pode estar num disco externo a dormir. Todo o acesso passa por uma fila própria, fora do thread principal, e se a base não existir, o tocaTintas tenta outra vez da vez seguinte, porque o disco pode ainda não estar montado.</p>
+<a name="fonoteca-registo-automatico"></a><h3 id="fonoteca-registo-automatico">Registo automático</h3>
+<p>Um álbum novo, ou uma pasta que mudou de nome ou de sítio, entra na base sem ser preciso correr o verificar_md5IV.sh. O tocaTintas acompanha a pasta de música pelo FSEvents do macOS e, quando ela fica um minuto sem mudanças, corre o <code>fonoteca.py registar</code> sobre as pastas que mudaram. O minuto de espera existe porque um rip ou um corte escrevem durante muito tempo, e o registo pode gravar o <code>FONOTECA_ID</code> nos ficheiros, o que nunca deve acontecer num ficheiro a meio.</p>
+<p>O registo trata dos ficheiros novos, dos que mudaram de sítio (reconhecidos pelo MD5 do áudio e pelo <code>FONOTECA_ID</code>), dos que desapareceram e das audições que tinham ficado sem ficheiro. Não verifica o áudio, que continua a ser trabalho do verificar_md5IV.sh. A saída fica em <code>registar.log</code>. Se houver ficheiros com problemas, ou se o registo não chegar a correr, aparece uma notificação.</p>
+<p>As somas MD5 do áudio guardam-se num único <code>.md5sum.txt</code>, na pasta da base (<code>CDs/</code>). O verificar_md5IV.sh refá-lo a partir da base de cada vez que corre, e apaga os <code>.md5sum.txt</code> antigos que encontre nas subpastas.</p>
+<a name="fonoteca-verificacao-diaria"></a><h3 id="fonoteca-verificacao-diaria">Verificação diária</h3>
+<p>Uma vez por dia, o tocaTintas corre o <code>fonoteca.py consistencia</code>, que só lê e não muda nada. Procura o que ficou entre duas contas: ficheiros de áudio na pasta de música que a base não tem, e faixas do Música que deviam estar ligadas à versão local do seu álbum e não estão. Se encontrar alguma coisa, aparece a notificação «Fonoteca: há contas por acertar», com o primeiro problema, e o resto fica em <code>sincronizar-musica.log</code>. Se estiver tudo certo, não diz nada. A verificação corre mesmo com o Música fechado.</p>
+</main>
+<nav class="percurso fim"><span><a href="capas.html">◂ Capas</a></span><span><a href="index.html">Temas</a></span><span><a href="base-da-fonoteca.html">A base de dados da fonoteca ▸</a></span></nav>
+</div>
+</body>
+</html>

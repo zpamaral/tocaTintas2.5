@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ficheiros — tocaTintas</title>
+<meta name="description" content="&lt;pasta de música&gt;/CDs/.fonoteca.sqlite">
+<meta name="keywords" content="&lt;pasta de música&gt;/CDs/.fonoteca.sqlite, /var/tmp/, ~/Library/Application Support/tocaTintas/, …/tocaTintas/eq/, …/tocaTintas/frequencia.log, …/tocaTintas/registar.log, …/tocaTintas/sincronizar-musica.log, …/tocaTintas/fonoteca-antes-de-migrar-data.sqlite, preferências, chave ZPLoopbackSampleRateToRestore, preferências, chave fonotecaConsistenciaEm, preferências, chave fonotecaPy, ~/Sites/now_playing.html, ~/Sites/cover.png, tocaTintas.app/Contents/Resources/, registos, log, preferências, defaults, Application Support">
+<meta name="robots" content="index, anchors">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<a name="ficheiros"></a>
+<div class="envolve">
+<nav class="percurso"><span><a href="acerca.html">◂ Acerca e versão</a></span><span><a href="index.html">Temas</a></span><span><a href="requisitos.html">Requisitos ▸</a></span></nav>
+<main>
+<h2 id="ficheiros">Ficheiros</h2>
+<p class="rotulo"><strong>&lt;pasta de música&gt;/CDs/.fonoteca.sqlite</strong></p>
+<p>A base de dados da fonoteca.</p>
+<p class="rotulo"><strong>/var/tmp/</strong></p>
+<p>As gravações WAV (<code>Recording_</code><em>UUID</em><code>.wav</code>) e os rascunhos da TOC (<code>Recording_</code><em>UUID</em><code>.toc.json</code>), até o álbum ser aprovado.</p>
+<p class="rotulo"><strong>~/Library/Application Support/tocaTintas/</strong></p>
+<p>Os ficheiros seguintes.</p>
+<p class="rotulo"><strong>…/tocaTintas/eq/</strong></p>
+<p>As correcções AutoEQ, uma pasta por marca.</p>
+<p class="rotulo"><strong>…/tocaTintas/frequencia.log</strong></p>
+<p>Uma linha por cada mudança de frequência do BlackHole que o tocaTintas faz ou tenta fazer, ao gravar, ao repor ou ao reabrir o AirPlay, com a data e o resultado. As desistências também ficam registadas.</p>
+<p class="rotulo"><strong>…/tocaTintas/registar.log</strong></p>
+<p>A saída do registo automático na fonoteca.</p>
+<p class="rotulo"><strong>…/tocaTintas/sincronizar-musica.log</strong></p>
+<p>A saída das sincronizações com o Música, das audições das faixas do catálogo e da verificação diária.</p>
+<p class="rotulo"><strong>…/tocaTintas/fonoteca-antes-de-migrar-</strong><em>data</em><strong>.sqlite</strong></p>
+<p>A cópia da base feita pelo <code>fonoteca.py migrar</code> antes de lhe acrescentar as tabelas do Música.</p>
+<p class="rotulo"><strong>preferências, chave ZPLoopbackSampleRateToRestore</strong></p>
+<p>A frequência que o BlackHole tinha antes de uma gravação a mudar. Só existe enquanto se grava, ou depois de a aplicação ter ido abaixo a meio de uma gravação, até ao arranque seguinte.</p>
+<p class="rotulo"><strong>preferências, chave fonotecaConsistenciaEm</strong></p>
+<p>A data da última verificação diária da fonoteca. A seguinte corre 20 horas depois, ou no arranque seguinte, se já tiver passado esse tempo. Apagá-la com <code>defaults delete</code> faz a verificação correr logo.</p>
+<p class="rotulo"><strong>preferências, chave fonotecaPy</strong></p>
+<p>Outro caminho para o <code>fonoteca.py</code>, que por omissão é <code>/usr/local/bin/fonoteca.py</code>. Muda-se com <code>defaults write</code>.</p>
+<p class="rotulo"><strong>~/Sites/now_playing.html</strong>, <strong>~/Sites/cover.png</strong></p>
+<p>A página da faixa a tocar.</p>
+<p class="rotulo"><strong>tocaTintas.app/Contents/Resources/</strong></p>
+<p>O <strong>bs2b_bridge</strong>, o <strong>raop_play</strong>, o <strong>cava</strong> e o <strong>ListAudioDevices</strong>, o <strong>tocaTintas.sdef</strong>, que é o dicionário AppleScript, e o <strong>tocaTintas.help</strong>, o livro de ajuda com este manual.</p>
+</main>
+<nav class="percurso fim"><span><a href="acerca.html">◂ Acerca e versão</a></span><span><a href="index.html">Temas</a></span><span><a href="requisitos.html">Requisitos ▸</a></span></nav>
+</div>
+</body>
+</html>

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sincronização do histograma com o AirPlay — tocaTintas</title>
+<meta name="description" content="O cava lê o BlackHole, no início da cadeia, e mostra o áudio no instante em que é capturado. O receptor AirPlay toca esse mesmo áudio alguns segundos depois. Sem correcção, as…">
+<meta name="keywords" content="Medir: o relógio do raop_play, Atrasar: a linha de atraso, Quando se aplica, Limitação, Porque não o head_ts, atraso, histograma, AirPlay, latência">
+<meta name="robots" content="index, anchors">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<a name="sincronizacao"></a>
+<div class="envolve">
+<nav class="percurso"><span><a href="airplay.html">◂ AirPlay</a></span><span><a href="index.html">Temas</a></span><span><a href="emparelhamento.html">Emparelhamento ▸</a></span></nav>
+<main>
+<h2 id="sincronizacao">Sincronização do histograma com o AirPlay</h2>
+<p>O <strong>cava</strong> lê o BlackHole, no início da cadeia, e mostra o áudio no instante em que é capturado. O receptor AirPlay toca esse mesmo áudio alguns segundos depois. Sem correcção, as barras andariam adiantadas em relação ao que se ouve, e o bombo apareceria antes de soar.</p>
+<p>A correcção tem duas partes: medir o atraso e atrasar o histograma outro tanto.</p>
+<a name="sincronizacao-medir-o-relogio-do-raop-play"></a><h3 id="sincronizacao-medir-o-relogio-do-raop-play">Medir: o relógio do raop_play</h3>
+<p>O <strong>raop_play</strong> é lançado com <strong>-f</strong> <em>FIFO</em> e escreve aí uma linha por segundo, tirada do seu controlador de sincronismo:</p>
+<pre><code>&lt;blocos enviados&gt; &lt;head_ts&gt;</code></pre>
+<p>O primeiro número conta os blocos de áudio <strong>novo</strong> que já foram para a rede, a partir de zero. Cada bloco tem 352 tramas, o máximo que o protocolo permite. Do lado do tocaTintas, sabe-se quantas tramas foram capturadas e quantas a correcção de deriva deitou fora. O que foi capturado e ainda não foi enviado está em trânsito, no tampão circular, no encadeamento do sistema ou já entregue ao raop_play. Somando-lhe a latência pedida ao receptor (<strong>-l</strong>, um segundo por omissão), obtém-se o atraso total:</p>
+<pre><code>Δ = (capturadas − cortadas − enviadas + latência) / 44100</code></pre>
+<p>A conta parte do que foi capturado, e não do que foi entregue ao raop_play, para incluir o tampão circular. Normalmente está quase vazio, mas a deriva entre o relógio do Mac e o do receptor pode enchê-lo até seis segundos, e é precisamente aí que interessa saber o atraso.</p>
+<p class="rotulo"><strong>Porque não o head_ts</strong></p>
+<p>O segundo número, a marca temporal RTP, avança com tudo, incluindo os reenvios. Parece útil, mas não serve. É recalculado a partir do relógio NTP a cada arranque de fluxo, e por isso uma diferença de head_ts que atravesse uma pausa mede o tempo que passou, e não tramas. O contador de blocos não conta o áudio reenviado ao retomar, que não é novo, e por isso é a fonte certa. Isto foi verificado no código do rust-raop-player (<code>raop_client.rs</code>).</p>
+<a name="sincronizacao-atrasar-a-linha-de-atraso"></a><h3 id="sincronizacao-atrasar-a-linha-de-atraso">Atrasar: a linha de atraso</h3>
+<p>As tramas do cava, cerca de 25 por segundo, entram numa fila com a hora a que foram lidas, e só se desenham quando passaram Δ segundos. O Δ actualiza-se uma vez por segundo, que é a cadência a que o raop_play o fornece.</p>
+<ul>
+<li><strong>Quando o atraso cai de repente</strong>, porque a correcção de deriva cortou áudio, a fila inteira pode ficar vencida de uma vez. Nesse caso, desenha-se só a trama mais recente, porque mostrá-las todas seria reproduzi-las aceleradas. O áudio também salta, e o histograma salta com ele.</li>
+<li><strong>Quando o atraso cresce</strong>, ao ligar o AirPlay, a fila tem de encher antes de haver alguma trama vencida. Se passarem 200 ms sem nada para desenhar, as colunas apagam-se. Deixar a última à vista seria mostrar o passado como se fosse o presente. O ecrã vazio é o correcto, porque ainda não soou nada que lhe corresponda.</li>
+<li><strong>O atraso nunca passa de 8 segundos.</strong> A correcção de deriva não deixa o áudio em trânsito passar dos seis, e a latência é de um. Acima disso, é mais provável o relógio estar errado do que o áudio estar tanto tempo a caminho.</li>
+</ul>
+<a name="sincronizacao-quando-se-aplica"></a><h3 id="sincronizacao-quando-se-aplica">Quando se aplica</h3>
+<p><strong>Só sem auscultadores.</strong> Com auscultadores ligados, ouve-se o som local, sem atraso, e o histograma acompanha esse, mesmo com o AirPlay a transmitir ao mesmo tempo. Sem auscultadores, o que se ouve é o receptor, e o histograma atrasa-se o Δ medido.</p>
+<p>Um Δ igual a zero quer dizer «não sei», e não «estão sincronizados». Se o raop_play não tiver escrito nenhuma linha, o histograma não se atrasa. Ao fim de cinco segundos de transmissão sem linhas, o tocaTintas regista o problema.</p>
+<a name="sincronizacao-limitacao"></a><h3 id="sincronizacao-limitacao">Limitação</h3>
+<p>A soma da latência pressupõe que o receptor guarda exactamente as tramas que lhe foram pedidas. Um aparelho que guarde menos faz o Δ sair grande de mais, e o som chega antes das barras. É um desvio fixo de cada aparelho. Distingue-se de um erro de contagem pela forma: no registo é constante, enquanto um erro de contagem varia com o que se passou no fluxo.</p>
+</main>
+<nav class="percurso fim"><span><a href="airplay.html">◂ AirPlay</a></span><span><a href="index.html">Temas</a></span><span><a href="emparelhamento.html">Emparelhamento ▸</a></span></nav>
+</div>
+</body>
+</html>

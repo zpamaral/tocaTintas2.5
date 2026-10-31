@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gravação — tocaTintas</title>
+<meta name="description" content="O botão ⏺ grava para WAV em vírgula flutuante de 32 bits, em /var/tmp, onde fica até o álbum ser aprovado. A fonte escolhe-se no separador Gravação:">
+<meta name="keywords" content="Gravar o Apple Music bit a bit, Processamento automático, Avisos durante a gravação, O que o Mac toca, BlackHole, A aplicação Música, Dolby Atmos binaural, a frequência acerta-se sozinha, pára no fim do álbum, e volta ao que estava, a grelha, gravar, WAV, TOC, bit a bit, bit-exacta, master, frequência, FLAC, processamento">
+<meta name="robots" content="index, anchors">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<a name="gravacao"></a>
+<div class="envolve">
+<nav class="percurso"><span><a href="emparelhamento.html">◂ Emparelhamento</a></span><span><a href="index.html">Temas</a></span><span><a href="applescript.html">AppleScript ▸</a></span></nav>
+<main>
+<h2 id="gravacao">Gravação</h2>
+<p>O botão <strong>⏺</strong> grava para WAV em vírgula flutuante de 32 bits, em <code>/var/tmp</code>, onde fica até o álbum ser aprovado. A fonte escolhe-se no separador <strong>Gravação</strong>:</p>
+<p class="rotulo"><strong>O que o Mac toca (BlackHole)</strong></p>
+<p>Tudo o que passa pela saída do sistema, à frequência do BlackHole. Se a saída não for o BlackHole, o tocaTintas avisa que a gravação vai sair em silêncio.</p>
+<p class="rotulo"><strong>A aplicação Música (Dolby Atmos binaural)</strong></p>
+<p>Só o som do Música, captado directamente do processo. Quando o Música toca para os AirPods com o áudio espacial em <strong>Fixo</strong>, faz ele próprio o binaural do Atmos, e é isso que fica gravado, em estéreo a 48 kHz.</p>
+<p>Os ficheiros chamam-se <code>Recording_</code><em>UUID</em><code>.wav</code> e <code>Recording_Music_</code><em>UUID</em><code>.wav</code>. Uma gravação parada sem som nenhum é apagada. Ao lado de cada uma fica um rascunho da TOC, <code>Recording_</code><em>UUID</em><code>.toc.json</code>: as faixas que o Música anunciou, com a trama do ficheiro onde cada uma começou, os silêncios digitais e o som que se tenha perdido pelo caminho. As faixas só ficam na TOC quando se grava pelo BlackHole. Serve para cortar as faixas depois, mesmo num álbum sem pausas entre elas. A vírgula flutuante não é um capricho. Com o volume do Mac abaixo do máximo, o sinal chega atenuado, e em 16 bits perderia resolução que nenhuma normalização posterior recupera. Em vírgula flutuante, a atenuação não custa nada.</p>
+
+<a name="gravacao-gravar-o-apple-music-bit-a-bit"></a><h3 id="gravacao-gravar-o-apple-music-bit-a-bit">Gravar o Apple Music bit a bit</h3>
+<p>O som só passa do Música para o BlackHole sem ser alterado se se verificarem três condições: o volume do Música no máximo, nenhum efeito ligado (equalizador, <strong>Sound Check</strong> ou transição entre faixas) e o BlackHole <strong>à mesma frequência do master</strong>. Se a última falhar, o Música reamostra o som sem avisar. A gravação ouve-se bem, mas já não é o master.</p>
+<p>A frequência do master varia de álbum para álbum: 44,1 kHz num disco digital dos anos 90, 48 kHz em muitas edições recentes. As preferências do Música não a indicam, porque «Sem perdas, até 24 bits/48 kHz» é o máximo que ele aceita, e não o que cada álbum é. Quem a sabe é o próprio Música, e o tocaTintas pergunta-lha.</p>
+<p class="rotulo"><strong>a frequência acerta-se sozinha</strong></p>
+<p>Para gravar pelo BlackHole, carrega-se no ⏺ e depois toca-se o álbum no Música, como sempre. Enquanto grava, o tocaTintas acompanha o Música:</p>
+<ol>
+<li>ao carregar no ⏺, se o Música já tiver uma faixa escolhida, o tocaTintas põe o BlackHole à frequência dela;</li>
+<li>quando o Música começa a tocar uma faixa a outra frequência e ainda não entrou som nenhum na gravação, o tocaTintas recomeça tudo à frequência certa. Pára a ponte dos auscultadores, muda o BlackHole, relança a ponte, recomeça a gravação num ficheiro limpo e volta a faixa ao início. Não se perde nada, porque o Música leva uns segundos a ter som depois de começar a tocar, e o que havia no ficheiro era esse silêncio. O Música não é posto em pausa, e isso é de propósito: ao sair de uma pausa, ele sobe o volume aos poucos durante cerca de 7 s, e essa subida ficaria no início da gravação;</li>
+<li>logo depois de uma faixa começar, o Música pode ainda não saber a frequência e responder «missing value». Nesse caso, a gravação começa já, e o tocaTintas volta a perguntar de meio em meio segundo, durante 10 s no máximo. Quando a resposta chega, acerta o BlackHole e recomeça a faixa, desde que o som gravado seja ainda só o da primeira faixa;</li>
+<li>com som já gravado, a frequência não muda a meio, porque um WAV só tem uma. Num álbum com faixas a frequências diferentes, que é raro, o aviso da grelha diz qual saiu reamostrada.</li>
+</ol>
+<p>Cada mudança de frequência, e cada desistência, fica registada em <code>frequencia.log</code>. Sem isso, uma gravação à frequência errada não deixaria rasto do motivo.</p>
+<p class="rotulo"><strong>pára no fim do álbum</strong></p>
+<p>Quando um álbum acaba, o Música costuma passar sozinho a outra coisa, ao acaso, e a gravação continuaria por ela dentro, muitas vezes a outra frequência e já reamostrada. Por isso, quando se grava pelo BlackHole, o tocaTintas toma nota do álbum da faixa que o Música tem, a tocar ou em pausa. Quando o Música passa a uma faixa de outro álbum, ou pára, a gravação acaba sozinha um segundo depois, como se se tivesse carregado no ⏺, e uma notificação diz «Gravação terminada: fim do álbum». A pausa não faz a gravação parar. Para gravar de seguida uma lista com faixas de vários álbuns, desliga-se <strong>Parar a gravação no fim do álbum</strong>, no separador <strong>Gravação</strong>.</p>
+<p class="rotulo"><strong>e volta ao que estava</strong></p>
+<p>No fim, ao parar a gravação, ao sair do tocaTintas com ela a decorrer ou se ela não chegar a arrancar, o BlackHole volta à frequência que tinha antes, normalmente os 44,1 kHz dos CDs. A frequência anterior fica guardada nas preferências enquanto se grava, e só é apagada depois de o BlackHole a ter de facto. A reposição tenta três vezes, com um segundo de intervalo. Se falhar, o tocaTintas avisa e volta a tentar no arranque seguinte, como também acontece se a aplicação for abaixo. Com o AirPlay a transmitir, cada mudança de frequência reabre a sessão com o receptor, como o ⌘-clique, porque a transmissão podia ficar a falhar. Sair do tocaTintas a meio de uma gravação fecha o ficheiro como se se tivesse carregado no ⏺.</p>
+<p>Na primeira gravação, o macOS pede autorização para o tocaTintas controlar o Música. Se for recusada, a gravação faz-se como antes, à frequência que o BlackHole tiver.</p>
+<p class="rotulo"><strong>a grelha</strong></p>
+<p>O som digital são números, e o de um master de 16 bits só pode tomar 65&nbsp;536 valores, que são os degraus da grelha. Gravada em vírgula flutuante sem ser alterada, cada amostra cai exactamente num desses degraus: multiplicada por 2<sup>15</sup>, dá um número inteiro. Num master de 24 bits, multiplica-se por 2<sup>23</sup>. Uma reamostragem, um volume abaixo do máximo ou um equalizador recalculam as amostras, e quase todas saem dos degraus. É assim que se sabe, só a partir do ficheiro, se a gravação é o master.</p>
+<p>O tocaTintas verifica-o enquanto grava, em janelas de um segundo de som. O silêncio digital não conta, porque o zero está em todas as grelhas. O resultado vê-se pela cor do ⏺ durante a gravação:</p>
+<ul>
+<li><strong>vermelho</strong>: bit a bit, sem nenhuma amostra fora da grelha até agora;</li>
+<li><strong>amarelo</strong>: houve algumas amostras fora da grelha, esteve mal e já não está, ou perdeu-se som pelo caminho (o tocaTintas esteve parado, por exemplo suspenso por um depurador, e o que o BlackHole entregou nesse tempo não chegou ao ficheiro). Não volta a vermelho, porque há um pedaço do ficheiro que não é o master, e isso não se desfaz;</li>
+<li><strong>laranja</strong>: está mal agora, com mais de metade da última janela fora da grelha de 24 bits. Da primeira vez que isto acontece aparece também um aviso com as causas habituais.</li>
+</ul>
+<p>O Música aplica uma rampa de cerca de 25 ms ao começar a tocar e ao saltar de faixa. Essas rampas saem sempre fora da grelha, mas ficam encostadas a silêncio digital (a de entrada depois dele, a de saída antes) e caem fora da música. Por isso, até 50 ms de cada lado de um silêncio, não contam. O registo diz ainda se a gravação é de 16 ou de 24 bits.</p>
+
+<a name="gravacao-processamento-automatico"></a><h3 id="gravacao-processamento-automatico">Processamento automático</h3>
+<p>Quando uma gravação pelo BlackHole acaba, o tocaTintas trata dela sozinho, a partir do WAV e do rascunho da TOC, e deixa as faixas em <code>/var/tmp/</code><em>Artista</em><code>/</code><em>Álbum</em><code>/</code>, à espera de aprovação. Uma notificação dá o resumo, e clicá-la mostra a pasta no Finder. O relatório completo fica na pasta, em <code>Processamento.txt</code>. O WAV e a TOC ficam onde estavam.</p>
+<ol>
+<li><strong>Rampas.</strong> Ao arrancar e ao saltar de faixa, o Música sobe ou desce o volume durante cerca de 25 ms, junto ao silêncio. O tocaTintas mede essa curva no próprio ficheiro e desfá-la, mas só se todas as amostras voltarem à grelha de 16 ou de 24 bits, com erro abaixo de 0,01 LSB. Senão, a rampa fica como está, e o relatório diz porquê.</li>
+<li><strong>Cortes.</strong> A primeira faixa começa no primeiro som. Cada uma das seguintes começa onde a põe a soma das durações do catálogo da Apple, ao milissegundo, desde que a marca do Música concorde, com uma margem de 0,25 s. Num álbum sem pausas entre faixas, essas são as fronteiras verdadeiras. Se a marca discordar (uma pausa, um salto de faixa), manda a marca. O som perdido pelo caminho é descontado. Uma faixa a que falte o início ou o fim não sai, mas fica no relatório.</li>
+<li><strong>FLAC.</strong> Os FLAC são de 16 ou de 24 bits, conforme a grelha em que o álbum cai. Quando a gravação é bit-exacta, os FLAC também o são, e o codificador confirma cada um, descodificando-o.</li>
+<li><strong>Etiquetas.</strong> Vêm do catálogo da Apple, da loja americana, que dá os géneros em inglês, como os da fonoteca. Quando há uma edição no MusicBrainz com o mesmo número de faixas e as mesmas durações, juntam-se os títulos dela, os ISRC, a editora e os identificadores. A capa é a do catálogo, a 600 px, ou, fora dele, a que o Música mostrava. Vai embutida em cada FLAC e também solta, em <code>albumart_backup/cover.jpg</code> ou <code>cover.png</code> dentro da pasta do álbum, conforme o formato em que veio, como nas pastas da fonoteca. O ReplayGain de faixa e de álbum segue a BS.1770, com referência a −18 LUFS. A música erudita fica com as etiquetas da Apple, e o relatório lembra que têm de ser revistas.</li>
+</ol>
+<p>A gravação pela fonte «A aplicação Música» não tem marcas de faixa, por isso não é processada.</p>
+
+<a name="gravacao-avisos-durante-a-gravacao"></a><h3 id="gravacao-avisos-durante-a-gravacao">Avisos durante a gravação</h3>
+<ul>
+<li><strong>A gravação vai sair em silêncio.</strong> A saída do sistema não é o BlackHole. A gravação continua.</li>
+<li><strong>A gravação não é bit-exacta.</strong> As amostras saíram da grelha, porque o volume do Música está abaixo do máximo, há um efeito ligado ou a frequência está errada. O aviso aparece uma vez por gravação, quando o ⏺ fica laranja pela primeira vez. A partir daí, é a cor do botão que diz se continua mal. A gravação continua, mas vale a pena pará-la, corrigir o problema e recomeçar.</li>
+<li><strong>Não foi possível mudar a frequência do BlackHole.</strong> O BlackHole não aceita a frequência do master, ou recusou a mudança. Pode mudar-se à mão na Configuração de Áudio MIDI.</li>
+<li><strong>O Música não está a tocar.</strong> Só na fonte «A aplicação Música». O Música tem de estar aberto e a tocar antes de se carregar no ⏺.</li>
+<li><strong>Isto não é o Dolby Atmos binaural.</strong> Para uma saída que não sejam os AirPods, o Música entrega a mistura estéreo comum. A gravação continua.</li>
+<li><strong>O seguimento da cabeça está a ficar gravado.</strong> Com ele ligado, os movimentos da cabeça ficam no ficheiro. É preciso escolher «Fixo» e gravar outra vez.</li>
+</ul>
+<p>Na primeira gravação a partir do Música, o macOS pede autorização para gravar o áudio do sistema e para ler o movimento dos AirPods.</p>
+</main>
+<nav class="percurso fim"><span><a href="emparelhamento.html">◂ Emparelhamento</a></span><span><a href="index.html">Temas</a></span><span><a href="applescript.html">AppleScript ▸</a></span></nav>
+</div>
+</body>
+</html>

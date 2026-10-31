@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleHelpBookFolder</key>
+	<string>tocaTintas.help</string>
+	<key>CFBundleHelpBookName</key>
+	<string>JPSdA.tocaTintas.help</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>This app asks Music for the sample rate of the track it plays, so that recordings are bit-exact, and pauses and restarts it when the rate has to change.</string>
 	<key>NSAppleScriptEnabled</key>

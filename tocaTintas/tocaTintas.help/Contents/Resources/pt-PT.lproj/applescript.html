@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AppleScript — tocaTintas</title>
+<meta name="description" content="O tocaTintas tem um dicionário AppleScript, que o Editor de Scripts mostra em Ficheiro ▸ Abrir dicionário… e que serve também aos Atalhos e ao osascript. Os comandos fazem o mesmo…">
+<meta name="keywords" content="Gravar um álbum por AppleScript, Comandos, Propriedades da aplicação, Exemplos, osascript, Atalhos, Shortcuts, Editor de Scripts, dicionário, gravar">
+<meta name="robots" content="index, anchors">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<a name="applescript"></a>
+<div class="envolve">
+<nav class="percurso"><span><a href="gravacao.html">◂ Gravação</a></span><span><a href="index.html">Temas</a></span><span><a href="histograma.html">Histograma ▸</a></span></nav>
+<main>
+<h2 id="applescript">AppleScript</h2>
+<p>O tocaTintas tem um dicionário AppleScript, que o Editor de Scripts mostra em <strong>Ficheiro</strong> ▸ <strong>Abrir dicionário…</strong> e que serve também aos Atalhos e ao <code>osascript</code>. Os comandos fazem o mesmo que os botões da janela, pelos mesmos caminhos, e os botões acompanham-nos. Ao contrário dos botões, os comandos agem sempre sobre o tocaTintas, mesmo quando a janela mostra a aplicação Música.</p>
+<p class="rotulo"><strong>Comandos</strong></p>
+<ul>
+<li><code>play</code>: o ▶. Toca a faixa escolhida, ou retoma-a se estiver em pausa.</li>
+<li><code>pause</code>: pausa. Ao contrário do ⏸, nunca retoma, e em pausa não faz nada.</li>
+<li><code>playpause</code>: pausa se estiver a tocar e toca nos outros casos.</li>
+<li><code>stop</code>: o ⏹.</li>
+<li><code>next track</code>, <code>previous track</code>: o ⏭ e o ⏮.</li>
+<li><code>start recording</code>, <code>stop recording</code>: o ⏺. Cada um só faz alguma coisa se a gravação não estiver já no estado pedido.</li>
+</ul>
+<p class="rotulo"><strong>Propriedades da aplicação</strong></p>
+<ul>
+<li><code>player state</code>: <code>stopped</code>, <code>playing</code> ou <code>paused</code>.</li>
+<li><code>player position</code>, <code>current duration</code>: em segundos. Em pausa, nos formatos tocados pela AudioQueue (WavPack, Monkey’s Audio e Opus), a posição dá 0 até se retomar, tal como a barra de progresso.</li>
+<li><code>current title</code>, <code>current artist</code>, <code>current album</code>: o que a janela mostra.</li>
+<li><code>current path</code>: o caminho do ficheiro que está a tocar, ou vazio com o leitor parado.</li>
+<li><code>shuffle enabled</code>, <code>repeat enabled</code>, <code>recording</code>: os botões 🔀, 🔁 e ⏺. Podem ler-se e mudar-se, e mudá-los para o valor que já têm não faz nada.</li>
+</ul>
+<p class="rotulo"><strong>Exemplos</strong></p>
+<pre><code>osascript -e 'tell application "tocaTintas" to get {player state, current title}'
+osascript -e 'tell application "tocaTintas" to next track'
+osascript -e 'tell application "tocaTintas" to set shuffle enabled to true'
+osascript -e 'tell application "tocaTintas" to start recording'</code></pre>
+<p>Da primeira vez, o macOS pede ao programa que envia os comandos (o Terminal, o Editor de Scripts ou os Atalhos) autorização para controlar o tocaTintas.</p>
+<a name="applescript-gravar-um-album-por-applescript"></a><h3 id="applescript-gravar-um-album-por-applescript">Gravar um álbum por AppleScript</h3>
+<p>O <code>start recording</code> é o ⏺, e por isso a gravação feita assim tem tudo o que a do botão tem: a frequência acertada pelo Música, as marcas na TOC, a paragem no fim do álbum e o processamento automático. A ordem conta: primeiro grava-se, depois toca-se. O álbum da gravação é o da faixa que o Música começa a tocar antes de entrar som no ficheiro.</p>
+<pre><code>tell application "tocaTintas" to start recording
+tell application "Music" to play (first track of playlist "Library" ¬
+    whose album is "Belly Up" and track number is 1)</code></pre>
+<p>Para gravar vários álbuns de seguida, espera-se que a propriedade <code>recording</code> volte a <code>false</code> antes de passar ao seguinte:</p>
+<pre><code>repeat with nome in {"Álbum A", "Álbum B"}
+    tell application "tocaTintas" to start recording
+    tell application "Music" to play (first track of playlist "Library" ¬
+        whose album is (nome as text) and track number is 1)
+    delay 5
+    repeat while (recording of application "tocaTintas")
+        delay 5
+    end repeat
+    tell application "Music" to stop
+    delay 3
+end repeat</code></pre>
+<p>A reprodução aleatória e a repetição do Música têm de estar desligadas, e <strong>Parar a gravação no fim do álbum</strong> ligado, no separador <strong>Gravação</strong>.</p>
+</main>
+<nav class="percurso fim"><span><a href="gravacao.html">◂ Gravação</a></span><span><a href="index.html">Temas</a></span><span><a href="histograma.html">Histograma ▸</a></span></nav>
+</div>
+</body>
+</html>

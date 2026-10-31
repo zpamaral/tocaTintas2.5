@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A base de dados da fonoteca — tocaTintas</title>
+<meta name="description" content="A base separa três coisas que um leitor de música costuma confundir: a música (uma gravação), o ficheiro (onde ela está agora, num dado formato) e o disco (o CD de onde veio). Uma…">
+<meta name="keywords" content="Tabelas, Vistas, Quem escreve o quê, Exemplos, musicas, 37 675, ficheiros, 19 471, discos, 1 237, faixas_cd, 15 991, faixas_musica, 37 896, candidatas_musica, 5 098, audicoes, 992, contagens_importadas, 14 616, contagens, ficheiros_contagens, fonoteca, audicoes_locais, SQLite, base de dados, audições, UUID, FONOTECA_ID">
+<meta name="robots" content="index, anchors">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<a name="base-da-fonoteca"></a>
+<div class="envolve">
+<nav class="percurso"><span><a href="fonoteca.html">◂ Fonoteca</a></span><span><a href="index.html">Temas</a></span><span><a href="audicoes-do-musica.html">Audições da aplicação Música ▸</a></span></nav>
+<main>
+<h2 id="base-da-fonoteca">A base de dados da fonoteca</h2>
+<figure>
+<img src="imagens/fonoteca.png" alt="DB Browser for SQLite com a vista fonoteca aberta, ordenada pela última audição" width="1582" height="967" loading="lazy">
+<figcaption>Fig. 3 — a vista <code>fonoteca</code> no DB Browser for SQLite, ordenada pela última audição, antes de lá estarem as músicas que só existem na aplicação Música.</figcaption>
+</figure>
+<p>A base separa três coisas que um leitor de música costuma confundir: a <strong>música</strong> (uma gravação), o <strong>ficheiro</strong> (onde ela está agora, num dado formato) e o <strong>disco</strong> (o CD de onde veio). Uma música pode ter vários ficheiros, por exemplo um FLAC e um AAC da mesma gravação, e pode estar em vários discos, como uma compilação e o álbum original. As audições contam-se na música, e por isso não se perdem quando um ficheiro muda de nome, de pasta ou de formato. A aplicação Música entra como uma quarta fonte, com as suas próprias faixas.</p>
+<p>Os números entre parênteses são os de 29 de Outubro de 2026.</p>
+<a name="base-da-fonoteca-tabelas"></a><h3 id="base-da-fonoteca-tabelas">Tabelas</h3>
+<p class="rotulo"><strong>musicas</strong> (37&nbsp;675)</p>
+<p>Uma linha por gravação. A chave é um UUID v4, o mesmo que está na etiqueta <code>FONOTECA_ID</code> dos ficheiros. Guarda o título, o artista, o álbum, o disco, a faixa e a duração, e, como referência, os identificadores do MusicBrainz da gravação e do lançamento. Cerca de metade são músicas que só existem na aplicação Música.</p>
+<p class="rotulo"><strong>ficheiros</strong> (19&nbsp;471)</p>
+<p>Uma linha por ficheiro de áudio, com a música a que pertence, o <strong>MD5 do áudio</strong>, o formato, o caminho e a última vez que o caminho foi confirmado. O MD5 é o das tramas ou dos pacotes de áudio tal como estão, sem etiquetas nem capa, para que mudá-las não o altere. Só o Monkey’s Audio é descodificado para PCM. Um ficheiro que desapareça fica com o caminho a NULL em vez de ser apagado. Assim, a sua história continua na base, e o MD5 permite reconhecê-lo se voltar a aparecer noutro sítio.</p>
+<p class="rotulo"><strong>discos</strong> (1&nbsp;237)</p>
+<p>Os CDs, pelo identificador CDDB de oito dígitos e, quando se conhecem, pela TOC completa e pelo disc ID do MusicBrainz. O CDDB sozinho não basta, porque discos diferentes podem partilhá-lo. Por isso, o que é único é o par CDDB e TOC.</p>
+<p class="rotulo"><strong>faixas_cd</strong> (15&nbsp;991)</p>
+<p>A ligação entre discos e músicas: a faixa <em>n</em> do disco <em>d</em> é a música <em>m</em>. É por aqui que um CD metido no leitor encontra os nomes, a capa e o ganho na fonoteca, e que uma audição do CD conta para a mesma música que o ficheiro riporinado.</p>
+<p class="rotulo"><strong>faixas_musica</strong> (37&nbsp;896)</p>
+<p>As faixas da aplicação Música, pelo persistent ID que o Música lhes dá, cada uma ligada à sua música. O estado diz como foi ligada: automaticamente, por escolha, com uma música própria criada para ela, ou ainda pendente de escolha. Guarda também o que o Música mostra (artista, álbum, faixa, título e duração), a contagem que o Música tinha quando a faixa entrou na base e a última contagem já registada. As faixas do catálogo tocadas fora da biblioteca têm uma chave tirada da própria faixa, porque o persistent ID delas muda a cada reprodução. Ver <a href="audicoes-do-musica.html"><strong>AUDIÇÕES DO MÚSICA</strong></a>.</p>
+<p class="rotulo"><strong>candidatas_musica</strong> (5&nbsp;098)</p>
+<p>Para cada faixa pendente, as músicas a que pode corresponder, pela ordem de preferência, com o critério que as encontrou e a diferença de duração.</p>
+<p class="rotulo"><strong>audicoes</strong> (992)</p>
+<p>Uma linha por audição, com a música, a data e hora (ISO 8601, em UTC), a origem (<code>ficheiro</code>, <code>cd</code> ou <code>musica</code>) e o ficheiro, o disco ou a faixa do Música que tocou. Uma faixa do tocaTintas conta ao fim de 5 segundos de audição efectiva. As pausas não contam, nem avançar antes disso, e cada reprodução conta uma vez. As regras da aplicação Música estão em <a href="audicoes-do-musica.html"><strong>AUDIÇÕES DO MÚSICA</strong></a>.</p>
+<p class="rotulo"><strong>contagens_importadas</strong> (14&nbsp;616)</p>
+<p>As contagens que o tocaTintas guardava antes de haver base, em <code>~/Library/Application Support/tocaTintas/contagens.json</code>. Foram trazidas uma única vez pelo <code>fonoteca.py importar</code>, que recusa repetir a importação. Somam-se às audições, mas não têm datas: só as audições novas as têm.</p>
+<a name="base-da-fonoteca-vistas"></a><h3 id="base-da-fonoteca-vistas">Vistas</h3>
+<p class="rotulo"><strong>contagens</strong></p>
+<p>Por música, o total de audições e a data da última. O total soma as contagens importadas, as que o Música tinha quando as suas faixas foram ligadas à música e as audições registadas.</p>
+<p class="rotulo"><strong>ficheiros_contagens</strong></p>
+<p>Por ficheiro, quantas vezes a música tocou ao todo e quantas tocou <strong>este</strong> ficheiro. É o que permite comparar o FLAC com o AAC da mesma música.</p>
+<p class="rotulo"><strong>fonoteca</strong></p>
+<p>A vista de leitura, a da Fig. 3. Tem uma linha por música, com as audições, a última, quantos ficheiros tem, os formatos (<code>aac+flac</code>), o caminho preferido (o do FLAC, se houver) e os CDs onde está, no formato <code>cddb:faixa</code>.</p>
+<p class="rotulo"><strong>audicoes_locais</strong></p>
+<p>As audições à hora local, a mais recente primeiro. Mostra a hora (WET ou WEST, conforme a data), o artista, o álbum, o título, quantas vezes a música já tocou ao todo (a contagem que a janela mostra) e o que tocou: <code>flac</code>, <code>aac</code>, <code>alac</code>, <code>mp3</code>, <code>cd</code> ou <code>música</code>. A tabela guarda as horas em UTC, para que a ordem e as contas não se baralhem na mudança de hora. A conversão faz-se na leitura e acompanha a hora de Verão de cada audição.</p>
+<a name="base-da-fonoteca-quem-escreve-o-que"></a><h3 id="base-da-fonoteca-quem-escreve-o-que">Quem escreve o quê</h3>
+<p>O <strong>verificar_md5IV.sh</strong> e o <strong>fonoteca.py</strong> mantêm as músicas, os ficheiros, os discos e as faixas dos CDs. O <code>fonoteca.py sincronizar-musica</code> mantém as faixas do Música e regista as audições que o Música contou. O tocaTintas acrescenta:</p>
+<ul>
+<li>uma linha em <strong>audicoes</strong> por cada faixa ouvida;</li>
+<li>uma linha em <strong>musicas</strong> só com o UUID, quando toca um ficheiro com <code>FONOTECA_ID</code> que o fonoteca.py ainda não viu, e que este completa da vez seguinte;</li>
+<li>o disco e as suas faixas, quando toca um CD que a base ainda não conhece. Os nomes vêm do MusicBrainz ou do gnudb e ficam à espera do ficheiro que um dia for riporinado;</li>
+<li>a TOC e o disc ID de um disco conhecido só pelo CDDB, e o título, o artista e o álbum de uma faixa que não os tinha;</li>
+<li>as escolhas feitas na janela <strong>Ligar faixas do Música</strong>, e as audições das faixas do catálogo, pelo <code>fonoteca.py ouvir-musica</code>.</li>
+</ul>
+<p>Os campos da quarta alínea só se escrevem quando estão vazios. O que os scripts da fonoteca lá puseram nunca é substituído.</p>
+<a name="base-da-fonoteca-exemplos"></a><h3 id="base-da-fonoteca-exemplos">Exemplos</h3>
+<pre><code>sqlite3 -readonly CDs/.fonoteca.sqlite \
+  "SELECT audicoes, artista, titulo FROM fonoteca
+   ORDER BY audicoes DESC LIMIT 10"</code></pre>
+<p>As dez músicas mais ouvidas. Com <code>-readonly</code>, a consulta não interfere com o tocaTintas a correr.</p>
+<pre><code>sqlite3 -readonly -header -column CDs/.fonoteca.sqlite \
+  "SELECT * FROM audicoes_locais LIMIT 20"</code></pre>
+<p>As últimas vinte audições, à hora local.</p>
+</main>
+<nav class="percurso fim"><span><a href="fonoteca.html">◂ Fonoteca</a></span><span><a href="index.html">Temas</a></span><span><a href="audicoes-do-musica.html">Audições da aplicação Música ▸</a></span></nav>
+</div>
+</body>
+</html>

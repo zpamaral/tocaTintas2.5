@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AirPlay — tocaTintas</title>
+<meta name="description" content="A transmissão é feita pelo raop_play, que vem dentro da aplicação e fala os dois protocolos: o AirPlay 1, para os receptores antigos, e o AirPlay 2, para os que só aceitam esse…">
+<meta name="keywords" content="Normalização do volume, Atraso do histograma, 44,1 kHz e 16 bits, sempre, Nenhuma, Por faixa, limitado pelo pico, Por faixa, ganho integral, Por álbum, limitado pelo pico, Compensar a atenuação do volume do sistema, HomePod, Apple TV, AirPlay 2, raop_play, ReplayGain, volume, normalização">
+<meta name="robots" content="index, anchors">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<a name="airplay"></a>
+<div class="envolve">
+<nav class="percurso"><span><a href="auscultadores.html">◂ Auscultadores</a></span><span><a href="index.html">Temas</a></span><span><a href="sincronizacao.html">Sincronização do histograma com o AirPlay ▸</a></span></nav>
+<main>
+<h2 id="airplay">AirPlay</h2>
+<p>A transmissão é feita pelo <strong>raop_play</strong>, que vem dentro da aplicação e fala os dois protocolos: o AirPlay 1, para os receptores antigos, e o AirPlay 2, para os que só aceitam esse, como o HomePod desde o seu sistema 27. O tocaTintas escolhe o protocolo pelo que o receptor anuncia em <code>/info</code>.</p>
+<p>A API de AirPlay da Apple não está disponível para programas de terceiros, porque exige autorizações restritas. É por isso que o caminho é este.</p>
+<p class="rotulo"><strong>44,1 kHz e 16 bits, sempre</strong></p>
+<p>O protocolo transporta ALAC a 44,1 kHz e 16 bits, e o raop_play não aceita outra coisa. Se o BlackHole estiver a outra frequência, por exemplo a 48 kHz para gravar um master do Apple Music, o tocaTintas converte o som para 44,1 kHz antes de o entregar, com o conversor do macOS na qualidade máxima. Não se ouve diferença, mas só a 44,1 kHz é que o que chega à aparelhagem é, bit a bit, o que está no ficheiro.</p>
+<a name="airplay-normalizacao-do-volume"></a><h3 id="airplay-normalizacao-do-volume">Normalização do volume</h3>
+<p>No separador <strong>AirPlay</strong>, a partir das etiquetas <a href="https://pt.wikipedia.org/wiki/ReplayGain">ReplayGain</a>:</p>
+<p class="rotulo"><strong>Nenhuma</strong></p>
+<p>O som vai como está no ficheiro.</p>
+<p class="rotulo"><strong>Por faixa, limitado pelo pico</strong></p>
+<p>Todas as faixas vão ao mesmo volume, com o ganho reduzido ao máximo que cada faixa aguenta sem ser ceifada.</p>
+<p class="rotulo"><strong>Por faixa, ganho integral</strong></p>
+<p>Aplica o ganho que a etiqueta indica, mesmo que os picos passem de 0 dBFS e sejam ceifados.</p>
+<p class="rotulo"><strong>Por álbum, limitado pelo pico</strong></p>
+<p>Iguala os discos entre si e mantém as diferenças de nível dentro de cada um, que um disco tem de propósito. Se não houver etiquetas de álbum, usa as de faixa.</p>
+<p>As faixas sem etiquetas tocam como estão.</p>
+<p class="rotulo"><strong>Compensar a atenuação do volume do sistema</strong></p>
+<p>O cursor de volume do BlackHole atenua o áudio antes de tudo o resto, incluindo a transmissão. Com esta opção, o que sai para o AirPlay vai sempre ao nível do ficheiro, e o cursor do Mac passa a controlar só os auscultadores. O volume da aparelhagem controla-se na própria aparelhagem.</p>
+<a name="airplay-atraso-do-histograma"></a><h3 id="airplay-atraso-do-histograma">Atraso do histograma</h3>
+<p>O histograma acompanha o que se ouve na sala. Ver <a href="sincronizacao.html"><strong>SINCRONIZAÇÃO DO HISTOGRAMA COM O AIRPLAY</strong></a>.</p>
+</main>
+<nav class="percurso fim"><span><a href="auscultadores.html">◂ Auscultadores</a></span><span><a href="index.html">Temas</a></span><span><a href="sincronizacao.html">Sincronização do histograma com o AirPlay ▸</a></span></nav>
+</div>
+</body>
+</html>

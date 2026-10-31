@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>O caminho do som — tocaTintas</title>
+<meta name="description" content="A saída do sistema é o BlackHole, um aparelho de áudio virtual. Tudo o que o Mac toca entra nele, e dele parte para três sítios:">
+<meta name="keywords" content="frequência de amostragem, BlackHole, 44, 1 kHz, 48 kHz, áudio">
+<meta name="robots" content="index, anchors">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<a name="caminho-do-som"></a>
+<div class="envolve">
+<nav class="percurso"><span><a href="cd-de-audio.html">◂ CD de áudio</a></span><span><a href="index.html">Temas</a></span><span><a href="auscultadores.html">Auscultadores ▸</a></span></nav>
+<main>
+<h2 id="caminho-do-som">O caminho do som</h2>
+<p>A saída do sistema é o <a href="https://existential.audio/blackhole/"><strong>BlackHole</strong></a>, um aparelho de áudio virtual. Tudo o que o Mac toca entra nele, e dele parte para três sítios:</p>
+<figure>
+<svg class="esquema" viewBox="0 0 720 250" role="img" aria-label="Esquema: o tocaTintas toca para o BlackHole, que alimenta o bs2b_bridge para os auscultadores, o raop_play para o AirPlay e o cava para o histograma">
+<defs><marker id="ponta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="seta" d="M0,0 L10,5 L0,10 z"/></marker></defs>
+<rect x="10" y="100" width="130" height="50" rx="7" class="realce"/><text x="75" y="130" text-anchor="middle">tocaTintas</text>
+<rect x="190" y="100" width="130" height="50" rx="7"/><text x="255" y="123" text-anchor="middle">BlackHole</text><text x="255" y="139" text-anchor="middle" class="nota">saída do sistema</text>
+<rect x="390" y="15" width="150" height="50" rx="7"/><text x="465" y="38" text-anchor="middle">bs2b_bridge</text><text x="465" y="54" text-anchor="middle" class="nota">crossfeed + EQ</text>
+<rect x="390" y="100" width="150" height="50" rx="7"/><text x="465" y="123" text-anchor="middle">raop_play</text><text x="465" y="139" text-anchor="middle" class="nota">ReplayGain</text>
+<rect x="390" y="185" width="150" height="50" rx="7"/><text x="465" y="208" text-anchor="middle">cava</text><text x="465" y="224" text-anchor="middle" class="nota">FFT</text>
+<text x="575" y="45">auscultadores</text>
+<text x="575" y="130">AirPlay</text>
+<text x="575" y="215">histograma</text>
+<path d="M140,125 H184" marker-end="url(#ponta)"/>
+<path d="M320,125 C355,125 355,40 384,40" marker-end="url(#ponta)"/>
+<path d="M320,125 H384" marker-end="url(#ponta)"/>
+<path d="M320,125 C355,125 355,210 384,210" marker-end="url(#ponta)"/>
+<path d="M540,40 H568" marker-end="url(#ponta)"/>
+<path d="M540,125 H568" marker-end="url(#ponta)"/>
+<path d="M540,210 H568" marker-end="url(#ponta)"/>
+</svg>
+<figcaption>Fig. 2 — a topologia de áudio. Os três programas auxiliares vêm dentro do <code>tocaTintas.app</code>.</figcaption>
+</figure>
+<p>Por isso, o tratamento dos auscultadores não afecta o que vai para o AirPlay, e a normalização do AirPlay não afecta o que vai para os auscultadores. Nas colunas do Mac, o som passa sempre sem tratamento.</p>
+<p class="rotulo"><strong>frequência de amostragem</strong></p>
+<p>O BlackHole trabalha a uma única frequência, a que estiver definida na <strong>Configuração de Áudio MIDI</strong>, e tudo o que o Mac toca é convertido para ela antes de lá entrar. A <strong>44,1 kHz</strong>, a frequência dos CDs, a fonoteca passa sem conversão nenhuma, e é essa a frequência para o uso de todos os dias. As outras servem para gravar (ver <a href="gravacao.html"><strong>GRAVAÇÃO</strong></a>).</p>
+<p>Os três auxiliares seguem a frequência do BlackHole. O <strong>bs2b_bridge</strong> lê-a ao arrancar e escreve-a na configuração do CamillaDSP, que de outro modo forçaria o BlackHole para a sua própria frequência e desfaria qualquer mudança. O <strong>cava</strong> abre o BlackHole à frequência dele. O caminho do AirPlay converte-a para a do receptor (ver <a href="airplay.html"><strong>AIRPLAY</strong></a>). Mudar a frequência com o tocaTintas aberto obriga a ponte a reiniciar, e o som dos auscultadores cala-se por um instante.</p>
+</main>
+<nav class="percurso fim"><span><a href="cd-de-audio.html">◂ CD de áudio</a></span><span><a href="index.html">Temas</a></span><span><a href="auscultadores.html">Auscultadores ▸</a></span></nav>
+</div>
+</body>
+</html>

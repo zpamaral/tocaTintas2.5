@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CD de áudio — tocaTintas</title>
+<meta name="description" content="Quando se mete um CD, o tocaTintas pergunta se o deve tocar. Se sim, as faixas do disco passam a ser a lista em vigor, como uma lista M3U, e Sair do modo corrente volta à fonoteca.">
+<meta name="keywords" content="O arranque do leitor, CD, disco, MusicBrainz, gnudb, freedb, ejectar, cddafs">
+<meta name="robots" content="index, anchors">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<a name="cd-de-audio"></a>
+<div class="envolve">
+<nav class="percurso"><span><a href="listas-m3u.html">◂ Listas M3U e M3U8</a></span><span><a href="index.html">Temas</a></span><span><a href="caminho-do-som.html">O caminho do som ▸</a></span></nav>
+<main>
+<h2 id="cd-de-audio">CD de áudio</h2>
+<p>Quando se mete um CD, o tocaTintas pergunta se o deve tocar. Se sim, as faixas do disco passam a ser a lista em vigor, como uma lista M3U, e <strong>Sair do modo corrente</strong> volta à fonoteca.</p>
+<p>Os nomes e a capa procuram-se pela ordem escolhida no separador <strong>CD</strong> das Preferências:</p>
+<ul>
+<li><strong>na fonoteca</strong>, pelo identificador CDDB ou pelo disc ID do MusicBrainz guardado nos FLAC desse disco;</li>
+<li><strong>na internet</strong>, primeiro no MusicBrainz (TOC completa, <a href="https://musicbrainz.org/doc/Disc_ID_Calculation">disc ID</a> e gravações) e, para os discos que ele não conheça, no gnudb, o antigo freedb. O gnudb exige um endereço de email, e sem ele não é usado. Também não tem capas.</li>
+</ul>
+<p>As respostas da internet ficam guardadas, e cada disco só se pede uma vez. O ganho ReplayGain vem sempre da fonoteca, quando o álbum lá está.</p>
+<a name="cd-de-audio-o-arranque-do-leitor"></a><h3 id="cd-de-audio-o-arranque-do-leitor">O arranque do leitor</h3>
+<p>O <strong>cddafs</strong> do macOS não guarda cache, e duas leituras simultâneas atrasam-se uma à outra. Ao arrancar, o leitor físico fica parado entre 4 e 6 segundos. Durante esse tempo a janela diz «A preparar o leitor de CD…». Não é uma falha.</p>
+</main>
+<nav class="percurso fim"><span><a href="listas-m3u.html">◂ Listas M3U e M3U8</a></span><span><a href="index.html">Temas</a></span><span><a href="caminho-do-som.html">O caminho do som ▸</a></span></nav>
+</div>
+</body>
+</html>

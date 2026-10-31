@@ -171,6 +171,9 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <h3>Registo automático</h3>
 <p>Um álbum novo, ou uma pasta que mudou de nome ou de sítio, entra na base sem ser preciso correr o verificar_md5IV.sh. O tocaTintas acompanha a pasta de música pelo FSEvents do macOS e, quando ela fica um minuto sem mudanças, corre o <code>fonoteca.py registar</code> sobre as pastas que mudaram. O minuto de espera existe porque um rip ou um corte escrevem durante muito tempo, e o registo pode gravar o <code>FONOTECA_ID</code> nos ficheiros, o que nunca deve acontecer num ficheiro a meio.</p>
 <p>O registo trata dos ficheiros novos, dos que mudaram de sítio (reconhecidos pelo MD5 do áudio e pelo <code>FONOTECA_ID</code>), dos que desapareceram e das audições que tinham ficado sem ficheiro. Não verifica o áudio, que continua a ser trabalho do verificar_md5IV.sh. A saída fica em <code>registar.log</code>. Se houver ficheiros com problemas, ou se o registo não chegar a correr, aparece uma notificação.</p>
+<p>As somas MD5 do áudio guardam-se num único <code>.md5sum.txt</code>, na pasta da base (<code>CDs/</code>). O verificar_md5IV.sh refá-lo a partir da base de cada vez que corre, e apaga os <code>.md5sum.txt</code> antigos que encontre nas subpastas.</p>
+<h3>Verificação diária</h3>
+<p>Uma vez por dia, o tocaTintas corre o <code>fonoteca.py consistencia</code>, que só lê e não muda nada. Procura o que ficou entre duas contas: ficheiros de áudio na pasta de música que a base não tem, e faixas do Música que deviam estar ligadas à versão local do seu álbum e não estão. Se encontrar alguma coisa, aparece a notificação «Fonoteca: há contas por acertar», com o primeiro problema, e o resto fica em <code>sincronizar-musica.log</code>. Se estiver tudo certo, não diz nada. A verificação corre mesmo com o Música fechado.</p>
 
 <h2 id="base-da-fonoteca">A base de dados da fonoteca</h2>
 <figure>
@@ -234,6 +237,7 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <tr><td>Uma faixa do catálogo fora da biblioteca, ou de uma estação</td><td>aos 5 s de audição</td><td>o tocaTintas</td></tr>
 </table>
 <p>A terceira regra existe porque o Música não guarda contagem para as faixas que não estão na biblioteca: para ele, ficam sempre a zero. Nesse caso, quem conta é o tocaTintas, pela mesma regra dos seus ficheiros, enquanto mostra o Música na janela. As pausas não contam, e cada reprodução conta uma vez. Se a faixa for depois acrescentada à biblioteca, o tocaTintas deixa de a contar e a contagem passa a ser a do Música.</p>
+<p>O Música continua a tocar quando o tocaTintas fecha ou reinicia. Por isso, a audição em curso fica guardada a cada segundo. Ao voltar, se o Música ainda estiver na mesma faixa e não tiver voltado ao princípio, a audição continua onde estava: o que já tinha tocado soma, e o que já tinha contado não conta outra vez.</p>
 <h3>Sincronização</h3>
 <p>O <code>fonoteca.py sincronizar-musica</code> lê a biblioteca do Música de uma vez, em poucos segundos, e só se o Música estiver aberto. O tocaTintas corre-o um minuto depois de arrancar e depois de meia em meia hora. Também se pode correr à mão em <strong>Ficheiro</strong> ▸ <strong>Sincronizar com o Música</strong>.</p>
 <p>A cada sincronização:</p>
@@ -241,8 +245,10 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <li>cada faixa nova é ligada à sua música, fica pendente de escolha ou recebe uma música própria. A contagem que o Música já tinha passa a contar logo que a faixa está ligada;</li>
 <li>cada aumento da contagem do Música numa faixa ligada passa a ser uma audição, com a data da última reprodução que o Música guardou;</li>
 <li>as faixas pendentes são reavaliadas, porque entretanto pode ter aparecido a versão certa;</li>
-<li>uma música própria funde-se com a versão local logo que esta apareça sem dúvida, por exemplo depois de se gravar o álbum a partir do Música.</li>
+<li>uma música própria funde-se com a versão local logo que esta apareça sem dúvida, por exemplo depois de se gravar o álbum a partir do Música;</li>
+<li>as ligações automáticas são revistas: uma faixa ligada a uma música sem ficheiro, ou a uma música de outro álbum, passa para a versão local do mesmo álbum quando ela existe, com o mesmo número de faixa, um título parecido e uma duração que não difere mais de 2 s. As escolhas feitas à mão na janela <strong>Ligar faixas do Música</strong> nunca são mudadas.</li>
 </ul>
+<p>Nenhuma contagem vem de fora da base. O antigo <code>contagens.json</code> já não é lido: o que lá estava entrou uma vez, pela importação, e daí em diante só contam as audições registadas.</p>
 <p>Se o Música passar a mostrar uma contagem mais baixa, por exemplo porque a faixa foi apagada e reposta, o que já estava registado fica.</p>
 <h3>Como se liga uma faixa</h3>
 <p>Uma faixa do Música liga-se sozinha a uma música da base quando há uma única candidata, com uma duração que não difere mais de 2 s, segundo um destes critérios, do mais estreito para o mais largo:</p>
@@ -470,20 +476,39 @@ osascript -e 'tell application "tocaTintas" to next track'
 osascript -e 'tell application "tocaTintas" to set shuffle enabled to true'
 osascript -e 'tell application "tocaTintas" to start recording'</code></pre>
 <p>Da primeira vez, o macOS pede ao programa que envia os comandos (o Terminal, o Editor de Scripts ou os Atalhos) autorização para controlar o tocaTintas.</p>
+<h3>Gravar um álbum por AppleScript</h3>
+<p>O <code>start recording</code> é o ⏺, e por isso a gravação feita assim tem tudo o que a do botão tem: a frequência acertada pelo Música, as marcas na TOC, a paragem no fim do álbum e o processamento automático. A ordem conta: primeiro grava-se, depois toca-se. O álbum da gravação é o da faixa que o Música começa a tocar antes de entrar som no ficheiro.</p>
+<pre><code>tell application "tocaTintas" to start recording
+tell application "Music" to play (first track of playlist "Library" ¬
+    whose album is "Belly Up" and track number is 1)</code></pre>
+<p>Para gravar vários álbuns de seguida, espera-se que a propriedade <code>recording</code> volte a <code>false</code> antes de passar ao seguinte:</p>
+<pre><code>repeat with nome in {"Álbum A", "Álbum B"}
+    tell application "tocaTintas" to start recording
+    tell application "Music" to play (first track of playlist "Library" ¬
+        whose album is (nome as text) and track number is 1)
+    delay 5
+    repeat while (recording of application "tocaTintas")
+        delay 5
+    end repeat
+    tell application "Music" to stop
+    delay 3
+end repeat</code></pre>
+<p>A reprodução aleatória e a repetição do Música têm de estar desligadas, e <strong>Parar a gravação no fim do álbum</strong> ligado, no separador <strong>Gravação</strong>.</p>
 
 <h2 id="histograma">Histograma</h2>
 <p>O histograma é desenhado a partir do <a href="https://github.com/karlstav/cava"><strong>cava</strong></a> 1.0.0, que vem dentro da aplicação, lê o BlackHole e entrega as barras por um FIFO. Tem uma alteração: o <code>portaudio.c</code> abre o aparelho com dois canais, porque os 16 canais do BlackHole estragariam o desenho.</p>
 
 <h2 id="notificacoes">Notificações</h2>
-<p>O tocaTintas publica cinco notificações:</p>
+<p>O tocaTintas publica seis notificações:</p>
 <ul>
 <li>a faixa que começou a tocar, com a capa anexada;</li>
 <li>o fim de uma gravação, por exemplo no fim do álbum;</li>
 <li>o fim do processamento de uma gravação, com o resumo. Clicar nesta mostra os FLAC no Finder;</li>
 <li>um problema no registo automático na fonoteca;</li>
+<li>contas por acertar na verificação diária da fonoteca;</li>
 <li>faixas do Música por ligar, quando o número de pendentes aumenta. Clicar nesta abre a janela <strong>Ligar faixas do Música</strong>.</li>
 </ul>
-<p>O macOS não mostra as notificações da aplicação que está à frente, a menos que esta o peça. Com o tocaTintas à frente, as quatro últimas aparecem na mesma. A da faixa a tocar fica só no Centro de Notificações, porque a janela já mostra essa faixa.</p>
+<p>O macOS não mostra as notificações da aplicação que está à frente, a menos que esta o peça. O tocaTintas pede-o para todas, e por isso aparecem também com ele à frente, incluindo a da faixa a tocar.</p>
 <p>Todas pedem o som de aviso do sistema. Se o som estiver desligado em Ajustes do Sistema ▸ Notificações ▸ tocaTintas, todas aparecem em silêncio.</p>
 
 <h2 id="pagina-a-tocar">Página «a tocar»</h2>
@@ -506,7 +531,7 @@ osascript -e 'tell application "tocaTintas" to start recording'</code></pre>
 </figure>
 <p>Entre parênteses, a seguir ao nome, está o <strong>commit</strong> do Git a partir do qual a aplicação foi compilada. É gravado no Info.plist por uma fase de script que corre a cada compilação. Um <strong>+</strong> no fim, como em <code>(b21b3c1+)</code>, quer dizer que havia alterações por registar no Git: a aplicação não corresponde exactamente a nenhum estado registado do código.</p>
 <p class="rotulo"><strong>Ajuda</strong> ▸ <strong>Ajuda do tocaTintas</strong> (⌘?)</p>
-<p>Abre este manual no navegador. A cópia que vai dentro da aplicação é a desta página no momento da compilação.</p>
+<p>Abre este manual no visualizador de Ajuda do macOS, dividido em temas. O campo de pesquisa do menu <strong>Ajuda</strong> procura nos temas e nas palavras-chave do manual, e mostra-os por baixo dos itens de menu que encontra. O livro de ajuda que vai dentro da aplicação, <code>tocaTintas.help</code>, é gerado a partir desta página pelo <code>gerar-ajuda.py</code>, e é o desta página no momento em que foi gerado.</p>
 
 <h2 id="ficheiros">Ficheiros</h2>
 <p class="rotulo"><strong>&lt;pasta de música&gt;/CDs/.fonoteca.sqlite</strong></p>
@@ -522,17 +547,19 @@ osascript -e 'tell application "tocaTintas" to start recording'</code></pre>
 <p class="rotulo"><strong>…/tocaTintas/registar.log</strong></p>
 <p>A saída do registo automático na fonoteca.</p>
 <p class="rotulo"><strong>…/tocaTintas/sincronizar-musica.log</strong></p>
-<p>A saída das sincronizações com o Música e das audições das faixas do catálogo.</p>
+<p>A saída das sincronizações com o Música, das audições das faixas do catálogo e da verificação diária.</p>
 <p class="rotulo"><strong>…/tocaTintas/fonoteca-antes-de-migrar-</strong><em>data</em><strong>.sqlite</strong></p>
 <p>A cópia da base feita pelo <code>fonoteca.py migrar</code> antes de lhe acrescentar as tabelas do Música.</p>
 <p class="rotulo"><strong>preferências, chave ZPLoopbackSampleRateToRestore</strong></p>
 <p>A frequência que o BlackHole tinha antes de uma gravação a mudar. Só existe enquanto se grava, ou depois de a aplicação ter ido abaixo a meio de uma gravação, até ao arranque seguinte.</p>
+<p class="rotulo"><strong>preferências, chave fonotecaConsistenciaEm</strong></p>
+<p>A data da última verificação diária da fonoteca. A seguinte corre 20 horas depois, ou no arranque seguinte, se já tiver passado esse tempo. Apagá-la com <code>defaults delete</code> faz a verificação correr logo.</p>
 <p class="rotulo"><strong>preferências, chave fonotecaPy</strong></p>
 <p>Outro caminho para o <code>fonoteca.py</code>, que por omissão é <code>/usr/local/bin/fonoteca.py</code>. Muda-se com <code>defaults write</code>.</p>
 <p class="rotulo"><strong>~/Sites/now_playing.html</strong>, <strong>~/Sites/cover.png</strong></p>
 <p>A página da faixa a tocar.</p>
 <p class="rotulo"><strong>tocaTintas.app/Contents/Resources/</strong></p>
-<p>O <strong>bs2b_bridge</strong>, o <strong>raop_play</strong>, o <strong>cava</strong> e o <strong>ListAudioDevices</strong>, o <strong>tocaTintas.sdef</strong>, que é o dicionário AppleScript, e a pasta <strong>Ajuda</strong>, com este manual.</p>
+<p>O <strong>bs2b_bridge</strong>, o <strong>raop_play</strong>, o <strong>cava</strong> e o <strong>ListAudioDevices</strong>, o <strong>tocaTintas.sdef</strong>, que é o dicionário AppleScript, e o <strong>tocaTintas.help</strong>, o livro de ajuda com este manual.</p>
 
 <h2 id="requisitos">Requisitos</h2>
 <ul>

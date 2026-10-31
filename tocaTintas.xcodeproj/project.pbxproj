@@ -38,7 +38,6 @@
 		1F7E10B030432FCF00C86ED4 /* eq_autoeq.tgz in Resources */ = {isa = PBXBuildFile; fileRef = 1F7E10AE30432D7E00C86ED4 /* eq_autoeq.tgz */; };
 		1FA3F84830940D8500ACF01D /* ZPBarraDeProgresso.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FA3F84730940D8500ACF01D /* ZPBarraDeProgresso.m */; };
 		1FA3F84B30949C2000ACF01D /* ZPPosGravacao.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FA3F84A30949C2000ACF01D /* ZPPosGravacao.m */; };
-		1FA7D0C1E2B34A5600A0C002 /* Ajuda in Resources */ = {isa = PBXBuildFile; fileRef = 1FA7D0C1E2B34A5600A0C001 /* Ajuda */; };
 		1FAA50772E436F2E00DB68C7 /* QuickLookThumbnailing.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FEC26C92E33C1EB0099225A /* QuickLookThumbnailing.framework */; };
 		1FAA50782E436F2E00DB68C7 /* Quartz.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F7D8B562E32D815009D8628 /* Quartz.framework */; };
 		1FAA507C2E436F2F00DB68C7 /* ThumbnailProvider.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FAA507B2E436F2F00DB68C7 /* ThumbnailProvider.m */; };
@@ -53,6 +52,7 @@
 		1FC9EE5F2E47CD4E006E3B2D /* ZPSpotLightwv.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1FC9EE562E47CD4D006E3B2D /* ZPSpotLightwv.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		1FC9EE632E47D3E7006E3B2D /* libwavpack.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F651EE52C88B91D00CA223D /* libwavpack.a */; };
 		1FC9EE652E4809FC006E3B2D /* CoreSpotlight.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FC9EE642E4809FC006E3B2D /* CoreSpotlight.framework */; };
+		1FE1EEA53095D17A000A0DAE /* tocaTintas.help in Resources */ = {isa = PBXBuildFile; fileRef = 1FE1EEA43095D17A000A0DAE /* tocaTintas.help */; };
 		1FE43C2E307304AF0030BCFC /* libc++.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FE43C2D307304AF0030BCFC /* libc++.tbd */; };
 		1FE43C30307305B50030BCFC /* libMAC.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FE43C2F307305B50030BCFC /* libMAC.a */; };
 		1FE43C333073B7A20030BCFC /* ZPEtiquetaDeslizante.m in Sources */ = {isa = PBXBuildFile; fileRef = 1FE43C323073B7A20030BCFC /* ZPEtiquetaDeslizante.m */; };
@@ -167,6 +167,7 @@
 		1FC9EE5B2E47CD4E006E3B2D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		1FC9EE5C2E47CD4E006E3B2D /* ZPSpotLightwv.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ZPSpotLightwv.entitlements; sourceTree = "<group>"; };
 		1FC9EE642E4809FC006E3B2D /* CoreSpotlight.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreSpotlight.framework; path = System/Library/Frameworks/CoreSpotlight.framework; sourceTree = SDKROOT; };
+		1FE1EEA43095D17A000A0DAE /* tocaTintas.help */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = tocaTintas.help; path = tocaTintas/tocaTintas.help; sourceTree = "<group>"; };
 		1FE4194DE889044F9592974F /* ZPLigacoesDoMusicaWindowController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPLigacoesDoMusicaWindowController.m; sourceTree = "<group>"; };
 		1FE43C2D307304AF0030BCFC /* libc++.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = "libc++.tbd"; path = "usr/lib/libc++.tbd"; sourceTree = SDKROOT; };
 		1FE43C2F307305B50030BCFC /* libMAC.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libMAC.a; path = tocaTintas.xcodeproj/Frameworks/libMAC.a; sourceTree = "<group>"; };
@@ -241,6 +242,7 @@
 		1F12F2992C7C85480064C694 = {
 			isa = PBXGroup;
 			children = (
+				1FE1EEA43095D17A000A0DAE /* tocaTintas.help */,
 				1F12F2A42C7C85480064C694 /* tocaTintas */,
 				1F37C8C92CD5491A00346A66 /* Resources */,
 				1F1955192E4AA80900488F3A /* ZPQLverwv */,
@@ -511,6 +513,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1FE1EEA53095D17A000A0DAE /* tocaTintas.help in Resources */,
 				1F7E10B030432FCF00C86ED4 /* eq_autoeq.tgz in Resources */,
 				1FBE937C2D0B130E00E14743 /* placeholder.png in Resources */,
 				1F73F9C22CFE0C2D007C70AD /* refresh_icon.png in Resources */,
@@ -519,7 +522,6 @@
 				1F75D8E02EE994110005EE27 /* bs2b_bridge in Resources */,
 				1FC8C3EE2CE4C1A300271175 /* raop_play in Resources */,
 				1F10D08C308A484A005ADBA1 /* tocaTintas.sdef in Resources */,
-				1FA7D0C1E2B34A5600A0C002 /* Ajuda in Resources */,
 				1F37C8C82CD5486600346A66 /* config_fifo in Resources */,
 				1F37C8C52CD5446700346A66 /* cava in Resources */,
 				1F12F2B92C7C86D60064C694 /* Property List.plist in Resources */,

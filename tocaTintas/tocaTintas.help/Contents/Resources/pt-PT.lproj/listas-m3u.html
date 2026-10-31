@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Listas M3U e M3U8 — tocaTintas</title>
+<meta name="description" content="Ficheiro ▸ Abrir… (⌘O)">
+<meta name="keywords" content="O que se lê da lista, Ao abrir, Limitações, Ficheiro ▸ Abrir…, ⌘O, Ficheiro ▸ Sair do modo corrente, ⇧⌘P, playlist, lista de reprodução, m3u8, abrir">
+<meta name="robots" content="index, anchors">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<a name="listas-m3u"></a>
+<div class="envolve">
+<nav class="percurso"><span><a href="audicoes-do-musica.html">◂ Audições da aplicação Música</a></span><span><a href="index.html">Temas</a></span><span><a href="cd-de-audio.html">CD de áudio ▸</a></span></nav>
+<main>
+<h2 id="listas-m3u">Listas M3U e M3U8</h2>
+<p class="rotulo"><strong>Ficheiro</strong> ▸ <strong>Abrir…</strong> (⌘O)</p>
+<p>Aceita listas <code>.m3u</code> e <code>.m3u8</code>, que para o macOS são o mesmo tipo de ficheiro (<code>public.m3u-playlist</code>). As listas abertas ficam em <strong>Ficheiro</strong> ▸ <strong>Abrir recentes</strong>.</p>
+<p class="rotulo"><strong>Ficheiro</strong> ▸ <strong>Sair do modo corrente</strong> (⇧⌘P)</p>
+<p>Volta à fonoteca e mantém a faixa que está a tocar.</p>
+<a name="listas-m3u-o-que-se-le-da-lista"></a><h3 id="listas-m3u-o-que-se-le-da-lista">O que se lê da lista</h3>
+<ul>
+<li>Uma faixa por linha. O caminho pode ser <strong>absoluto</strong>, começar por <code>~</code>, ser um endereço <code>file://</code> ou ser <strong>relativo</strong>. Neste caso, conta a partir da pasta onde está a lista, como nos outros leitores.</li>
+<li>As linhas que começam por <code>#</code> são ignoradas, incluindo <code>#EXTM3U</code> e <code>#EXTINF</code>. O título e a duração vêm sempre das etiquetas do próprio ficheiro, nunca da lista.</li>
+<li>O ficheiro lê-se em <strong>UTF-8</strong>, que é o que o <code>.m3u8</code> garante, com ou sem a marca de ordem dos octetos no início. Se não for UTF-8, lê-se em <strong>Windows-1252</strong> e, por fim, em <strong>Latin-1</strong>, as codificações dos <code>.m3u</code> antigos. Um ficheiro em Windows-1252 com acentos quase nunca é UTF-8 válido, e por isso as tentativas sucessivas não se confundem.</li>
+</ul>
+<a name="listas-m3u-ao-abrir"></a><h3 id="listas-m3u-ao-abrir">Ao abrir</h3>
+<p>A lista passa a ser o que toca, e a fonoteca fica onde estava. Abrir uma lista <strong>não interrompe</strong> o que se está a ouvir. Se a faixa em curso fizer parte da lista, continua a tocar, já dentro dela. Se não fizer, acaba de tocar e a seguinte é a primeira da lista. Com o leitor parado, nada arranca sozinho, e o ▶ começa pela primeira faixa. Com o baralhamento ligado, a lista é baralhada.</p>
+<a name="listas-m3u-limitacoes"></a><h3 id="listas-m3u-limitacoes">Limitações</h3>
+<ul>
+<li>Os endereços de rede (<code>http://…</code>) não são suportados.</li>
+<li>O tocaTintas lê listas, mas não as grava.</li>
+</ul>
+</main>
+<nav class="percurso fim"><span><a href="audicoes-do-musica.html">◂ Audições da aplicação Música</a></span><span><a href="index.html">Temas</a></span><span><a href="cd-de-audio.html">CD de áudio ▸</a></span></nav>
+</div>
+</body>
+</html>

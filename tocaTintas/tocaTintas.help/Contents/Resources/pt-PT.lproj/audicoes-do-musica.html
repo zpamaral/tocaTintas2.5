@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audições da aplicação Música — tocaTintas</title>
+<meta name="description" content="O que se ouve na aplicação Música também conta na base da fonoteca, e conta na música certa. Se a mesma gravação existir num ficheiro ou num CD, as audições juntam-se às dessa…">
+<meta name="keywords" content="As três regras, Sincronização, Como se liga uma faixa, A janela «Ligar faixas do Música», Ligar, ↩, ou duplo clique, Saltar, Aceitar o álbum, ▶︎ Ouvir 10 s, Apple Music, Música, contagens, played count, sincronizar, ligar faixas, pendentes, catálogo">
+<meta name="robots" content="index, anchors">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<a name="audicoes-do-musica"></a>
+<div class="envolve">
+<nav class="percurso"><span><a href="base-da-fonoteca.html">◂ A base de dados da fonoteca</a></span><span><a href="index.html">Temas</a></span><span><a href="listas-m3u.html">Listas M3U e M3U8 ▸</a></span></nav>
+<main>
+<h2 id="audicoes-do-musica">Audições da aplicação Música</h2>
+<p>O que se ouve na aplicação Música também conta na base da fonoteca, e conta na música certa. Se a mesma gravação existir num ficheiro ou num CD, as audições juntam-se às dessa música. Se não existir, a faixa do Música fica com uma música própria.</p>
+<a name="audicoes-do-musica-as-tres-regras"></a><h3 id="audicoes-do-musica-as-tres-regras">As três regras</h3>
+<table>
+<tr><th>O que toca</th><th>Quando conta</th><th>Quem conta</th></tr>
+<tr><td>Um ficheiro ou um CD, no tocaTintas</td><td>aos 5 s de audição</td><td>o tocaTintas</td></tr>
+<tr><td>Uma faixa da biblioteca do Música</td><td>quando a faixa chega ao fim</td><td>o Música, com o seu «played count»</td></tr>
+<tr><td>Uma faixa do catálogo fora da biblioteca, ou de uma estação</td><td>aos 5 s de audição</td><td>o tocaTintas</td></tr>
+</table>
+<p>A terceira regra existe porque o Música não guarda contagem para as faixas que não estão na biblioteca: para ele, ficam sempre a zero. Nesse caso, quem conta é o tocaTintas, pela mesma regra dos seus ficheiros, enquanto mostra o Música na janela. As pausas não contam, e cada reprodução conta uma vez. Se a faixa for depois acrescentada à biblioteca, o tocaTintas deixa de a contar e a contagem passa a ser a do Música.</p>
+<p>O Música continua a tocar quando o tocaTintas fecha ou reinicia. Por isso, a audição em curso fica guardada a cada segundo. Ao voltar, se o Música ainda estiver na mesma faixa e não tiver voltado ao princípio, a audição continua onde estava: o que já tinha tocado soma, e o que já tinha contado não conta outra vez.</p>
+<a name="audicoes-do-musica-sincronizacao"></a><h3 id="audicoes-do-musica-sincronizacao">Sincronização</h3>
+<p>O <code>fonoteca.py sincronizar-musica</code> lê a biblioteca do Música de uma vez, em poucos segundos, e só se o Música estiver aberto. O tocaTintas corre-o um minuto depois de arrancar e depois de meia em meia hora. Também se pode correr à mão em <strong>Ficheiro</strong> ▸ <strong>Sincronizar com o Música</strong>.</p>
+<p>A cada sincronização:</p>
+<ul>
+<li>cada faixa nova é ligada à sua música, fica pendente de escolha ou recebe uma música própria. A contagem que o Música já tinha passa a contar logo que a faixa está ligada;</li>
+<li>cada aumento da contagem do Música numa faixa ligada passa a ser uma audição, com a data da última reprodução que o Música guardou;</li>
+<li>as faixas pendentes são reavaliadas, porque entretanto pode ter aparecido a versão certa;</li>
+<li>uma música própria funde-se com a versão local logo que esta apareça sem dúvida, por exemplo depois de se gravar o álbum a partir do Música;</li>
+<li>as ligações automáticas são revistas: uma faixa ligada a uma música sem ficheiro, ou a uma música de outro álbum, passa para a versão local do mesmo álbum quando ela existe, com o mesmo número de faixa, um título parecido e uma duração que não difere mais de 2 s. As escolhas feitas à mão na janela <strong>Ligar faixas do Música</strong> nunca são mudadas.</li>
+</ul>
+<p>Nenhuma contagem vem de fora da base. O antigo <code>contagens.json</code> já não é lido: o que lá estava entrou uma vez, pela importação, e daí em diante só contam as audições registadas.</p>
+<p>Se o Música passar a mostrar uma contagem mais baixa, por exemplo porque a faixa foi apagada e reposta, o que já estava registado fica.</p>
+<a name="audicoes-do-musica-como-se-liga-uma-faixa"></a><h3 id="audicoes-do-musica-como-se-liga-uma-faixa">Como se liga uma faixa</h3>
+<p>Uma faixa do Música liga-se sozinha a uma música da base quando há uma única candidata, com uma duração que não difere mais de 2 s, segundo um destes critérios, do mais estreito para o mais largo:</p>
+<ol>
+<li>o artista, o álbum, o disco, a faixa e o título iguais;</li>
+<li>o artista principal e o título iguais;</li>
+<li>o artista principal e o título iguais, sem contar sufixos de remasterização como «(2015 Remaster)».</li>
+</ol>
+<p>Há ainda um caso que se liga sozinho: o mesmo artista, o mesmo álbum e o mesmo título, com uma diferença de duração até 5 s. É o mesmo disco noutra masterização, ou com pausas diferentes no início e no fim. O «Sea, Swallow Me» do CD dura 191,4 s e o do Música 189,0 s. No título só se ignora a remasterização: «(Mono Mix)», «(EP Version)» ou «(Alternate Mix)» são outras misturas e não se ligam assim.</p>
+<p>Uma candidata que só exista na aplicação Música nunca passa à frente de uma versão local possível. Nesse caso, a faixa fica para escolha.</p>
+<p>Ficam pendentes as faixas com candidatas mas sem nenhuma certa. São encontradas pelo título sem sufixos de versão («Live», «Mix», «Edit»…), pelo álbum e número da faixa, muito usado na música clássica, em que o Música e o MusicBrainz escrevem o artista de maneiras diferentes, ou pelo título com outra duração. Uma faixa pendente ainda não conta. O que o Música tiver contado entretanto entra quando ela for ligada.</p>
+<a name="audicoes-do-musica-a-janela-ligar-faixas-do-musica"></a><h3 id="audicoes-do-musica-a-janela-ligar-faixas-do-musica">A janela «Ligar faixas do Música»</h3>
+<p>Abre-se em <strong>Ficheiro</strong> ▸ <strong>Ligar faixas do Música…</strong>, ou clicando na notificação «Faixas do Música por ligar», que aparece quando o número de pendentes aumenta. É o mesmo género de escolha que o Música propõe quando um CD tem várias entradas.</p>
+<p>À esquerda estão as faixas pendentes, com um campo para filtrar por artista, álbum ou título. À direita estão as candidatas da faixa escolhida, com a sugestão já seleccionada, a diferença de duração, onde está cada uma (o formato, o CD ou «só no Música») e o critério que a encontrou. A última opção é sempre <strong>Nenhuma — fica como música própria</strong>.</p>
+<p class="rotulo"><strong>Ligar</strong> (↩, ou duplo clique)</p>
+<p>Liga a faixa à candidata escolhida e passa à seguinte.</p>
+<p class="rotulo"><strong>Saltar</strong></p>
+<p>Deixa a faixa pendente e passa à seguinte.</p>
+<p class="rotulo"><strong>Aceitar o álbum</strong></p>
+<p>Aceita as sugestões de todas as faixas pendentes do mesmo álbum, depois de uma confirmação que diz quantas ficam ligadas e quantas ficam como músicas próprias. É a forma rápida de tratar os discos de música clássica.</p>
+<p class="rotulo"><strong>▶︎ Ouvir 10 s</strong></p>
+<p>Toca dez segundos da versão local, a partir de 30 % da duração, para comparar de ouvido. Não conta como audição. Só funciona com os formatos que o macOS lê sozinho (FLAC, ALAC, AAC e MP3).</p>
+<p>A sugestão é a primeira candidata, excepto quando só se encontrou uma pelo título com outra duração. Nesse caso, a sugestão é <strong>Nenhuma</strong>.</p>
+</main>
+<nav class="percurso fim"><span><a href="base-da-fonoteca.html">◂ A base de dados da fonoteca</a></span><span><a href="index.html">Temas</a></span><span><a href="listas-m3u.html">Listas M3U e M3U8 ▸</a></span></nav>
+</div>
+</body>
+</html>

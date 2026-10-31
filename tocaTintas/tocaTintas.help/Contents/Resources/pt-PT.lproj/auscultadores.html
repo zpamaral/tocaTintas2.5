@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auscultadores — tocaTintas</title>
+<meta name="description" content="O crossfeed mistura em cada ouvido um pouco do canal oposto, filtrado, como a cabeça faria ao ouvir colunas. Isso desfaz a sensação de o som estar dentro da cabeça. Há três…">
+<meta name="keywords" content="Crossfeed, Equalização, Suave, Médio, Forte, bs2b, EQ, AutoEQ, headphones">
+<meta name="robots" content="index, anchors">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<a name="auscultadores"></a>
+<div class="envolve">
+<nav class="percurso"><span><a href="caminho-do-som.html">◂ O caminho do som</a></span><span><a href="index.html">Temas</a></span><span><a href="airplay.html">AirPlay ▸</a></span></nav>
+<main>
+<h2 id="auscultadores">Auscultadores</h2>
+<a name="auscultadores-crossfeed"></a><h3 id="auscultadores-crossfeed">Crossfeed</h3>
+<p>O <a href="https://en.wikipedia.org/wiki/Crossfeed">crossfeed</a> mistura em cada ouvido um pouco do canal oposto, filtrado, como a cabeça faria ao ouvir colunas. Isso desfaz a sensação de o som estar dentro da cabeça. Há três intensidades, no separador <strong>DSP</strong>:</p>
+<p class="rotulo"><strong>Suave</strong></p>
+<p>700 Hz / 4,5 dB. É o perfil por omissão do bs2b.</p>
+<p class="rotulo"><strong>Médio</strong></p>
+<p>700 Hz / 6,0 dB, o perfil de Chu Moy.</p>
+<p class="rotulo"><strong>Forte</strong></p>
+<p>650 Hz / 9,5 dB, o perfil de Jan Meier.</p>
+<p>A mudança tem efeito imediato. O som cala-se por um instante enquanto o filtro reinicia.</p>
+<a name="auscultadores-equalizacao"></a><h3 id="auscultadores-equalizacao">Equalização</h3>
+<p>O crossfeed imita a cabeça, e a equalização corrige os auscultadores. No separador <strong>Auscultadores</strong> escolhem-se a marca e o modelo entre 523 correcções do <a href="https://github.com/jaakkopasanen/AutoEq">projecto AutoEQ</a>, de 106 marcas, para o alvo Harman over-ear. Todas foram medidas por <a href="https://github.com/jaakkopasanen/AutoEq/tree/master/results/oratory1990">oratory1990</a>, excepto a do Sony MDR-V600, que vem da Innerfidelity. A do Sony MDR-7506 vem embutida.</p>
+<p>Para acrescentar outra, põe-se o ficheiro <code>ParametricEQ.txt</code> em <code>~/Library/Application Support/tocaTintas/eq</code>, na raiz ou numa subpasta com o nome da marca. A linha <strong>Preamp</strong> é lida e respeitada, e é ela que impede o reforço de graves de saturar a saída.</p>
+</main>
+<nav class="percurso fim"><span><a href="caminho-do-som.html">◂ O caminho do som</a></span><span><a href="index.html">Temas</a></span><span><a href="airplay.html">AirPlay ▸</a></span></nav>
+</div>
+</body>
+</html>

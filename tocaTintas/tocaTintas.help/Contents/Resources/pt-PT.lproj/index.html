@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ajuda do tocaTintas</title>
+<meta name="AppleTitle" content="Ajuda do tocaTintas">
+<meta name="AppleIcon" content="imagens/icone.png">
+<meta name="description" content="O que é o tocaTintas, como se usa e a lista de temas desta ajuda.">
+<meta name="keywords" content="tocaTintas, ajuda, manual, temas, sinopse, descrição">
+<meta name="robots" content="index, anchors">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<a name="index"></a>
+<div class="envolve">
+<nav class="percurso"><span></span><span><a href="index.html">Temas</a></span><span><a href="janela-principal.html">Janela principal ▸</a></span></nav>
+<main>
+<header class="topo">
+<img src="imagens/icone.png" alt="Ícone do tocaTintas" width="96" height="96">
+<div>
+<h1>tocaTintas</h1>
+<p class="sub">tocaTintas 4.0.0 (Manual do utente)</p>
+<p class="sub">Outubro de 2026</p>
+</div>
+</header>
+
+<h2 id="nome">Nome</h2>
+<p>tocaTintas: leitor de música para macOS, com crossfeed, AirPlay e gravação.</p>
+
+<h2 id="sinopse">Sinopse</h2>
+<p><strong>tocaTintas</strong></p>
+<p><strong>Ficheiro</strong> ▸ <strong>Abrir…</strong> <em>lista.m3u</em> | <em>lista.m3u8</em></p>
+<p><strong>Ficheiro</strong> ▸ <strong>Tocar o CD</strong></p>
+<p><strong>Ficheiro</strong> ▸ <strong>Ligar faixas do Música…</strong></p>
+<p><strong>Ficheiro</strong> ▸ <strong>Sincronizar com o Música</strong></p>
+<p><strong>Ficheiro</strong> ▸ <strong>Sair do modo corrente</strong> (⇧⌘P)</p>
+<p><strong>Ajuda</strong> ▸ <strong>Ajuda do tocaTintas</strong> (⌘?)</p>
+<p><code>osascript -e 'tell application "tocaTintas" to</code> <em>comando</em><code>'</code></p>
+
+<h2 id="descricao">Descrição</h2>
+<p>O <strong>tocaTintas</strong> toca a fonoteca guardada em disco, milhares de faixas em FLAC, WavPack, Monkey’s Audio, ALAC e outros formatos, sem a importar para lado nenhum. Percorre a pasta de música, por mais subpastas que tenha, e toca o que lá encontra pela ordem, ao acaso ou em repetição.</p>
+<p>Cada faixa toca com a sua <strong>capa</strong>, a que vem embutida no ficheiro ou, se não houver, a imagem da pasta do álbum. A mesma capa aparece na janela, na notificação, na página «a tocar» e, nos ficheiros WavPack, no próprio ícone do Finder. Um CD metido no leitor recebe a capa do mesmo álbum na fonoteca ou a do Cover Art Archive (ver <a href="capas.html"><strong>CAPAS</strong></a>).</p>
+<p>Além disso, faz o que os leitores correntes não fazem:</p>
+<ul>
+<li>crossfeed <a href="https://bs2b.sourceforge.net/">bs2b</a> e equalização <a href="https://github.com/jaakkopasanen/AutoEq">AutoEQ</a> para os auscultadores;</li>
+<li>transmissão para receptores AirPlay e AirPlay 2, como o HomePod e a Apple TV;</li>
+<li>leitura de CDs, com os nomes vindos do <a href="https://musicbrainz.org/">MusicBrainz</a> e do <a href="https://gnudb.org/">gnudb</a>;</li>
+<li>contagem das audições numa base de dados da fonoteca, que junta também o que se ouve na aplicação Música;</li>
+<li>gravação do que o Mac toca, bit a bit e à frequência do original, incluindo o Dolby Atmos binaural da aplicação Música;</li>
+<li>um histograma de frequências em tempo real;</li>
+<li>um dicionário AppleScript, para ser comandado de fora.</li>
+</ul>
+
+<h2 id="temas">Temas</h2>
+<ul class="temas">
+<li><a href="janela-principal.html">Janela principal</a><span>À esquerda fica a capa. Ao centro estão o artista, o álbum e a faixa, em etiquetas que deslizam quando o texto não…</span></li>
+<li><a href="formatos.html">Formatos</a><span>FLAC, WavPack (.wv), Monkey’s Audio (.ape), ALAC e AAC (.m4a), AIFF, MP3 e Opus. Quando a mesma faixa existe em vários…</span></li>
+<li><a href="capas.html">Capas</a><span>Ficheiros</span></li>
+<li><a href="fonoteca.html">Fonoteca</a><span>A pasta de música escolhe-se nas Preferências, no separador Música. O tocaTintas percorre todas as subpastas e encontra…</span></li>
+<li><a href="base-da-fonoteca.html">A base de dados da fonoteca</a><span>A base separa três coisas que um leitor de música costuma confundir: a música (uma gravação), o ficheiro (onde ela está…</span></li>
+<li><a href="audicoes-do-musica.html">Audições da aplicação Música</a><span>O que se ouve na aplicação Música também conta na base da fonoteca, e conta na música certa. Se a mesma gravação…</span></li>
+<li><a href="listas-m3u.html">Listas M3U e M3U8</a><span>Ficheiro ▸ Abrir… (⌘O)</span></li>
+<li><a href="cd-de-audio.html">CD de áudio</a><span>Quando se mete um CD, o tocaTintas pergunta se o deve tocar. Se sim, as faixas do disco passam a ser a lista em vigor…</span></li>
+<li><a href="caminho-do-som.html">O caminho do som</a><span>A saída do sistema é o BlackHole, um aparelho de áudio virtual. Tudo o que o Mac toca entra nele, e dele parte para…</span></li>
+<li><a href="auscultadores.html">Auscultadores</a><span>O crossfeed mistura em cada ouvido um pouco do canal oposto, filtrado, como a cabeça faria ao ouvir colunas. Isso…</span></li>
+<li><a href="airplay.html">AirPlay</a><span>A transmissão é feita pelo raop_play, que vem dentro da aplicação e fala os dois protocolos: o AirPlay 1, para os…</span></li>
+<li><a href="sincronizacao.html">Sincronização do histograma com o AirPlay</a><span>O cava lê o BlackHole, no início da cadeia, e mostra o áudio no instante em que é capturado. O receptor AirPlay toca…</span></li>
+<li><a href="emparelhamento.html">Emparelhamento</a><span>A Apple TV 4K só aceita som de quem tiver feito um emparelhamento com ela. Faz-se uma vez, no separador Emparelhamento.…</span></li>
+<li><a href="gravacao.html">Gravação</a><span>O botão ⏺ grava para WAV em vírgula flutuante de 32 bits, em /var/tmp, onde fica até o álbum ser aprovado. A fonte…</span></li>
+<li><a href="applescript.html">AppleScript</a><span>O tocaTintas tem um dicionário AppleScript, que o Editor de Scripts mostra em Ficheiro ▸ Abrir dicionário… e que serve…</span></li>
+<li><a href="histograma.html">Histograma</a><span>O histograma é desenhado a partir do cava 1.0.0, que vem dentro da aplicação, lê o BlackHole e entrega as barras por um…</span></li>
+<li><a href="notificacoes.html">Notificações</a><span>O tocaTintas publica seis notificações:</span></li>
+<li><a href="pagina-a-tocar.html">Página «a tocar»</a><span>A cada faixa nova, o tocaTintas escreve now_playing.html e cover.png em ~/Sites, com o título, o álbum, o artista e a…</span></li>
+<li><a href="extensoes.html">Extensões do Finder</a><span>A aplicação traz três extensões para os ficheiros WavPack, que o macOS não conhece:</span></li>
+<li><a href="acerca.html">Acerca e versão</a><span>Entre parênteses, a seguir ao nome, está o commit do Git a partir do qual a aplicação foi compilada. É gravado no…</span></li>
+<li><a href="ficheiros.html">Ficheiros</a><span>&lt;pasta de música&gt;/CDs/.fonoteca.sqlite</span></li>
+<li><a href="requisitos.html">Requisitos</a><span></span></li>
+<li><a href="ver-tambem.html">Ver também</a><span>riporinador(1), cava(1), bs2b(3), abcde(1) e metaflac(1)</span></li>
+</ul>
+</main>
+<nav class="percurso fim"><span></span><span><a href="index.html">Temas</a></span><span><a href="janela-principal.html">Janela principal ▸</a></span></nav>
+</div>
+</body>
+</html>
