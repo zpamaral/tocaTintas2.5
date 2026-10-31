@@ -409,12 +409,44 @@ static void ZPFiltroK(double taxa, ZPBiquad *prefiltro, ZPBiquad *passaAlto) {
     *passaAlto = (ZPBiquad){ 1.0, -2.0, 1.0, 2.0 * (K * K - 1.0) / a0, (1.0 - K / Q + K * K) / a0, 0, 0 };
 }
 
-// Energia dos blocos de 400 ms, de 100 em 100 ms, de uma faixa; e o pico.
+// O pico verdadeiro, como o do libebur128 (o do rsgain com o zp, TruePeak=true):
+// sobreamostragem 4× abaixo de 96 kHz e 2× abaixo de 192 kHz, por um FIR de 49
+// coeficientes (sinc com janela de Hann) em fases; acima, o pico das amostras.
+// Cada fase guarda os seus coeficientes pelo atraso, em tramas.
+enum { kZPCoeficientes = 49, kZPFatorMaximo = 4, kZPAtrasoMaximo = 25 };
+
+typedef struct {
+    int fator, atraso;
+    int quantos[kZPFatorMaximo];
+    int indice[kZPFatorMaximo][kZPAtrasoMaximo];
+    double coef[kZPFatorMaximo][kZPAtrasoMaximo];
+} ZPSobreamostragem;
+
+static ZPSobreamostragem ZPSobreamostragemPara(double taxa) {
+    ZPSobreamostragem s = { .fator = taxa < 96000 ? 4 : taxa < 192000 ? 2 : 1 };
+    s.atraso = (kZPCoeficientes + s.fator - 1) / s.fator;
+    if (s.fator == 1) return s;
+    for (int j = 0; j < kZPCoeficientes; ++j) {
+        double m = j - (kZPCoeficientes - 1) / 2.0, c = 1.0;
+        if (fabs(m) > 1e-6) c = sin(m * M_PI / s.fator) / (m * M_PI / s.fator);
+        c *= 0.5 * (1.0 - cos(2.0 * M_PI * j / (kZPCoeficientes - 1)));
+        if (fabs(c) > 1e-6) {   // os zeros do sinc ficam de fora, como lá
+            int f = j % s.fator;
+            s.indice[f][s.quantos[f]] = j / s.fator;
+            s.coef[f][s.quantos[f]++] = c;
+        }
+    }
+    return s;
+}
+
+// Energia dos blocos de 400 ms, de 100 em 100 ms, de uma faixa; e o pico
+// verdadeiro, nunca abaixo do das amostras.
 static NSData *ZPBlocosDeEnergia(const ZPGravacao *g, const ZPCorreccao *cs, int nc,
                                  long long inicio, long long fim, double *pico) {
     ZPBiquad pre[2], alto[2];
     ZPFiltroK(g->taxa, &pre[0], &alto[0]);
     pre[1] = pre[0]; alto[1] = alto[0];
+    ZPSobreamostragem so = ZPSobreamostragemPara(g->taxa);
     long long seg = llround(g->taxa * 0.1);
     NSMutableData *segmentos = [NSMutableData data];
     double soma = 0.0;
@@ -422,6 +454,10 @@ static NSData *ZPBlocosDeEnergia(const ZPGravacao *g, const ZPCorreccao *cs, int
     *pico = 0.0;
     const long long pedaco = 65536;
     float *buf = malloc(sizeof(float) * 2 * pedaco);
+    // Por canal, as atraso − 1 tramas anteriores seguidas do pedaço; a faixa
+    // começa sobre zeros, como um ficheiro no rsgain.
+    const int antes = so.atraso - 1;
+    float *hist[2] = { calloc(antes + pedaco, sizeof(float)), calloc(antes + pedaco, sizeof(float)) };
     for (long long p = inicio; p < fim; p += pedaco) {
         long long n = MIN(pedaco, fim - p);
         ZPLer(g, cs, nc, p, n, buf);
@@ -437,7 +473,23 @@ static NSData *ZPBlocosDeEnergia(const ZPGravacao *g, const ZPCorreccao *cs, int
                 soma = 0.0; noSegmento = 0;
             }
         }
+        if (so.fator == 1) continue;
+        for (int c = 0; c < 2; ++c) {
+            float *h = hist[c];
+            for (long long i = 0; i < n; ++i) h[antes + i] = buf[2*i+c];
+            for (long long i = 0; i < n; ++i) {
+                const float *x = h + antes + i;   // x[-k] é a trama k atrás
+                for (int f = 0; f < so.fator; ++f) {
+                    double acc = 0.0;
+                    for (int t = 0; t < so.quantos[f]; ++t) acc += x[-so.indice[f][t]] * so.coef[f][t];
+                    float y = (float)acc;   // o libebur128 guarda a saída em float
+                    if (fabsf(y) > *pico) *pico = fabsf(y);
+                }
+            }
+            memmove(h, h + n, sizeof(float) * antes);
+        }
     }
+    free(hist[0]); free(hist[1]);
     free(buf);
     const double *s = segmentos.bytes;
     long ns = (long)(segmentos.length / sizeof(double));
@@ -911,7 +963,7 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
                 notaDaCapa = [NSString stringWithFormat:@" Não consegui escrever albumart_backup/%@.", nome];
             }
         }
-        [rel addObject:[NSString stringWithFormat:@"%u bits, %@. ReplayGain do álbum %+.2f dB, pico %.6f.%@", bits,
+        [rel addObject:[NSString stringWithFormat:@"%u bits, %@. ReplayGain do álbum %+.2f dB, pico verdadeiro %.6f.%@", bits,
                         exacto ? @"bit-exacto" : [NSString stringWithFormat:@"NÃO bit-exacto (%lld tramas fora da grelha de 24 bits, arredondadas)", fora24],
                         ganhoDoAlbum, picoDoAlbum, notaDaCapa]];
 
