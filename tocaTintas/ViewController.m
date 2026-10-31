@@ -9548,18 +9548,14 @@ static NSString *const kZPConsistenciaEmKey = @"fonotecaConsistenciaEm";
 }
 
 // Com o tocaTintas à frente, o macOS não mostra os avisos dele: só os põe no
-// Centro de Notificações, a não ser que se peça aqui. Pede-se para todos menos o
-// da faixa a tocar, que a janela já mostra.
+// Centro de Notificações, a não ser que se peça aqui. Pede-se para todos, a faixa
+// a tocar incluída.
 - (void)userNotificationCenter:(UNUserNotificationCenter *)centro
        willPresentNotification:(UNNotification *)aviso
          withCompletionHandler:(void (^)(UNNotificationPresentationOptions))mostrar {
-    if ([aviso.request.identifier isEqualToString:@"NowPlaying"]) {
-        mostrar(UNNotificationPresentationOptionNone);
-    } else {
-        // O som decide-se nos Ajustes do Sistema (Notificações › tocaTintas).
-        mostrar(UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionList |
-                UNNotificationPresentationOptionSound);
-    }
+    // O som decide-se nos Ajustes do Sistema (Notificações › tocaTintas).
+    mostrar(UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionList |
+            UNNotificationPresentationOptionSound);
 }
 
 // O aviso das ligações abre a janela delas, e o da gravação processada mostra
