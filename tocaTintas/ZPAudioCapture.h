@@ -111,6 +111,13 @@ extern NSString * const kZPAudioCaptureProcessedNotification;
 // ao lado do WAV, escrito ao fechar.
 - (void)marcarFaixa:(NSDictionary *)faixa;
 
+// Junta à TOC («posicoes») onde ia o Música, tal como ZPMusicNowPlaying o
+// diz, e a trama do ficheiro em que chegou: das perguntas de cinco em cinco
+// segundos da janela. `demora` é quanto levou a pergunta (as lentas não
+// contam). Com elas, o processamento põe as faixas no sítio mesmo quando a
+// primeira começa em silêncio, e vê as pausas e os encravamentos.
+- (void)registarPosicaoDoMusica:(NSDictionary *)faixa demora:(NSTimeInterval)demora;
+
 // A capa que o Música mostra para um álbum, para os FLAC dos álbuns que não
 // estejam no catálogo da Apple. Fica a primeira de cada álbum.
 - (void)guardarCapa:(NSData *)capa doAlbum:(NSString *)album;

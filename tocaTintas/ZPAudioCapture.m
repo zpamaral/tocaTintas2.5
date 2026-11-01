@@ -413,6 +413,7 @@ static void ZPPublicarEstadoDaGrelha(ZPEstadoDaGrelha estado);   // com o vigia 
     ZPVigiaGrelha _grelha;   // só na ioQueue
     // O rascunho da TOC (ver -marcarFaixa:). Tudo só na ioQueue.
     NSMutableArray<NSDictionary *> *_marcasDeFaixa;
+    NSMutableArray<NSDictionary *> *_posicoes;           // ver -registarPosicaoDoMusica:demora:
     NSMutableDictionary<NSString *, NSData *> *_capas;   // a do Música, por álbum
     NSMutableArray<NSArray<NSNumber *> *> *_silencios;   // [início, fim) em tramas
     unsigned long long _inicioDoSilencio;
@@ -484,6 +485,7 @@ static void ZPPublicarEstadoDaGrelha(ZPEstadoDaGrelha estado);   // com o vigia 
     dispatch_sync(self.ioQueue, ^{
         memset(&self->_grelha, 0, sizeof(self->_grelha));
         self->_marcasDeFaixa = [NSMutableArray array];
+        self->_posicoes = [NSMutableArray array];
         self->_silencios = [NSMutableArray array];
         self->_inicioDoSilencio = 0;
         self->_emSilencio = YES;   // o ficheiro começa sem som
@@ -814,6 +816,16 @@ static NSURL *ZPFicheiroDaTOC(NSURL *wav) {
     });
 }
 
+- (void)registarPosicaoDoMusica:(NSDictionary *)faixa demora:(NSTimeInterval)demora {
+    if (!self.isRecording || ![faixa[@"pid"] length]) return;
+    dispatch_async(self.ioQueue, ^{
+        if (!self.recordFileHandle) return;
+        unsigned long long trama = self.recordDataBytes / (2 * sizeof(float));
+        [self->_posicoes addObject:@{ @"trama": @(trama), @"posicao": faixa[@"posicao"] ?: @0, @"pid": faixa[@"pid"],
+                                      @"estado": faixa[@"estado"] ?: @"", @"demora": @(demora) }];
+    });
+}
+
 // Corre na ioQueue, depois do fecho do WAV.
 - (void)escreverRascunhoDaTOC {
     if (!self.gravouSom) return;
@@ -829,6 +841,7 @@ static NSURL *ZPFicheiroDaTOC(NSURL *wav) {
         @"tramas":     @(tramas),
         @"silencios":  _silencios ?: @[],
         @"faixas":     _marcasDeFaixa ?: @[],
+        @"posicoes":   _posicoes ?: @[],
         @"perdas":     _perdas ?: @[],
         @"tramasPerdidas": @(_tramasPerdidas),
         @"capas":      [self escreverCapas],

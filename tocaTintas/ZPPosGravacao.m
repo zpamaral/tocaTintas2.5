@@ -618,6 +618,170 @@ static NSString *ZPCreditoDoMusicBrainz(NSArray<NSDictionary *> *credito) {
     return s.length ? s : nil;
 }
 
+#pragma mark - O corte pela TOC
+
+// As marcas do Música erram dezenas de ms, mas são muitas: a primeira de cada
+// faixa e, desde 2026-11, as posições que a gravação pergunta de cinco em cinco
+// segundos («posicoes» na TOC). Cada uma diz onde a faixa começou no ficheiro
+// (trama − posição × frequência), e as durações do catálogo dizem onde começa
+// cada faixa em relação à primeira: a mediana das diferenças põe a cadeia
+// inteira no sítio, a uns 20 ms, mesmo que a primeira faixa seja muda. O
+// primeiro som deixou de ser a âncora (o «Next Exit» dos Interpol começa com
+// 206 ms de zeros, o «Untitled» com 481, e uma faixa só de silêncio dá o
+// primeiro som da seguinte); é só um dos silêncios que podem acertar a cadeia
+// à amostra: o fim de um silêncio digital a encostar a uma das fronteiras,
+// perto de onde as posições a põem.
+//
+// Uma posição que não anda enquanto as tramas andam é uma pausa ou um
+// encravamento do Música (os Dead Kennedys de 2026-10-31): o início que dá
+// salta, e a faixa tem um buraco — não sai, e diz-se onde. As faixas seguintes
+// começam outra cadeia.
+static const double kZPDesvioDaCadeia = 0.30;      // s: acima disto, outra cadeia
+static const double kZPSilencioAntes = 0.15;       // s: o silêncio pode estar até isto antes das posições…
+static const double kZPSilencioDepois = 0.08;      // s: …e até isto depois (as posições chegam tarde)
+static const double kZPSilencioMinimo = 0.01;      // s: os mais curtos são da própria música
+static const double kZPDemoraMaxima = 0.25;        // s: perguntas ao Música mais lentas não contam
+static const double kZPAtrasoDasPosicoes = 0.025;  // s: o que chegam tarde, em mediana (Turn On the Bright Lights, 2026-11: 24 ms)
+
+static double ZPMediana(NSArray<NSNumber *> *v) {
+    if (!v.count) return NAN;
+    NSArray *o = [v sortedArrayUsingSelector:@selector(compare:)];
+    return o.count % 2 ? [o[o.count / 2] doubleValue]
+                       : ([o[o.count / 2 - 1] doubleValue] + [o[o.count / 2] doubleValue]) / 2.0;
+}
+
+static void ZPCortarPelaTOC(const ZPGravacao *g, NSArray<NSMutableDictionary *> *faixas, NSDictionary *toc) {
+    const double taxa = g->taxa;
+    // Os inícios que cada faixa dá, por ordem. Uma posição 0 é do arranque, com
+    // o Música ainda sem som (no «Untitled» dava 0,72 s antes do certo).
+    NSMutableArray<NSMutableArray<NSNumber *> *> *inicios = [NSMutableArray array];
+    NSMutableArray<NSMutableArray<NSNumber *> *> *tramasDosPontos = [NSMutableArray array];
+    for (NSUInteger i = 0; i < faixas.count; ++i) {
+        [inicios addObject:[NSMutableArray array]];
+        [tramasDosPontos addObject:[NSMutableArray array]];
+    }
+    NSMutableArray<NSDictionary *> *pontos = [NSMutableArray array];
+    for (NSMutableDictionary *f in faixas) [pontos addObject:f[@"marca"]];
+    [pontos addObjectsFromArray:toc[@"posicoes"] ?: @[]];
+    [pontos sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        return [a[@"trama"] compare:b[@"trama"]];
+    }];
+    for (NSDictionary *p in pontos) {
+        double posicao = [p[@"posicao"] doubleValue];
+        if (![p[@"estado"] isEqualToString:@"playing"] || posicao < 0.01 || ![p[@"pid"] length]) continue;
+        if (p[@"demora"] && [p[@"demora"] doubleValue] > kZPDemoraMaxima) continue;
+        long long trama = [p[@"trama"] longLongValue];
+        // A faixa: a última com este pid que já tinha começado.
+        for (NSInteger i = (NSInteger)faixas.count - 1; i >= 0; --i) {
+            NSDictionary *m = faixas[i][@"marca"];
+            if ([m[@"pid"] isEqualToString:p[@"pid"]] && [m[@"trama"] longLongValue] <= trama + llround(taxa)) {
+                [inicios[i] addObject:@(trama - posicao * taxa)];
+                [tramasDosPontos[i] addObject:@(trama)];
+                break;
+            }
+        }
+    }
+
+    // As interrompidas: o início salta entre dois pontos seguidos.
+    NSMutableArray<NSNumber *> *inicioDaFaixa = [NSMutableArray array];   // NaN sem pontos
+    for (NSUInteger i = 0; i < faixas.count; ++i) {
+        NSArray<NSNumber *> *s = inicios[i];
+        NSUInteger ate = s.count;
+        for (NSUInteger k = 1; k < s.count; ++k) {
+            double salto = s[k].doubleValue - s[k-1].doubleValue;
+            if (fabs(salto) > kZPDesvioDaCadeia * taxa) {
+                faixas[i][@"interrompida"] = [NSString stringWithFormat:
+                    @"interrompida: o Música %@ %.1f s entre os %@ e os %@ do ficheiro (pausa ou encravamento), e a faixa tem um buraco",
+                    salto > 0 ? @"parou" : @"saltou", fabs(salto) / taxa,
+                    ZPTempo([tramasDosPontos[i][k-1] longLongValue], taxa), ZPTempo([tramasDosPontos[i][k] longLongValue], taxa)];
+                ate = k;
+                break;
+            }
+        }
+        [inicioDaFaixa addObject:@(ZPMediana([s subarrayWithRange:NSMakeRange(0, ate)]))];
+    }
+
+    // As cadeias: faixas seguidas cujos inícios batem com a soma das durações.
+    NSArray<NSArray<NSNumber *> *> *silencios = toc[@"silencios"] ?: @[];
+    NSUInteger i = 0;
+    while (i < faixas.count) {
+        NSUInteger inicio = i;
+        NSMutableArray<NSNumber *> *somas = [NSMutableArray arrayWithObject:@0.0];   // C_k, em tramas
+        NSMutableArray<NSNumber *> *desvios = [NSMutableArray array];               // início − C_k, por ponto
+        for (NSNumber *s in inicios[i]) [desvios addObject:@(s.doubleValue)];
+        while (YES) {
+            double c = somas.lastObject.doubleValue + [faixas[i][@"duracao"] doubleValue] * taxa;
+            [somas addObject:@(c)];
+            if (faixas[i][@"interrompida"] || i + 1 >= faixas.count) break;
+            double s = inicioDaFaixa[i + 1].doubleValue;
+            if (!isnan(s) && desvios.count && fabs(s - c - ZPMediana(desvios)) > kZPDesvioDaCadeia * taxa) break;
+            ++i;
+            for (NSNumber *x in inicios[i]) [desvios addObject:@(x.doubleValue - c)];
+        }
+        NSUInteger fimDaCadeia = i;   // inclusive
+        ++i;
+
+        // O sítio da cadeia: pelas posições; sem nenhuma, pelo primeiro som.
+        double o = ZPMediana(desvios);
+        NSString *pelas = [NSString stringWithFormat:@"%lu posições do Música", (unsigned long)desvios.count];
+        if (isnan(o)) {
+            NSDictionary *m = faixas[inicio][@"marca"];
+            long long est = [(m[@"inicioEstimado"] ?: m[@"trama"]) longLongValue];
+            long long som = ZPPrimeiroSom(g, MAX(0LL, est - llround(0.5 * taxa)), g->n);
+            o = som >= 0 ? (double)som : (double)MAX(0LL, est);
+            pelas = @"o primeiro som (sem posições do Música)";
+        }
+        // À amostra, pelo silêncio que encoste a uma fronteira.
+        double melhor = NAN, melhorDesvio = INFINITY;
+        NSUInteger fronteira = 0;
+        for (NSArray<NSNumber *> *sil in silencios) {
+            double e = sil[1].doubleValue;
+            if (e >= g->n || e - sil[0].doubleValue < kZPSilencioMinimo * taxa) continue;
+            for (NSUInteger k = 0; k < somas.count; ++k) {
+                double d = o - (e - somas[k].doubleValue);   // > 0: as posições põem-na depois
+                if (d <= kZPSilencioAntes * taxa && d >= -kZPSilencioDepois * taxa && fabs(d) < melhorDesvio) {
+                    melhorDesvio = fabs(d);
+                    melhor = e - somas[k].doubleValue;
+                    fronteira = k;
+                }
+            }
+        }
+        NSString *ancora;
+        if (!isnan(melhor)) {
+            ancora = [NSString stringWithFormat:@"no fim do silêncio aos %@, %@ (%@ a %+.0f ms)",
+                      ZPTempo(llround(melhor + somas[fronteira].doubleValue), taxa),
+                      fronteira == 0 ? @"o primeiro som" : fronteira + 1 == somas.count ? @"o fim do álbum a encostar ao som seguinte"
+                                     : [NSString stringWithFormat:@"no início da %lu.ª faixa", (unsigned long)(inicio + fronteira + 1)],
+                      pelas, (o - melhor) * 1000.0 / taxa];
+            o = melhor;
+        } else if (desvios.count) {
+            o -= kZPAtrasoDasPosicoes * taxa;
+            ancora = [NSString stringWithFormat:@"pelas %@, menos %.0f ms de atraso típico (±20 ms: nenhum silêncio bate)",
+                      pelas, kZPAtrasoDasPosicoes * 1000.0];
+        } else {
+            ancora = [NSString stringWithFormat:@"pel%@", pelas];   // «pelo primeiro som»
+        }
+
+        for (NSUInteger k = inicio; k <= fimDaCadeia; ++k) {
+            NSMutableDictionary *f = faixas[k];
+            double x = o + somas[k - inicio].doubleValue;
+            long long a = llround(x), b = llround(o + somas[k - inicio + 1].doubleValue);
+            [f removeObjectForKey:@"falta"];
+            double s = inicioDaFaixa[k].doubleValue;
+            NSString *daTOC = isnan(s) ? @"sem posições do Música"
+                            : [NSString stringWithFormat:@"posições a %+.0f ms", (s - x) * 1000.0 / taxa];
+            f[@"como"] = k == inicio ? [NSString stringWithFormat:@"cadeia ancorada %@; %@", ancora, daTOC]
+                                     : [NSString stringWithFormat:@"soma das durações (%@)", daTOC];
+            if (a < 0) { f[@"falta"] = @"o início: a gravação começou com a faixa já a tocar"; a = 0; }
+            if (b > g->n) { f[@"falta"] = @"o fim: a gravação parou antes"; b = g->n; }
+            if (f[@"interrompida"]) f[@"falta"] = f[@"interrompida"];
+            f[@"inicio"] = @(a);
+            f[@"exacto"] = @(x);
+            f[@"fim"] = @(b);
+        }
+    }
+}
+
 NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **pastasEscritas) {
     if (pastasEscritas) *pastasEscritas = @[];
     NSMutableArray<NSString *> *rel = [NSMutableArray array];
@@ -713,7 +877,9 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         }
     }
 
-    // 4. Onde começa e acaba cada faixa. A primeira no primeiro som depois da
+    // 4. Onde começa e acaba cada faixa. Com todas as durações de confiança e
+    // sem som perdido, manda o passo 4b, pela TOC; o que se segue fica para os
+    // outros casos. A primeira no primeiro som depois da
     // marca; cada uma das seguintes onde a soma das durações a põe, se a marca
     // concordar (num álbum sem pausas, são as fronteiras verdadeiras, ao
     // milissegundo); senão no primeiro som depois da marca. O som perdido pelo
@@ -827,45 +993,12 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         }
     }
 
-    // 4b. A primeira faixa pode começar em silêncio digital: o «Next Exit» dos
-    // Interpol tem 208 ms de zeros, o primeiro som fica atrás do início e a
-    // soma das durações empurra as fronteiras todas (em 2026-11, a última
-    // faixa levava 206 ms da que o Música tocou a seguir). Se a soma acaba
-    // pouco depois do fim de um silêncio — o som seguinte a começar —, é aí
-    // que o álbum acaba: recua-se tudo a eito, desde que o recuo caia nos zeros
-    // de antes do primeiro som. Só com a cadeia inteira pela soma, sem pausas
-    // nem som perdido.
-    BOOL emCadeia = faixas.count > 0 && perdas.count == 0;
-    for (NSUInteger i = 0; i < faixas.count && emCadeia; ++i) {
-        NSDictionary *f = faixas[i];
-        emCadeia = [f[@"duracaoExacta"] boolValue] && !f[@"falta"] && (i == 0 || [f[@"exacto"] doubleValue] >= 0.0)
-                   && (i == 0 || [f[@"como"] hasPrefix:@"soma das durações"]);
-    }
-    if (emCadeia) {
-        long long inicio0 = [faixas[0][@"inicio"] longLongValue], fimDoAlbum = [faixas.lastObject[@"fim"] longLongValue];
-        long long recuo = 0;
-        for (NSArray<NSNumber *> *sil in silencios) {
-            long long fimDoSilencio = sil[1].longLongValue;
-            if (fimDoSilencio < fimDoAlbum && fimDoAlbum - fimDoSilencio <= meioSegundo &&
-                fimDoSilencio > [faixas.lastObject[@"inicio"] longLongValue] &&
-                (recuo == 0 || fimDoAlbum - fimDoSilencio < recuo)) recuo = fimDoAlbum - fimDoSilencio;
-        }
-        if (recuo > 0 && inicio0 - recuo >= 0 && ZPPrimeiroSom(&g, inicio0 - recuo, inicio0) < 0) {
-            for (NSUInteger i = 0; i < faixas.count; ++i) {
-                NSMutableDictionary *f = faixas[i];
-                f[@"inicio"] = @([f[@"inicio"] longLongValue] - recuo);
-                f[@"exacto"] = @([f[@"exacto"] doubleValue] - recuo);
-                f[@"fim"] = @([f[@"fim"] longLongValue] - recuo);
-                NSDictionary *m = f[@"marca"];
-                long long est = [(m[@"inicioEstimado"] ?: m[@"trama"]) longLongValue];
-                f[@"como"] = i == 0
-                    ? [NSString stringWithFormat:@"%.0f ms antes do primeiro som, em silêncio digital (o fim do álbum encosta ao som seguinte)",
-                       recuo * 1000.0 / g.taxa]
-                    : [NSString stringWithFormat:@"soma das durações (marca a %+.0f ms)",
-                       (est - [f[@"inicio"] longLongValue]) * 1000.0 / g.taxa];
-            }
-        }
-    }
+    // 4b. Pela TOC (ver ZPCortarPelaTOC), quando todas as durações são de
+    // confiança e não se perdeu som: as fronteiras de cima ficam só para os
+    // outros casos.
+    BOOL pelaTOC = faixas.count > 0 && perdas.count == 0;
+    for (NSDictionary *f in faixas) pelaTOC = pelaTOC && [f[@"duracaoExacta"] boolValue];
+    if (pelaTOC) ZPCortarPelaTOC(&g, faixas, toc);
 
     // 5. A grelha de cada faixa, já com as rampas desfeitas; a sonoridade.
     const long long pedaco = 65536;

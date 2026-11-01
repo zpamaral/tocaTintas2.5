@@ -16,8 +16,10 @@
 ///      o ganho medido no próprio ficheiro põe todas as amostras de novo na
 ///      grelha (erro < 0,01 LSB);
 ///   2. as faixas cortadas pelas durações do catálogo da Apple (ao
-///      milissegundo), somadas a partir do primeiro som, e reancoradas na marca
-///      do Música quando as duas discordam (pausa, salto de faixa);
+///      milissegundo), em cadeia: a cadeia posta no sítio pelas posições do
+///      Música guardadas na TOC e acertada à amostra pelo silêncio digital que
+///      encoste a uma das fronteiras; uma pausa ou um encravamento a meio de
+///      uma faixa deixa-a de fora e começa outra cadeia;
 ///   3. FLAC de 16 ou 24 bits, conforme a grelha em que o álbum cai — bit-
 ///      exacto quando a gravação o é;
 ///   4. etiquetas do catálogo da Apple e, quando a edição bate sem ambiguidade,

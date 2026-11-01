@@ -11295,7 +11295,11 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
         [self deixarDeMostrarOMusica];
         return;
     }
+    NSTimeInterval antes = NSProcessInfo.processInfo.systemUptime;
     NSDictionary *m = ZPMusicNowPlaying();
+    if (self.isRecording && m[@"titulo"]) {
+        [self.audioCapture registarPosicaoDoMusica:m demora:NSProcessInfo.processInfo.systemUptime - antes];
+    }
     // Sem resposta não é parado: fica o que está à vista, a barra segue pelo
     // relógio local, e volta-se a perguntar daqui a cinco segundos. Só à
     // terceira falha seguida se desiste — até ao próximo aviso do Música.
