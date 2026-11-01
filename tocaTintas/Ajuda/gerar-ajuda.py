@@ -1,20 +1,22 @@
 #!/usr/local/bin/python3
 """Gera o livro de ajuda do macOS (tocaTintas.help) a partir do manual.
 
-O manual é uma página só, tocaTintas.html. A cópia que manda é a do
-servidor, /Volumes/amaral-1/Sites/tocaTintas/tocaTintas.html
-(https://sim.zpsou.eu/~amaral/tocaTintas/): é lá que o texto se edita, e
-esta pasta recebe-a antes de se gerar o livro. O visualizador de Ajuda e o campo de
-pesquisa do menu Ajuda querem outra coisa: um tema por página, com título,
-resumo e palavras-chave, e um índice feito pelo hiutil. Este script parte a
-página pelos <h2>, reescreve as ligações entre secções para as páginas novas e
-gera os dois índices (o do Core Spotlight, que é o que o menu Ajuda usa hoje, e
-o antigo, LSM).
+O manual é uma página só, tocaTintas.html, nesta pasta: é aqui que o texto se
+edita, com o histórico no Git ao lado do código que descreve. O visualizador de
+Ajuda e o campo de pesquisa do menu Ajuda querem outra coisa: um tema por
+página, com título, resumo e palavras-chave, e um índice feito pelo hiutil.
+Este script parte a página pelos <h2>, reescreve as ligações entre secções para
+as páginas novas e gera os dois índices (o do Core Spotlight, que é o que o
+menu Ajuda usa hoje, e o antigo, LSM).
 
     /usr/local/bin/python3 gerar-ajuda.py
 
 Corre-se depois de mudar o manual; o livro sai em ../tocaTintas.help, que é o
-que vai para dentro da aplicação. Depois de o substituir, o macOS pode
+que vai para dentro da aplicação. No fim, o manual e as imagens são publicados
+no servidor, /Volumes/amaral-1/Sites/tocaTintas/
+(https://sim.zpsou.eu/~amaral/tocaTintas/), só os que mudaram; com o servidor
+desmontado, o livro sai na mesma e o script diz que não publicou. Até 2026-11 a
+cópia que mandava era a do servidor. Depois de substituir o livro, o macOS pode
 continuar a mostrar o antigo, que guarda em cache: ver o fim deste ficheiro.
 """
 
@@ -33,6 +35,7 @@ LINGUA = 'pt-PT'
 IDENTIFICADOR = 'JPSdA.tocaTintas.help'
 TITULO = 'Ajuda do tocaTintas'
 SITIO = 'https://sim.zpsou.eu/~amaral/'
+SERVIDOR = Path('/Volumes/amaral-1/Sites/tocaTintas')
 
 # As três primeiras secções são a apresentação: vão juntas para a página de entrada.
 ENTRADA = ('nome', 'sinopse', 'descricao')
@@ -266,6 +269,25 @@ def main():
             sys.exit(f'hiutil ({tipo}) falhou:\n{r.stderr}')
 
     print(f'{LIVRO}: {len(temas) + 1} páginas, {len(usadas)} imagens')
+    publicar()
+
+
+def publicar():
+    """Copia o manual e as imagens para o servidor, só os que mudaram (com as
+    datas), sem apagar lá nada."""
+    if not SERVIDOR.parent.is_dir():
+        print(f'Servidor desmontado ({SERVIDOR.parent}): o manual não foi publicado.')
+        return
+    fontes = [MANUAL] + sorted(p for p in (AQUI / 'imagens').iterdir() if p.is_file() and not p.name.startswith('.'))
+    copiados = []
+    for f in fontes:
+        alvo = SERVIDOR / f.relative_to(AQUI)
+        if alvo.exists() and alvo.read_bytes() == f.read_bytes():
+            continue
+        alvo.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(f, alvo)
+        copiados.append(str(f.relative_to(AQUI)))
+    print(f'Publicado em {SERVIDOR}: ' + (', '.join(copiados) if copiados else 'nada mudou'))
 
 
 if __name__ == '__main__':
