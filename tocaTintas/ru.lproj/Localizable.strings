@@ -186,3 +186,6 @@
 "music_links_crit_suffixes" = "без суффиксов";
 "music_links_crit_album_track" = "альбом и трек";
 "music_links_crit_other_length" = "другая длительность";
+
+/* Меню «Окно»: возвращает окно плеера, даже если оно было закрыто */
+"menu_show_player" = "Плеер";

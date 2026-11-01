@@ -178,3 +178,6 @@
 "music_links_crit_suffixes" = "sem sufixos";
 "music_links_crit_album_track" = "álbum e faixa";
 "music_links_crit_other_length" = "outra duração";
+
+/* Menu Janela: traz de volta a janela do leitor, mesmo depois de fechada */
+"menu_show_player" = "Leitor";

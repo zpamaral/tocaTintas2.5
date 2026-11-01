@@ -275,6 +275,7 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, assign) sqlite3 *fonoteca;                  // CDs/.fonoteca.sqlite, ou NULL (só na filaDaFonoteca)
 @property (nonatomic, strong) dispatch_queue_t filaDaFonoteca;    // todo o acesso à base passa por aqui
 @property (nonatomic, copy) NSDictionary<NSString *, NSString *> *codecsDaFonoteca;   // caminho NFC → aac/alac (thread principal)
+@property (nonatomic, strong) NSWindow *janelaDoLeitor;          // segura-a depois de fechada, para voltar a abrir
 
 - (void)loadTrackPlayCounts;
 - (void)saveTrackPlayCounts;
@@ -3703,6 +3704,35 @@ static const NSUInteger ZPTentativasDaFrequencia = 20;   // × 0,5 s
     // Para o clique no aviso das faixas do Música abrir a janela delas.
     [UNUserNotificationCenter currentNotificationCenter].delegate = self;
     [self comecarASincronizarComOMusica];
+    [self porOLeitorNoMenuJanela];
+}
+
+// Fechar a janela do leitor não fecha a app (a gravação e a ponte seguem), mas
+// uma janela fechada sai do menu Janela, e numa app sem documentos o AppKit não
+// faz nada ao clique no ícone da Dock: fechada por engano, o leitor só voltava
+// relançando a app (2026-11, a meio de uma gravação). Voltam as duas vias.
+- (void)porOLeitorNoMenuJanela {
+    self.janelaDoLeitor = self.view.window;
+    NSMenu *janela = NSApp.windowsMenu;
+    if (!janela || [janela indexOfItemWithTarget:self andAction:@selector(mostrarOLeitor:)] >= 0) return;
+    NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"menu_show_player", @"Leitor")
+                                                  action:@selector(mostrarOLeitor:)
+                                           keyEquivalent:@"0"];
+    item.target = self;
+    [janela addItem:[NSMenuItem separatorItem]];
+    [janela addItem:item];
+}
+
+- (IBAction)mostrarOLeitor:(id)sender {
+    NSWindow *janela = self.view.window ?: self.janelaDoLeitor;
+    [janela makeKeyAndOrderFront:sender];
+    [NSApp activate];
+}
+
+// O clique no ícone da Dock (e o «reopen» do AppleScript) sem janelas à vista.
+- (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)flag {
+    if (!flag) [self mostrarOLeitor:sender];
+    return YES;
 }
 
 - (NSString *)localizedVersionStringWithVersion:(NSString *)version {

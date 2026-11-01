@@ -178,3 +178,6 @@
 "music_links_crit_suffixes" = "without suffixes";
 "music_links_crit_album_track" = "album and track";
 "music_links_crit_other_length" = "other length";
+
+/* Window menu: brings back the player window, even after it was closed */
+"menu_show_player" = "Player";
