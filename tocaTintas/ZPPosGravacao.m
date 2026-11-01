@@ -646,9 +646,9 @@ typedef struct {
     double desvioDaCadeia;     // s: acima disto, outra cadeia (e um salto destes é uma interrupção)
     double silencioAntes;      // s: o silêncio pode estar até isto antes das posições…
     double silencioDepois;     // s: …e até isto depois
-    double atrasoDasPosicoes;  // s: o que as posições chegam tarde, em mediana, sem silêncio que acerte
+    double atrasoDasPosicoes;  // s: o que as posições chegam tarde (< 0: adiantadas), em mediana, sem silêncio que acerte
 } ZPLimitesDasPosicoes;
-static const ZPLimitesDasPosicoes kZPPeloRelogio = { 0.10, 0.10, 0.10, 0.0 };   // atraso por medir
+static const ZPLimitesDasPosicoes kZPPeloRelogio = { 0.10, 0.10, 0.10, -0.025 }; // El Pintor, 2026-11-01: −24 a −28 ms, ±5 ms por faixa
 static const ZPLimitesDasPosicoes kZPPelaEscrita = { 0.30, 0.15, 0.08, 0.025 }; // Turn On the Bright Lights, 2026-11: 24 ms
 static const double kZPSilencioMinimo = 0.01;      // s: os mais curtos são da própria música
 static const double kZPDemoraMaxima = 0.25;        // s: perguntas ao Música mais lentas não contam
@@ -676,8 +676,11 @@ static void ZPCortarPelaTOC(const ZPGravacao *g, NSArray<NSMutableDictionary *> 
     NSArray<NSDictionary *> *posicoes = toc[@"posicoes"] ?: @[];
     const BOOL peloRelogio = posicoes.count && posicoes.firstObject[@"tramaDepois"] != nil;
     const ZPLimitesDasPosicoes L = peloRelogio ? kZPPeloRelogio : kZPPelaEscrita;
-    // Os inícios que cada faixa dá, por ordem. Uma posição 0 é do arranque, com
-    // o Música ainda sem som (no «Untitled» dava 0,72 s antes do certo).
+    // Os inícios que cada faixa dá, por ordem. No primeiro segundo da faixa a
+    // posição é do arranque, com o Música ainda sem som (no «Untitled» dava
+    // 0,72 s antes do certo; no «All the Rage Back Home», 0,28 s, e com os
+    // limites pelo relógio passava por interrupção): as marcas não contam,
+    // ficam só as perguntas de cinco em cinco segundos.
     NSMutableArray<NSMutableArray<NSNumber *> *> *inicios = [NSMutableArray array];
     NSMutableArray<NSMutableArray<NSNumber *> *> *tramasDosPontos = [NSMutableArray array];
     for (NSUInteger i = 0; i < faixas.count; ++i) {
@@ -692,7 +695,7 @@ static void ZPCortarPelaTOC(const ZPGravacao *g, NSArray<NSMutableDictionary *> 
     }];
     for (NSDictionary *p in pontos) {
         double posicao = [p[@"posicao"] doubleValue];
-        if (![p[@"estado"] isEqualToString:@"playing"] || posicao < 0.01 || ![p[@"pid"] length]) continue;
+        if (![p[@"estado"] isEqualToString:@"playing"] || posicao < 1.0 || ![p[@"pid"] length]) continue;
         if (p[@"demora"] && [p[@"demora"] doubleValue] > kZPDemoraMaxima) continue;
         long long trama = [p[@"trama"] longLongValue];
         // A faixa: a última com este pid que já tinha começado.
@@ -789,7 +792,8 @@ static void ZPCortarPelaTOC(const ZPGravacao *g, NSArray<NSMutableDictionary *> 
         } else if (desvios.count) {
             om = llround((o - L.atrasoDasPosicoes * taxa) * 1000.0);
             ancora = peloRelogio
-                ? [NSString stringWithFormat:@"pelas %@ (pelo relógio; nenhum silêncio bate)", pelas]
+                ? [NSString stringWithFormat:@"pelas %@, mais %.0f ms de adiantamento típico (pelo relógio; nenhum silêncio bate)",
+                   pelas, -L.atrasoDasPosicoes * 1000.0]
                 : [NSString stringWithFormat:@"pelas %@, menos %.0f ms de atraso típico (±20 ms: nenhum silêncio bate)",
                    pelas, L.atrasoDasPosicoes * 1000.0];
         } else {
