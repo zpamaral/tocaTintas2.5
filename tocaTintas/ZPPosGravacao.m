@@ -10,6 +10,7 @@
 //
 
 #import "ZPPosGravacao.h"
+#import "ZPCatalogoDaApple.h"
 #import <AppKit/AppKit.h>
 #include <FLAC/metadata.h>
 #include <FLAC/stream_encoder.h>
@@ -310,34 +311,15 @@ static NSString *ZPSemSufixoDaApple(NSString *album) {
     return album;
 }
 
-// O álbum no catálogo da Apple: a loja americana primeiro, que dá os géneros
-// em inglês, como os da fonoteca (a portuguesa deu «Alternativa» no Low);
-// depois a portuguesa, para o que só lá houver. Devolve @{ @"album": …,
-// @"faixas": @[…] } com os campos do iTunes Search API, ou nil.
-static NSDictionary *ZPCatalogoDaApple(NSString *artista, NSString *album) {
-    NSString *chaveAlbum = ZPChave(album), *chaveArtista = ZPChave(artista);
-    for (NSString *pais in @[ @"us", @"pt" ]) {
-        NSDictionary *r = ZPPedirJSON(ZPEndereco(@"https://itunes.apple.com/search",
-            @{ @"term": [NSString stringWithFormat:@"%@ %@", artista, album], @"entity": @"album",
-               @"country": pais, @"limit": @"25" }), NULL);
-        NSDictionary *escolhido = nil;
-        for (NSDictionary *a in r[@"results"]) {
-            if (![ZPChave(a[@"collectionName"]) isEqualToString:chaveAlbum]) continue;
-            NSString *ca = ZPChave(a[@"artistName"]);
-            if (chaveArtista.length && ![ca containsString:chaveArtista] && ![chaveArtista containsString:ca]) continue;
-            escolhido = a;
-            break;
-        }
-        if (!escolhido) continue;
-        NSDictionary *l = ZPPedirJSON(ZPEndereco(@"https://itunes.apple.com/lookup",
-            @{ @"id": [escolhido[@"collectionId"] description], @"entity": @"song", @"country": pais }), NULL);
-        NSMutableArray *faixas = [NSMutableArray array];
-        for (NSDictionary *t in l[@"results"]) {
-            if ([t[@"wrapperType"] isEqualToString:@"track"] && [t[@"kind"] isEqualToString:@"song"]) [faixas addObject:t];
-        }
-        if (faixas.count) return @{ @"album": escolhido, @"faixas": faixas, @"pais": pais };
-    }
-    return nil;
+// O álbum no catálogo da Apple (ver ZPCatalogoDaApple), só com o mesmo nome:
+// a loja americana primeiro, que dá os géneros em inglês, como os da fonoteca
+// (a portuguesa deu «Alternativa» no Low); depois a portuguesa, para o que só
+// lá houver. Devolve @{ @"album": …, @"faixas": @[…] } com os campos do iTunes
+// Search API, ou nil.
+static NSDictionary *ZPAlbumNoCatalogo(NSString *artista, NSString *album) {
+    NSDictionary *a = [ZPCatalogoDaApple albumDe:artista chamado:album titulo:nil lojas:@[ @"us", @"pt" ] exacto:YES];
+    NSArray *faixas = a ? [ZPCatalogoDaApple faixasDoAlbum:a] : nil;
+    return faixas.count ? @{ @"album": a, @"faixas": faixas } : nil;
 }
 
 // A edição no MusicBrainz, só se bater sem ambiguidade: o mesmo número de
@@ -683,7 +665,7 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         [a[@"faixas"] addObject:f];
     }
     for (NSMutableDictionary *a in albuns) {
-        NSDictionary *cat = ZPCatalogoDaApple(a[@"artista"], a[@"nome"]);
+        NSDictionary *cat = ZPAlbumNoCatalogo(a[@"artista"], a[@"nome"]);
         NSArray<NSDictionary *> *doCatalogo = cat[@"faixas"];
         if (cat) {
             a[@"catalogo"] = cat[@"album"];
@@ -845,6 +827,46 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         }
     }
 
+    // 4b. A primeira faixa pode começar em silêncio digital: o «Next Exit» dos
+    // Interpol tem 208 ms de zeros, o primeiro som fica atrás do início e a
+    // soma das durações empurra as fronteiras todas (em 2026-11, a última
+    // faixa levava 206 ms da que o Música tocou a seguir). Se a soma acaba
+    // pouco depois do fim de um silêncio — o som seguinte a começar —, é aí
+    // que o álbum acaba: recua-se tudo a eito, desde que o recuo caia nos zeros
+    // de antes do primeiro som. Só com a cadeia inteira pela soma, sem pausas
+    // nem som perdido.
+    BOOL emCadeia = faixas.count > 0 && perdas.count == 0;
+    for (NSUInteger i = 0; i < faixas.count && emCadeia; ++i) {
+        NSDictionary *f = faixas[i];
+        emCadeia = [f[@"duracaoExacta"] boolValue] && !f[@"falta"] && (i == 0 || [f[@"exacto"] doubleValue] >= 0.0)
+                   && (i == 0 || [f[@"como"] hasPrefix:@"soma das durações"]);
+    }
+    if (emCadeia) {
+        long long inicio0 = [faixas[0][@"inicio"] longLongValue], fimDoAlbum = [faixas.lastObject[@"fim"] longLongValue];
+        long long recuo = 0;
+        for (NSArray<NSNumber *> *sil in silencios) {
+            long long fimDoSilencio = sil[1].longLongValue;
+            if (fimDoSilencio < fimDoAlbum && fimDoAlbum - fimDoSilencio <= meioSegundo &&
+                fimDoSilencio > [faixas.lastObject[@"inicio"] longLongValue] &&
+                (recuo == 0 || fimDoAlbum - fimDoSilencio < recuo)) recuo = fimDoAlbum - fimDoSilencio;
+        }
+        if (recuo > 0 && inicio0 - recuo >= 0 && ZPPrimeiroSom(&g, inicio0 - recuo, inicio0) < 0) {
+            for (NSUInteger i = 0; i < faixas.count; ++i) {
+                NSMutableDictionary *f = faixas[i];
+                f[@"inicio"] = @([f[@"inicio"] longLongValue] - recuo);
+                f[@"exacto"] = @([f[@"exacto"] doubleValue] - recuo);
+                f[@"fim"] = @([f[@"fim"] longLongValue] - recuo);
+                NSDictionary *m = f[@"marca"];
+                long long est = [(m[@"inicioEstimado"] ?: m[@"trama"]) longLongValue];
+                f[@"como"] = i == 0
+                    ? [NSString stringWithFormat:@"%.0f ms antes do primeiro som, em silêncio digital (o fim do álbum encosta ao som seguinte)",
+                       recuo * 1000.0 / g.taxa]
+                    : [NSString stringWithFormat:@"soma das durações (marca a %+.0f ms)",
+                       (est - [f[@"inicio"] longLongValue]) * 1000.0 / g.taxa];
+            }
+        }
+    }
+
     // 5. A grelha de cada faixa, já com as rampas desfeitas; a sonoridade.
     const long long pedaco = 65536;
     float *buf = malloc(sizeof(float) * 2 * pedaco);
@@ -881,7 +903,7 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         [rel addObject:@""];
         [rel addObject:[NSString stringWithFormat:@"%@ — %@", artistaDoAlbum, nomeDoAlbum]];
         [rel addObject:[NSString stringWithFormat:@"Catálogo da Apple: %@. MusicBrainz: %@.",
-                        cat ? [NSString stringWithFormat:@"%@ (loja %@)", cat[@"collectionId"], [cat[@"collectionViewUrl"] containsString:@"/pt/"] ? @"pt" : @"us"] : @"não encontrado",
+                        cat ? [NSString stringWithFormat:@"%@ (loja %@)", cat[@"collectionId"], cat[@"loja"]] : @"não encontrado",
                         mb ? mb[@"id"] : a[@"mbSemResposta"] ? @"não respondeu (servidor ocupado); as etiquetas são só as da Apple"
                                               : @"sem edição que bata sem ambiguidade"]];
         if (!inteiras.count) {
@@ -915,8 +937,7 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         // A capa: a do catálogo a 600 px, como na fonoteca; senão a que o
         // Música tinha, guardada pela gravação.
         NSData *capa = nil;
-        NSString *arte = ZPOuNada(cat[@"artworkUrl100"]);
-        if (arte) capa = ZPPedir([NSURL URLWithString:[arte stringByReplacingOccurrencesOfString:@"100x100bb" withString:@"600x600bb"]], NULL);
+        if (cat) capa = [ZPCatalogoDaApple capaDoAlbum:cat lado:600];
         if (!capa) {
             for (NSDictionary *c in capas) {
                 if ([c[@"album"] isEqual:a[@"nome"]]) {

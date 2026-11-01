@@ -56,6 +56,7 @@ SOFTWARE.
 #import "PreferencesWindowController.h"
 #import "ZPEtiquetaDeslizante.h"   // Etiquetas que deslizam quando o texto não cabe
 #import "ZPBarraDeProgresso.h"   // Barra de progresso que não anima cada mudança de valor
+#import "ZPCatalogoDaApple.h"   // Álbuns e capas do catálogo da Apple
 
 #import "ZPAirPlay.h"
 #import "ZPAudioCapture.h"
@@ -2442,12 +2443,21 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
     if (pid && [pid isEqualToString:self.faixaMarcadaNaTOC]) return;
     self.faixaMarcadaNaTOC = pid;
     [self.audioCapture marcarFaixa:faixa];
-    // A capa, uma vez por álbum, enquanto é a dele que o Música mostra: serve
-    // aos FLAC dos álbuns que não estão no catálogo da Apple.
+    // A capa, uma vez por álbum: serve aos FLAC quando o processamento não acha
+    // o álbum. Das faixas do catálogo («URL track») o Música dá muitas vezes a
+    // da faixa anterior, ou nenhuma (o «Antics» dos Interpol, em 2026-11): a
+    // delas vem do catálogo, e chega quando chegar, se ainda se estiver a gravar.
     NSString *album = faixa[@"album"];
     if (album.length && ![self.albunsComCapa containsObject:album]) {
         [self.albunsComCapa addObject:album];
-        [self.audioCapture guardarCapa:ZPMusicCurrentArtworkData() doAlbum:album];
+        if ([faixa[@"classe"] isEqualToString:@"URL track"]) {
+            ZPAudioCapture *captura = self.audioCapture;
+            [ZPCatalogoDaApple capaDe:faixa[@"artista"] album:album titulo:faixa[@"titulo"] concluido:^(NSData *capa) {
+                [captura guardarCapa:capa doAlbum:album];
+            }];
+        } else {
+            [self.audioCapture guardarCapa:ZPMusicCurrentArtworkData() doAlbum:album];
+        }
     }
 }
 
@@ -11355,116 +11365,22 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
 // Há faixas em streaming — sobretudo as da reprodução automática, que não vêm
 // de um álbum aberto — de que o Música não dá capa nenhuma: «count of
 // artworks» é 0, por mais que se espere (visto em 2026-10, num Trifonov). Vai-se
-// então buscá-la ao catálogo da Apple pela pesquisa pública do iTunes, na loja
-// do país do Mac (é dela que o Música tira os nomes), a 600 px: primeiro o
-// artista e, entre os álbuns dele, o que tiver esse nome; depois, pesquisando
-// por texto, o álbum pelo artista e pelo nome; por fim, a faixa pelo artista e
-// pelo título, e dela o álbum com esse nome. O nome compara-se sem
-// maiúsculas nem acentos e, se assim não houver, também sem os sufixos de
-// edição («(Deluxe Version)», «- EP», «- Single»); entre os que servem, o do
-// mesmo artista passa à frente (há «Bloom» de mais de um). Sem nenhum fica a
-// imagem genérica: uma capa de outro disco engana mais do que nenhuma. Chega
-// mais tarde: só se põe se a faixa à vista ainda for a mesma.
-static const NSStringCompareOptions dobrar = NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch;
-
-// 2 se o nome do álbum é o mesmo (sem contar maiúsculas e acentos), 1 se só o
-// é sem os sufixos de edição, 0 se não.
-static NSInteger ZPMesmoNomeDeAlbum(NSString *a, NSString *b) {
-    if ([a compare:b options:dobrar] == NSOrderedSame) return 2;
-    NSString *(^simples)(NSString *) = ^NSString *(NSString *n) {
-        NSRegularExpression *sufixo = [NSRegularExpression regularExpressionWithPattern:
-            @"\\s*(?:[\\(\\[][^\\(\\)\\[\\]]*[\\)\\]]|-\\s*(?:EP|Single))\\s*$" options:NSRegularExpressionCaseInsensitive error:NULL];
-        for (NSUInteger i = 0; i < 3; i++) {
-            NSString *m = [sufixo stringByReplacingMatchesInString:n options:0 range:NSMakeRange(0, n.length) withTemplate:@""];
-            if ([m isEqualToString:n]) break;
-            n = m;
-        }
-        return n;
-    };
-    NSString *sa = simples(a), *sb = simples(b);
-    return sa.length && [sa compare:sb options:dobrar] == NSOrderedSame ? 1 : 0;
-}
-
+// então buscá-la ao catálogo da Apple (ver ZPCatalogoDaApple), na loja do país
+// do Mac, a 600 px. Sem nenhuma fica a imagem genérica: uma capa de outro disco
+// engana mais do que nenhuma. Chega mais tarde: só se põe se a faixa à vista
+// ainda for a mesma.
 - (void)procurarCapaDoMusicaNoCatalogo:(NSString *)artista album:(NSString *)album
                                 titulo:(NSString *)titulo faixa:(NSString *)chave {
     if (album.length == 0) return;
-    // O artista do Música é muitas vezes uma lista («Sumi Jo, Suyoen Kim &
-    // …»): o primeiro nome basta para a pesquisa.
-    NSString *primeiro = [[artista componentsSeparatedByCharactersInSet:
-                           [NSCharacterSet characterSetWithCharactersInString:@",&"]].firstObject
-                          stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet] ?: @"";
-    NSString *pais = [NSLocale.currentLocale objectForKey:NSLocaleCountryCode] ?: @"US";
-
-    // Os resultados de um pedido ao catálogo (search ou lookup), ou nil.
-    NSArray *(^pedir)(NSString *, NSDictionary *) = ^NSArray *(NSString *onde, NSDictionary *campos) {
-        NSURLComponents *c = [NSURLComponents componentsWithString:[@"https://itunes.apple.com/" stringByAppendingString:onde]];
-        NSMutableArray *itens = [NSMutableArray arrayWithObject:[NSURLQueryItem queryItemWithName:@"country" value:pais]];
-        [campos enumerateKeysAndObjectsUsingBlock:^(NSString *k, NSString *v, BOOL *parar) {
-            [itens addObject:[NSURLQueryItem queryItemWithName:k value:v]];
-        }];
-        c.queryItems = itens;
-        NSData *d = [NSData dataWithContentsOfURL:c.URL];
-        NSArray *res = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:NULL][@"results"] : nil;
-        return [res isKindOfClass:[NSArray class]] ? res : nil;
-    };
-
-    // Dos resultados, a capa do álbum com esse nome, o do mesmo artista à frente.
-    NSString *(^melhorCapa)(NSArray *) = ^NSString *(NSArray *res) {
-        NSString *melhor = nil;
-        NSInteger melhorPontos = 0;
-        for (NSDictionary *a in res) {
-            if (![a isKindOfClass:[NSDictionary class]] || ![a[@"collectionName"] isKindOfClass:[NSString class]]
-                || ![a[@"artworkUrl100"] isKindOfClass:[NSString class]]) continue;
-            NSInteger pontos = ZPMesmoNomeDeAlbum(a[@"collectionName"], album);
-            if (pontos == 0) continue;
-            NSString *dele = [a[@"artistName"] isKindOfClass:[NSString class]] ? a[@"artistName"] : @"";
-            if (primeiro.length && [dele rangeOfString:primeiro options:dobrar].location != NSNotFound) pontos += 2;
-            if (pontos > melhorPontos) { melhor = a[@"artworkUrl100"]; melhorPontos = pontos; }
-        }
-        return melhor;
-    };
-
-    NSString *(^capaExacta)(NSString *, NSString *, NSString *) = ^NSString *(NSString *termo, NSString *entidade, NSString *limite) {
-        return melhorCapa(pedir(@"search", @{ @"term": termo, @"entity": entidade, @"limit": limite }));
-    };
-
-    // Pelo artista: os álbuns dele, todos. É o que acha os discos de nomes
-    // comuns, que a pesquisa por texto enterra debaixo de outros («Alex G
-    // Trick» dava Radiohead e Rihanna). Há artistas com o mesmo nome (três
-    // «Alex G»): vêem-se os que tiverem exactamente esse, até três.
-    NSString *(^capaPeloArtista)(void) = ^NSString *(void) {
-        if (primeiro.length == 0) return nil;
-        NSUInteger vistos = 0;
-        for (NSDictionary *a in pedir(@"search", @{ @"term": primeiro, @"entity": @"musicArtist", @"limit": @"5" })) {
-            if (![a isKindOfClass:[NSDictionary class]] || ![a[@"artistName"] isKindOfClass:[NSString class]]
-                || [a[@"artistName"] compare:primeiro options:dobrar] != NSOrderedSame || !a[@"artistId"]) continue;
-            NSString *url = melhorCapa(pedir(@"lookup", @{ @"id": [a[@"artistId"] description], @"entity": @"album",
-                                                           @"limit": @"200" }));
-            if (url || ++vistos >= 3) return url;
-        }
-        return nil;
-    };
-
     __weak typeof(self) fraco = self;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        NSString *url = capaPeloArtista();
-        if (!url) url = capaExacta([NSString stringWithFormat:@"%@ %@", primeiro, album], @"album", @"10");
-        if (!url && titulo.length > 0) {
-            url = capaExacta([NSString stringWithFormat:@"%@ %@", primeiro, titulo], @"song", @"50");
+    [ZPCatalogoDaApple capaDe:artista album:album titulo:titulo concluido:^(NSData *dados) {
+        NSImage *capa = dados ? [[NSImage alloc] initWithData:dados] : nil;
+        __strong typeof(fraco) forte = fraco;
+        if (capa.size.width > 0 && forte.aMostrarOMusica && [forte.musicaFaixaMostrada isEqualToString:chave]) {
+            forte.coverArtView.image = capa;
+            [forte actualizarAPaginaDoMusica];
         }
-        if (!url) return;
-        url = [url stringByReplacingOccurrencesOfString:@"100x100bb" withString:@"600x600bb"];
-        NSData *img = [NSData dataWithContentsOfURL:[NSURL URLWithString:url]];
-        NSImage *capa = img ? [[NSImage alloc] initWithData:img] : nil;
-        if (capa.size.width <= 0) return;
-        dispatch_async(dispatch_get_main_queue(), ^{
-            __strong typeof(fraco) forte = fraco;
-            if (forte.aMostrarOMusica && [forte.musicaFaixaMostrada isEqualToString:chave]) {
-                forte.coverArtView.image = capa;
-                [forte actualizarAPaginaDoMusica];
-            }
-        });
-    });
+    }];
 }
 
 // A página «a tocar» também acompanha o Música: escreve-se a cada faixa nova,
