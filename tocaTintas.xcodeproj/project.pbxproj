@@ -21,6 +21,7 @@
 		1F1955342E4AAA1E00488F3A /* QuickLookUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FF2BC7E2E358EF200133BF3 /* QuickLookUI.framework */; };
 		1F1955352E4AAA2700488F3A /* QuickLook.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FF2BC7C2E358EA900133BF3 /* QuickLook.framework */; };
 		1F2614532C809B140041651D /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 1F2614552C809B140041651D /* Localizable.strings */; };
+		1F2E27723096E283001B0268 /* ZPCatalogoDaApple.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F2E27713096E283001B0268 /* ZPCatalogoDaApple.m */; };
 		1F2FB2BB2E494BE7008CD88C /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F2FB2BA2E494BE7008CD88C /* Foundation.framework */; };
 		1F2FB2BD2E494C00008CD88C /* UniformTypeIdentifiers.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F2FB2BC2E494C00008CD88C /* UniformTypeIdentifiers.framework */; };
 		1F37C8C52CD5446700346A66 /* cava in Resources */ = {isa = PBXBuildFile; fileRef = 1F37C8C42CD5446700346A66 /* cava */; };
@@ -125,6 +126,8 @@
 		1F2614502C8099760041651D /* pt-PT */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "pt-PT"; path = "pt-PT.lproj/Main.strings"; sourceTree = "<group>"; };
 		1F2614542C809B140041651D /* pt-PT */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.strings; lineEnding = 0; name = "pt-PT"; path = "pt-PT.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		1F2614562C809B260041651D /* en */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.strings; lineEnding = 0; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		1F2E27703096E283001B0268 /* ZPCatalogoDaApple.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPCatalogoDaApple.h; sourceTree = "<group>"; };
+		1F2E27713096E283001B0268 /* ZPCatalogoDaApple.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPCatalogoDaApple.m; sourceTree = "<group>"; };
 		1F2FB2BA2E494BE7008CD88C /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		1F2FB2BC2E494C00008CD88C /* UniformTypeIdentifiers.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UniformTypeIdentifiers.framework; path = System/Library/Frameworks/UniformTypeIdentifiers.framework; sourceTree = SDKROOT; };
 		1F37C8C42CD5446700346A66 /* cava */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = cava; sourceTree = "<group>"; };
@@ -275,6 +278,8 @@
 				1FA3F84730940D8500ACF01D /* ZPBarraDeProgresso.m */,
 				1FA3F84930949C2000ACF01D /* ZPPosGravacao.h */,
 				1FA3F84A30949C2000ACF01D /* ZPPosGravacao.m */,
+				1F2E27703096E283001B0268 /* ZPCatalogoDaApple.h */,
+				1F2E27713096E283001B0268 /* ZPCatalogoDaApple.m */,
 				1FBE64BB2CE37FD90092C6FA /* ZPAirPlay.h */,
 				1FBE64BC2CE37FD90092C6FA /* ZPAirPlay.m */,
 				1FC8C3EB2CE4254400271175 /* ZPAudioCapture.h */,
@@ -605,6 +610,7 @@
 				1FE43C333073B7A20030BCFC /* ZPEtiquetaDeslizante.m in Sources */,
 				1FE4A9A6E517F886FFB90E7F /* ZPLigacoesDoMusicaWindowController.m in Sources */,
 				1FA3F84830940D8500ACF01D /* ZPBarraDeProgresso.m in Sources */,
+				1F2E27723096E283001B0268 /* ZPCatalogoDaApple.m in Sources */,
 				1F7D75202C95DCAF0046E0AC /* M3UPlaylist.m in Sources */,
 				1FC8C3F22CE63CE500271175 /* ZPAirPlayStreamer.m in Sources */,
 				1FA3F84B30949C2000ACF01D /* ZPPosGravacao.m in Sources */,
