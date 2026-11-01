@@ -35,6 +35,7 @@ SOFTWARE.
 #import <CoreAudio/CATapDescription.h>
 #import <AudioToolbox/AudioToolbox.h>
 #import <CoreMotion/CoreMotion.h>
+#import <mach/mach_time.h>
 
 NSString * const kZPAudioCaptureWarningNotification = @"ZPAudioCaptureWarning";
 NSString * const kZPAudioCaptureProcessedNotification = @"ZPAudioCaptureProcessed";
@@ -266,7 +267,9 @@ NSDictionary *ZPMusicNowPlaying(void) {
              "end timeout"];
     }
     NSDictionary *erro = nil;
+    uint64_t antes = mach_absolute_time();
     NSAppleEventDescriptor *r = [pergunta executeAndReturnError:&erro];
+    uint64_t depois = mach_absolute_time();
     if (!r || r.numberOfItems < 1) {
         NSLog(@"[Música na janela] O Música não respondeu: %@", erro[NSAppleScriptErrorMessage] ?: erro);
         return nil;
@@ -287,7 +290,11 @@ NSDictionary *ZPMusicNowPlaying(void) {
               // «URL track» é uma faixa do catálogo tocada sem estar na
               // biblioteca: o Música não lhe guarda contagem.
               @"classe":  (r.numberOfItems >= 10 ? [r descriptorAtIndex:10].stringValue : nil) ?: @"",
-              @"disco":   @(r.numberOfItems >= 11 ? [r descriptorAtIndex:11].int32Value : 0) };
+              @"disco":   @(r.numberOfItems >= 11 ? [r descriptorAtIndex:11].int32Value : 0),
+              // O relógio do anfitrião antes e depois da pergunta, para a TOC
+              // (ver -[ZPAudioCapture tramaDoHost:]).
+              @"hostAntes":  @(antes),
+              @"hostDepois": @(depois) };
 }
 
 NSData *ZPMusicCurrentArtworkData(void) {
@@ -424,6 +431,10 @@ static void ZPPublicarEstadoDaGrelha(ZPEstadoDaGrelha estado);   // com o vigia 
     BOOL _haTempo;              // já chegou um bloco com tempo
     double _proximoTempo;       // o tempo em amostras esperado no bloco seguinte, ou < 0
     uint64_t _proximoHost;      // o tempo do anfitrião esperado, ou 0
+    // O último bloco com tempo do anfitrião: a trama do ficheiro em que começou
+    // e a hora a que entrou (ver -tramaDoHost:).
+    uint64_t _hostDoBloco;
+    unsigned long long _tramaDoBloco;
 }
 
 - (instancetype)init {
@@ -493,6 +504,7 @@ static void ZPPublicarEstadoDaGrelha(ZPEstadoDaGrelha estado);   // com o vigia 
         self->_capas = [NSMutableDictionary dictionary];
         self->_tramasPerdidas = 0;
         self->_haTempo = NO;
+        self->_hostDoBloco = 0;
     });
 
     NSMutableData *reserva = [NSMutableData dataWithLength:kZPWavHeaderSize];
@@ -770,6 +782,10 @@ static NSURL *ZPFicheiroDaTOC(NSURL *wav) {
         }
     }
     _haTempo = YES;
+    if (host) {
+        _hostDoBloco = host;
+        _tramaDoBloco = self.recordDataBytes / (2 * sizeof(float));
+    }
     _proximoTempo = tempo >= 0.0 ? tempo + tramas : -1.0;
     _proximoHost = host ? host + [AVAudioTime hostTimeForSeconds:tramas / frequencia] : 0;
 }
@@ -798,18 +814,41 @@ static NSURL *ZPFicheiroDaTOC(NSURL *wav) {
     return lista;
 }
 
+// A trama do ficheiro que entrou à hora `host` do anfitrião, contada a partir
+// do último bloco, ou -1 sem tempo. Antes, a TOC levava a trama já escrita
+// quando chegava a resposta do Música: andava aos saltos de um bloco (100 ms
+// pelo tap) e com a demora da pergunta dentro (os degraus de 100 ms do
+// «Interpol», 2026-11-01). Na ioQueue.
+- (long long)tramaDoHost:(NSNumber *)host {
+    if (!host || !_hostDoBloco || self.recordSampleRate <= 0.0) return -1;
+    double segundos = [AVAudioTime secondsForHostTime:host.unsignedLongLongValue]
+                      - [AVAudioTime secondsForHostTime:_hostDoBloco];
+    return (long long)_tramaDoBloco + llround(segundos * self.recordSampleRate);
+}
+
+// A trama de uma ficha do Música: a do relógio antes da pergunta (a posição é
+// lida logo no início: quando a pergunta demora mais, a posição não muda), ou,
+// sem relógio, a já escrita. Na ioQueue.
+- (long long)tramaDaFicha:(NSDictionary *)faixa escrita:(unsigned long long)escrita {
+    long long t = [self tramaDoHost:faixa[@"hostAntes"]];
+    return t >= 0 ? t : (long long)escrita;
+}
+
 - (void)marcarFaixa:(NSDictionary *)faixa {
     if (!self.isRecording || !faixa) return;
     NSDate *quando = [NSDate date];
     dispatch_async(self.ioQueue, ^{
         if (!self.recordFileHandle) return;
         NSMutableDictionary *marca = [faixa mutableCopy];
-        unsigned long long trama = self.recordDataBytes / (2 * sizeof(float));
+        [marca removeObjectsForKeys:@[ @"hostAntes", @"hostDepois" ]];
+        unsigned long long escrita = self.recordDataBytes / (2 * sizeof(float));
+        long long trama = [self tramaDaFicha:faixa escrita:escrita];
         marca[@"trama"] = @(trama);
+        marca[@"tramaEscrita"] = @(escrita);
         marca[@"quando"] = @(quando.timeIntervalSince1970);
         double posicao = [faixa[@"posicao"] doubleValue];
         if (self.recordSampleRate > 0.0) {
-            long long inicio = (long long)trama - llround(posicao * self.recordSampleRate);
+            long long inicio = trama - llround(posicao * self.recordSampleRate);
             marca[@"inicioEstimado"] = @(inicio);
         }
         [self->_marcasDeFaixa addObject:marca];
@@ -820,9 +859,15 @@ static NSURL *ZPFicheiroDaTOC(NSURL *wav) {
     if (!self.isRecording || ![faixa[@"pid"] length]) return;
     dispatch_async(self.ioQueue, ^{
         if (!self.recordFileHandle) return;
-        unsigned long long trama = self.recordDataBytes / (2 * sizeof(float));
-        [self->_posicoes addObject:@{ @"trama": @(trama), @"posicao": faixa[@"posicao"] ?: @0, @"pid": faixa[@"pid"],
-                                      @"estado": faixa[@"estado"] ?: @"", @"demora": @(demora) }];
+        unsigned long long escrita = self.recordDataBytes / (2 * sizeof(float));
+        NSMutableDictionary *p = [@{ @"trama": @([self tramaDaFicha:faixa escrita:escrita]),
+                                     @"tramaEscrita": @(escrita),
+                                     @"posicao": faixa[@"posicao"] ?: @0, @"pid": faixa[@"pid"],
+                                     @"estado": faixa[@"estado"] ?: @"", @"demora": @(demora) } mutableCopy];
+        // Com relógio: a do fim da pergunta, para se ver qual das duas bate.
+        long long depois = [self tramaDoHost:faixa[@"hostDepois"]];
+        if (depois >= 0) p[@"tramaDepois"] = @(depois);
+        [self->_posicoes addObject:p];
     });
 }
 

@@ -636,12 +636,22 @@ static NSString *ZPCreditoDoMusicBrainz(NSArray<NSDictionary *> *credito) {
 // encravamento do Música (os Dead Kennedys de 2026-10-31): o início que dá
 // salta, e a faixa tem um buraco — não sai, e diz-se onde. As faixas seguintes
 // começam outra cadeia.
-static const double kZPDesvioDaCadeia = 0.30;      // s: acima disto, outra cadeia
-static const double kZPSilencioAntes = 0.15;       // s: o silêncio pode estar até isto antes das posições…
-static const double kZPSilencioDepois = 0.08;      // s: …e até isto depois (as posições chegam tarde)
+//
+// Desde 2026-11-01 as posições trazem a trama pelo relógio do anfitrião, à
+// hora a que se fez a pergunta («tramaDepois» na TOC diz que é dessas). Antes
+// traziam a trama já escrita quando chegava a resposta, aos saltos de um
+// bloco (100 ms) e com a demora da pergunta dentro: os limites largos ficam
+// para as TOC antigas.
+typedef struct {
+    double desvioDaCadeia;     // s: acima disto, outra cadeia (e um salto destes é uma interrupção)
+    double silencioAntes;      // s: o silêncio pode estar até isto antes das posições…
+    double silencioDepois;     // s: …e até isto depois
+    double atrasoDasPosicoes;  // s: o que as posições chegam tarde, em mediana, sem silêncio que acerte
+} ZPLimitesDasPosicoes;
+static const ZPLimitesDasPosicoes kZPPeloRelogio = { 0.10, 0.10, 0.10, 0.0 };   // atraso por medir
+static const ZPLimitesDasPosicoes kZPPelaEscrita = { 0.30, 0.15, 0.08, 0.025 }; // Turn On the Bright Lights, 2026-11: 24 ms
 static const double kZPSilencioMinimo = 0.01;      // s: os mais curtos são da própria música
 static const double kZPDemoraMaxima = 0.25;        // s: perguntas ao Música mais lentas não contam
-static const double kZPAtrasoDasPosicoes = 0.025;  // s: o que chegam tarde, em mediana (Turn On the Bright Lights, 2026-11: 24 ms)
 
 // Só com v não vazio. Nada de NaN neste ficheiro: compila-se com -Ofast, que
 // liga o -ffast-math, e aí o compilador pode tirar os isnan().
@@ -663,6 +673,9 @@ static long long ZPDeMilesimas(long long v) {
 static void ZPCortarPelaTOC(const ZPGravacao *g, NSArray<NSMutableDictionary *> *faixas, NSDictionary *toc) {
     const double taxa = g->taxa;
     const long long taxaInteira = llround(taxa);
+    NSArray<NSDictionary *> *posicoes = toc[@"posicoes"] ?: @[];
+    const BOOL peloRelogio = posicoes.count && posicoes.firstObject[@"tramaDepois"] != nil;
+    const ZPLimitesDasPosicoes L = peloRelogio ? kZPPeloRelogio : kZPPelaEscrita;
     // Os inícios que cada faixa dá, por ordem. Uma posição 0 é do arranque, com
     // o Música ainda sem som (no «Untitled» dava 0,72 s antes do certo).
     NSMutableArray<NSMutableArray<NSNumber *> *> *inicios = [NSMutableArray array];
@@ -673,7 +686,7 @@ static void ZPCortarPelaTOC(const ZPGravacao *g, NSArray<NSMutableDictionary *> 
     }
     NSMutableArray<NSDictionary *> *pontos = [NSMutableArray array];
     for (NSMutableDictionary *f in faixas) [pontos addObject:f[@"marca"]];
-    [pontos addObjectsFromArray:toc[@"posicoes"] ?: @[]];
+    [pontos addObjectsFromArray:posicoes];
     [pontos sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
         return [a[@"trama"] compare:b[@"trama"]];
     }];
@@ -700,9 +713,9 @@ static void ZPCortarPelaTOC(const ZPGravacao *g, NSArray<NSMutableDictionary *> 
         NSUInteger ate = s.count;
         for (NSUInteger k = 1; k < s.count; ++k) {
             double salto = s[k].doubleValue - s[k-1].doubleValue;
-            if (fabs(salto) > kZPDesvioDaCadeia * taxa) {
+            if (fabs(salto) > L.desvioDaCadeia * taxa) {
                 faixas[i][@"interrompida"] = [NSString stringWithFormat:
-                    @"interrompida: o Música %@ %.1f s entre os %@ e os %@ do ficheiro (pausa ou encravamento), e a faixa tem um buraco",
+                    @"interrompida: o Música %@ %.2f s entre os %@ e os %@ do ficheiro (pausa ou encravamento), e a faixa tem um buraco",
                     salto > 0 ? @"parou" : @"saltou", fabs(salto) / taxa,
                     ZPTempo([tramasDosPontos[i][k-1] longLongValue], taxa), ZPTempo([tramasDosPontos[i][k] longLongValue], taxa)];
                 ate = k;
@@ -728,7 +741,7 @@ static void ZPCortarPelaTOC(const ZPGravacao *g, NSArray<NSMutableDictionary *> 
             [somas addObject:@(c)];
             if (faixas[i][@"interrompida"] || i + 1 >= faixas.count) break;
             NSNumber *s = ZPOuNada(inicioDaFaixa[i + 1]);
-            if (s && desvios.count && fabs(s.doubleValue - c - ZPMediana(desvios)) > kZPDesvioDaCadeia * taxa) break;
+            if (s && desvios.count && fabs(s.doubleValue - c - ZPMediana(desvios)) > L.desvioDaCadeia * taxa) break;
             ++i;
             for (NSNumber *x in inicios[i]) [desvios addObject:@(x.doubleValue - c)];
         }
@@ -755,7 +768,7 @@ static void ZPCortarPelaTOC(const ZPGravacao *g, NSArray<NSMutableDictionary *> 
             if (e >= g->n || e - sil[0].doubleValue < kZPSilencioMinimo * taxa) continue;
             for (NSUInteger k = 0; k < somas.count; ++k) {
                 double d = o - (e - somas[k].doubleValue);   // > 0: as posições põem-na depois
-                if (d <= kZPSilencioAntes * taxa && d >= -kZPSilencioDepois * taxa && fabs(d) < melhorDesvio) {
+                if (d <= L.silencioAntes * taxa && d >= -L.silencioDepois * taxa && fabs(d) < melhorDesvio) {
                     achou = YES;
                     melhorDesvio = fabs(d);
                     melhor = e - somas[k].doubleValue;
@@ -774,9 +787,11 @@ static void ZPCortarPelaTOC(const ZPGravacao *g, NSArray<NSMutableDictionary *> 
                       pelas, (o - melhor) * 1000.0 / taxa];
             om = fimDoMelhor * 1000 - milesimas[fronteira].longLongValue;
         } else if (desvios.count) {
-            om = llround((o - kZPAtrasoDasPosicoes * taxa) * 1000.0);
-            ancora = [NSString stringWithFormat:@"pelas %@, menos %.0f ms de atraso típico (±20 ms: nenhum silêncio bate)",
-                      pelas, kZPAtrasoDasPosicoes * 1000.0];
+            om = llround((o - L.atrasoDasPosicoes * taxa) * 1000.0);
+            ancora = peloRelogio
+                ? [NSString stringWithFormat:@"pelas %@ (pelo relógio; nenhum silêncio bate)", pelas]
+                : [NSString stringWithFormat:@"pelas %@, menos %.0f ms de atraso típico (±20 ms: nenhum silêncio bate)",
+                   pelas, L.atrasoDasPosicoes * 1000.0];
         } else {
             om = llround(o) * 1000;
             ancora = [NSString stringWithFormat:@"pel%@", pelas];   // «pelo primeiro som»
