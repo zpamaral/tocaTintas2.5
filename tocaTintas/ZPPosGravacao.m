@@ -1047,11 +1047,22 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
                 por(@"REPLAYGAIN_ALBUM_PEAK", [NSString stringWithFormat:@"%.8f", picoDoAlbum]);
             }
 
-            NSString *base = discos > 1 ? [NSString stringWithFormat:@"%ld-%02ld %@", disco, numero, ZPNomeDeFicheiro(titulo)]
-                                        : [NSString stringWithFormat:@"%02ld %@", numero, ZPNomeDeFicheiro(titulo)];
-            NSString *caminho = [pasta.path stringByAppendingPathComponent:[base stringByAppendingPathExtension:@"flac"]];
+            // Mais de um disco: cada um na sua pasta CD01, CD02…, como na
+            // fonoteca, com um albumart_backup que aponta para o do álbum.
+            NSString *base = [NSString stringWithFormat:@"%02ld %@", numero, ZPNomeDeFicheiro(titulo)];
+            NSString *pastaDoDisco = pasta.path;
+            if (discos > 1) {
+                pastaDoDisco = [pasta.path stringByAppendingPathComponent:[NSString stringWithFormat:@"CD%02ld", disco]];
+                [[NSFileManager defaultManager] createDirectoryAtPath:pastaDoDisco withIntermediateDirectories:YES attributes:nil error:NULL];
+                NSString *atalho = [pastaDoDisco stringByAppendingPathComponent:@"albumart_backup"];
+                if ([[NSFileManager defaultManager] fileExistsAtPath:[pasta.path stringByAppendingPathComponent:@"albumart_backup"]]
+                    && ![[NSFileManager defaultManager] attributesOfItemAtPath:atalho error:NULL]) {
+                    [[NSFileManager defaultManager] createSymbolicLinkAtPath:atalho withDestinationPath:@"../albumart_backup" error:NULL];
+                }
+            }
+            NSString *caminho = [pastaDoDisco stringByAppendingPathComponent:[base stringByAppendingPathExtension:@"flac"]];
             for (int k = 2; [[NSFileManager defaultManager] fileExistsAtPath:caminho]; ++k) {
-                caminho = [pasta.path stringByAppendingPathComponent:[NSString stringWithFormat:@"%@ (%d).flac", base, k]];
+                caminho = [pastaDoDisco stringByAppendingPathComponent:[NSString stringWithFormat:@"%@ (%d).flac", base, k]];
             }
             long long ini = [f[@"inicio"] longLongValue], fim = [f[@"fim"] longLongValue];
             NSString *falha = nil;
@@ -1061,7 +1072,7 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
                              : [f[@"fora24"] longLongValue] == 0 ? @"24 bits exactos"
                              : [NSString stringWithFormat:@"%@ tramas fora da grelha", f[@"fora24"]];
             [rel addObject:[NSString stringWithFormat:@"  %@  %@ a %@ (%@)  %@; %@; %+.2f dB%@",
-                            caminho.lastPathComponent, ZPTempo(ini, g.taxa), ZPTempo(fim, g.taxa), ZPTempo(fim - ini, g.taxa),
+                            [caminho substringFromIndex:pasta.path.length + 1], ZPTempo(ini, g.taxa), ZPTempo(fim, g.taxa), ZPTempo(fim - ini, g.taxa),
                             f[@"como"], grelha, ganho, bem ? @"" : [NSString stringWithFormat:@"  — FALHOU: %@", falha]]];
         }
         if (erudita) [rel addObject:@"Erudita: os compositores, os intérpretes e os títulos vêm da Apple e têm de ser revistos (convenção da fonoteca)."];

@@ -8,8 +8,9 @@
 #import <Foundation/Foundation.h>
 
 /// Do «Recording_….wav» e do rascunho da TOC ao lado dele («….toc.json») aos
-/// FLAC de cada faixa, em <raiz>/<Artista do álbum>/<Álbum>/NN Título.flac, à
-/// espera de aprovação:
+/// FLAC de cada faixa, em <raiz>/<Artista do álbum>/<Álbum>/NN Título.flac (com
+/// mais de um disco, em <Álbum>/CD01/, CD02/…, cada uma com um albumart_backup
+/// que aponta para o do álbum), à espera de aprovação:
 ///
 ///   1. as rampas do Música junto aos silêncios digitais desfeitas, só quando
 ///      o ganho medido no próprio ficheiro põe todas as amostras de novo na
