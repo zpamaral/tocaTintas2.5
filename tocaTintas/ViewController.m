@@ -7840,6 +7840,22 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 
 #pragma mark - HTML ”Now Playing“
 
+// O ícone da página «now_playing» dentro do próprio HTML, como data: URI, para
+// que não dependa de haver images/icone.png no servidor. É o icone.png do
+// livro de ajuda, tal qual (o mesmo ficheiro que está em ~/Sites/images).
+// Lido uma vez; nil se faltar.
+static NSString *ZPIconeDaPaginaEmDataURI(void) {
+    static NSString *uri;
+    static dispatch_once_t umaVez;
+    dispatch_once(&umaVez, ^{
+        NSString *caminho = [[NSBundle mainBundle] pathForResource:@"icone" ofType:@"png"
+                                                       inDirectory:@"tocaTintas.help/Contents/Resources/pt-PT.lproj/imagens"];
+        NSData *png = caminho ? [NSData dataWithContentsOfFile:caminho] : nil;
+        if (png.length) uri = [@"data:image/png;base64," stringByAppendingString:[png base64EncodedStringWithOptions:0]];
+    });
+    return uri;
+}
+
 - (void)generateNowPlayingPage {
     // Get the data from the UI elements
     // Declare variables to hold UI data
@@ -7850,6 +7866,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     __block NSURL *trackURL = nil;
     __block NSNumber *playCount = nil;
     __block NSString *contagemDoMusica = nil;
+    NSString *icone = ZPIconeDaPaginaEmDataURI();
 
     // Access UI elements on the main thread
     dispatch_sync(dispatch_get_main_queue(), ^{
@@ -8029,8 +8046,9 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     @"    <meta property=\"og:image:height\" content=\"150\">\n"
     @"    <meta property=\"og:url\" content=\"https://zpsurfistaprateadopreto.local/~amaral/now_playing.html\">\n"
     @"    <meta property=\"og:type\" content=\"music.song\">\n"
-    @"    <title>tocaTintas</title>\n"
-    @"    <link rel=\"icon\" type=\"image/png\" href=\"images/icone.png\">\n"
+    @"    <title>tocaTintas</title>\n"];
+    [htmlContent appendFormat:@"    <link rel=\"icon\" type=\"image/png\" href=\"%@\">\n", icone ?: @"images/icone.png"];
+    [htmlContent appendString:
     @"\n"
     @"    <style>\n"
     @"        body {\n"
