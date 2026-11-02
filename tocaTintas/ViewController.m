@@ -8030,7 +8030,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     @"    <meta property=\"og:url\" content=\"https://zpsurfistaprateadopreto.local/~amaral/now_playing.html\">\n"
     @"    <meta property=\"og:type\" content=\"music.song\">\n"
     @"    <title>tocaTintas</title>\n"
-    @"    <link rel=\"icon\" type=\"image/png\" href=\"images/pedro-logotipo-caixa.png\">\n"
+    @"    <link rel=\"icon\" type=\"image/png\" href=\"images/icone.png\">\n"
     @"\n"
     @"    <style>\n"
     @"        body {\n"
