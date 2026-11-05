@@ -11385,6 +11385,11 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
 
     self.aMostrarOMusica = YES;
     self.musicaATocar = [m[@"estado"] isEqualToString:@"playing"];
+    // Com o Música à vista, o ⏸️ é dele, e o verde também: pinta-se pelo
+    // estado que o Música dá, venha a pausa do botão, do Música ou do teclado.
+    // Só o aspecto — o isPlaybackPaused é do tocaTintas, e posto a YES aqui
+    // faria o -isPlaybackEngaged largar o Música.
+    [self updatePauseButtonAppearance:[m[@"estado"] isEqualToString:@"paused"]];
     self.musicaPosicao = [m[@"posicao"] doubleValue];
     self.musicaDuracao = [m[@"duracao"] doubleValue];
     self.musicaQuando = [NSDate date];
@@ -11584,6 +11589,9 @@ static NSString * const kZPAudicaoDoCatalogoKey = @"ZPAudicaoDoCatalogo";
     self.aMostrarOMusica = NO;
     self.musicaFaixaMostrada = nil;
     self.musicaFalhas = 0;
+    // A janela volta ao tocaTintas, e o ⏸️ com ela: o verde de uma pausa do
+    // Música não pode ficar.
+    [self updatePauseButtonAppearance:self.isPlaybackPaused];
 }
 
 #pragma mark - AppleScript
