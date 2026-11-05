@@ -11558,7 +11558,12 @@ static NSString * const kZPAudicaoDoCatalogoKey = @"ZPAudicaoDoCatalogo";
 // catálogo o Música dá 0, nas da biblioteca o verdadeiro.
 - (void)lerContagemDoCatalogo:(NSDictionary *)f {
     NSString *chave = ZPChaveDoMusica(f);
-    NSArray *args = @[f[@"artista"] ?: @"", f[@"album"] ?: @"", f[@"titulo"] ?: @"", @([f[@"faixa"] integerValue]),
+    // Em NFC, como a base: o SQLite compara byte a byte, e o Música tanto dá
+    // «ö» composto como decomposto, conforme a etiqueta. Com as duas formas
+    // misturadas, a Zauberflöte do Östman aparecia com 0 audições tendo 2
+    // (2026-11-05).
+    NSString *(^nfc)(NSString *) = ^NSString *(NSString *s) { return s.precomposedStringWithCanonicalMapping ?: @""; };
+    NSArray *args = @[nfc(f[@"artista"]), nfc(f[@"album"]), nfc(f[@"titulo"]), @([f[@"faixa"] integerValue]),
                       @([f[@"duracao"] doubleValue])];
     dispatch_async(self.filaDaFonoteca, ^{
         if (![self abrirFonoteca]) return;
