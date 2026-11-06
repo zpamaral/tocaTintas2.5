@@ -63,14 +63,14 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 </head>
 <body>
 <div class="envolve">
-<nav><a href="#nome">Nome</a><a href="#sinopse">Sinopse</a><a href="#descricao">Descrição</a><a href="#janela-principal">Janela principal</a><a href="#formatos">Formatos</a><a href="#capas">Capas</a><a href="#fonoteca">Fonoteca</a><a href="#base-da-fonoteca">Base de dados da fonoteca</a><a href="#audicoes-do-musica">Audições do Música</a><a href="#listas-m3u">Listas M3U e M3U8</a><a href="#cd-de-audio">CD de áudio</a><a href="#caminho-do-som">O caminho do som</a><a href="#auscultadores">Auscultadores</a><a href="#airplay">AirPlay</a><a href="#sincronizacao">Sincronização</a><a href="#emparelhamento">Emparelhamento</a><a href="#gravacao">Gravação</a><a href="#applescript">AppleScript</a><a href="#histograma">Histograma</a><a href="#notificacoes">Notificações</a><a href="#pagina-a-tocar">Página «a tocar»</a><a href="#extensoes">Extensões do Finder</a><a href="#acerca">Acerca e versão</a><a href="#ficheiros">Ficheiros</a><a href="#requisitos">Requisitos</a><a href="#ver-tambem">Ver também</a></nav>
+<nav><a href="#nome">Nome</a><a href="#sinopse">Sinopse</a><a href="#descricao">Descrição</a><a href="#janela-principal">Janela principal</a><a href="#formatos">Formatos</a><a href="#capas">Capas</a><a href="#fonoteca">Fonoteca</a><a href="#base-da-fonoteca">Base de dados da fonoteca</a><a href="#audicoes-do-musica">Audições do Música</a><a href="#listas-m3u">Listas M3U e M3U8</a><a href="#cd-de-audio">CD de áudio</a><a href="#caminho-do-som">O caminho do som</a><a href="#auscultadores">Auscultadores</a><a href="#airpods">AirPods</a><a href="#airplay">AirPlay</a><a href="#sincronizacao">Sincronização</a><a href="#emparelhamento">Emparelhamento</a><a href="#gravacao">Gravação</a><a href="#applescript">AppleScript</a><a href="#histograma">Histograma</a><a href="#notificacoes">Notificações</a><a href="#pagina-a-tocar">Página «a tocar»</a><a href="#extensoes">Extensões do Finder</a><a href="#acerca">Acerca e versão</a><a href="#ficheiros">Ficheiros</a><a href="#requisitos">Requisitos</a><a href="#ver-tambem">Ver também</a></nav>
 <main>
 <header class="topo">
 <img src="imagens/icone.png" alt="Ícone do tocaTintas" width="96" height="96">
 <div>
 <h1>tocaTintas</h1>
 <p class="sub">tocaTintas 4.1.0 (Manual do utente)</p>
-<p class="sub">Outubro de 2026</p>
+<p class="sub">Novembro de 2026</p>
 </div>
 </header>
 
@@ -93,6 +93,7 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <p>Além disso, faz o que os leitores correntes não fazem:</p>
 <ul>
 <li>crossfeed <a href="https://bs2b.sourceforge.net/">bs2b</a> e equalização <a href="https://github.com/jaakkopasanen/AutoEq">AutoEQ</a> para os auscultadores;</li>
+<li>áudio espacial nos AirPods, com o tocaTintas no «A tocar» do sistema e comandado pelas hastes e pelas teclas multimédia;</li>
 <li>transmissão para receptores AirPlay e AirPlay 2, como o HomePod e a Apple TV;</li>
 <li>leitura de CDs, com os nomes vindos do <a href="https://musicbrainz.org/">MusicBrainz</a> e do <a href="https://gnudb.org/">gnudb</a>;</li>
 <li>contagem das audições numa base de dados da fonoteca, que junta também o que se ouve na aplicação Música;</li>
@@ -327,6 +328,7 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <figcaption>Fig. 2 — a topologia de áudio. Os três programas auxiliares vêm dentro do <code>tocaTintas.app</code>.</figcaption>
 </figure>
 <p>Por isso, o tratamento dos auscultadores não afecta o que vai para o AirPlay, e a normalização do AirPlay não afecta o que vai para os auscultadores. Nas colunas do Mac, o som passa sempre sem tratamento.</p>
+<p>A excepção são os auscultadores Bluetooth, como os AirPods: com eles como saída do sistema, o som vai directo para lá e o BlackHole só recebe uma cópia, para o histograma (ver <a href="#airpods"><strong>AIRPODS</strong></a>).</p>
 <p class="rotulo"><strong>frequência de amostragem</strong></p>
 <p>O BlackHole trabalha a uma única frequência, a que estiver definida na <strong>Configuração de Áudio MIDI</strong>, e tudo o que o Mac toca é convertido para ela antes de lá entrar. A <strong>44,1 kHz</strong>, a frequência dos CDs, a fonoteca passa sem conversão nenhuma, e é essa a frequência para o uso de todos os dias. As outras servem para gravar (ver <a href="#gravacao"><strong>GRAVAÇÃO</strong></a>).</p>
 <p>Os três auxiliares seguem a frequência do BlackHole. O <strong>bs2b_bridge</strong> lê-a ao arrancar e escreve-a na configuração do CamillaDSP, que de outro modo forçaria o BlackHole para a sua própria frequência e desfaria qualquer mudança. O <strong>cava</strong> abre o BlackHole à frequência dele. O caminho do AirPlay converte-a para a do receptor (ver <a href="#airplay"><strong>AIRPLAY</strong></a>). Mudar a frequência com o tocaTintas aberto obriga a ponte a reiniciar, e o som dos auscultadores cala-se por um instante.</p>
@@ -344,6 +346,28 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <h3>Equalização</h3>
 <p>O crossfeed imita a cabeça, e a equalização corrige os auscultadores. No separador <strong>Auscultadores</strong> escolhem-se a marca e o modelo entre 523 correcções do <a href="https://github.com/jaakkopasanen/AutoEq">projecto AutoEQ</a>, de 106 marcas, para o alvo Harman over-ear. Todas foram medidas por <a href="https://github.com/jaakkopasanen/AutoEq/tree/master/results/oratory1990">oratory1990</a>, excepto a do Sony MDR-V600, que vem da Innerfidelity. A do Sony MDR-7506 vem embutida.</p>
 <p>Para acrescentar outra, põe-se o ficheiro <code>ParametricEQ.txt</code> em <code>~/Library/Application Support/tocaTintas/eq</code>, na raiz ou numa subpasta com o nome da marca. A linha <strong>Preamp</strong> é lida e respeitada, e é ela que impede o reforço de graves de saturar a saída.</p>
+
+<h2 id="airpods">AirPods</h2>
+<p>Com uns AirPods, ou outros auscultadores Bluetooth, como saída do sistema, o tocaTintas toca directamente para eles. O tratamento é o dos próprios AirPods: a equalização, o cancelamento de ruído e o áudio espacial. O crossfeed e a equalização AutoEQ não se aplicam, e o botão dos auscultadores não tem efeito.</p>
+<h3>O «A tocar» do sistema</h3>
+<p>O tocaTintas aparece no «A tocar» do Centro de Controlo e do menu, com o título, o artista, o álbum, a capa e o tempo decorrido. Isto vale para qualquer saída, e não só para os AirPods. Daí, e das teclas multimédia do teclado, chegam tocar, pausa, parar, seguinte e anterior. Os saltos dentro da faixa não estão disponíveis.</p>
+<p>Nos AirPods, as hastes comandam o tocaTintas:</p>
+<ul>
+<li><strong>um aperto</strong>, em qualquer das hastes, pausa e retoma;</li>
+<li><strong>dois apertos</strong> passam à faixa seguinte;</li>
+<li><strong>três apertos</strong> voltam à anterior;</li>
+<li><strong>tirar um auricular do ouvido</strong> pausa.</li>
+</ul>
+<p>Com o Música na janela, estes comandos vão para o Música, como os botões (ver <a href="#janela-principal"><strong>JANELA PRINCIPAL</strong></a>).</p>
+<h3>Áudio espacial</h3>
+<p>O «Espacializar estéreo» dos AirPods, com e sem seguimento da cabeça, só fica disponível se o leitor o pedir expressamente. O leitor habitual do tocaTintas não o pode pedir. Por isso, com a saída em Bluetooth, as faixas tocam por outro motor, que entrega o som ao sistema em blocos e pede a espacialização do estéreo. Encontra-se no menu do som ou no Centro de Controlo, carregando em <strong>›</strong> ao lado dos AirPods.</p>
+<p>O motor escolhe-se no início de cada faixa. Se a saída mudar a meio, dos AirPods para a cavilha ou o contrário, o tocaTintas troca de motor e continua no mesmo ponto, sem parar a faixa.</p>
+<p>O motor novo toca FLAC, ALAC, AAC, MP3, WAV e AIFF. O WavPack, o Monkey’s Audio e o Opus continuam pelo caminho de sempre, sem áudio espacial. O ReplayGain não se aplica, tal como nos outros auscultadores, porque só o AirPlay o usa.</p>
+<h3>O histograma</h3>
+<p>O som não passa pelo BlackHole, e o cava ficaria sem nada para ler. Por isso, o motor envia ao mesmo tempo uma cópia de cada bloco para o BlackHole, com o mesmo relógio. As barras acompanham o que se ouve nos AirPods, sem atraso a acertar. Se o BlackHole estiver silenciado, a cópia chega a zeros e o histograma fica parado. Isso acontece, por exemplo, depois de se carregar na tecla de silenciar com ele como saída.</p>
+<h3>Passagem automática</h3>
+<p>É o macOS que passa o som para os AirPods quando se põem nos ouvidos. Com música a tocar, ele só o faz se o som estiver a sair pelas colunas do Mac. Com auscultadores na cavilha, os AirPods não tiram o som, e escolhem-se à mão no menu do som.</p>
+<p>A ponte dos auscultadores mantém o CamillaDSP sempre activo, mesmo em pausa, e o macOS conta isso como música a tocar. Se o sistema ficar convencido de que a rota é Bluetooth quando já não é, deixa de passar o som automaticamente enquanto o tocaTintas estiver aberto. Isto aconteceu uma vez, depois de várias trocas manuais. Desfaz-se com uma passagem com o tocaTintas fechado, ou com <code>sudo killall audioaccessoryd</code>.</p>
 
 <h2 id="airplay">AirPlay</h2>
 <p>A transmissão é feita pelo <strong>raop_play</strong>, que vem dentro da aplicação e fala os dois protocolos: o AirPlay 1, para os receptores antigos, e o AirPlay 2, para os que só aceitam esse, como o HomePod desde o seu sistema 27. O tocaTintas escolhe o protocolo pelo que o receptor anuncia em <code>/info</code>.</p>
@@ -497,6 +521,7 @@ end repeat</code></pre>
 
 <h2 id="histograma">Histograma</h2>
 <p>O histograma é desenhado a partir do <a href="https://github.com/karlstav/cava"><strong>cava</strong></a> 1.0.0, que vem dentro da aplicação, lê o BlackHole e entrega as barras por um FIFO. Tem uma alteração: o <code>portaudio.c</code> abre o aparelho com dois canais, porque os 16 canais do BlackHole estragariam o desenho.</p>
+<p>Com os AirPods como saída, o som não passa pelo BlackHole, e o tocaTintas manda-lhe uma cópia para o histograma (ver <a href="#airpods"><strong>AIRPODS</strong></a>).</p>
 
 <h2 id="notificacoes">Notificações</h2>
 <p>O tocaTintas publica seis notificações:</p>
@@ -564,7 +589,7 @@ end repeat</code></pre>
 <h2 id="requisitos">Requisitos</h2>
 <ul>
 <li>macOS 27 ou posterior.</li>
-<li>O BlackHole como saída do sistema, para o tratamento dos auscultadores, o AirPlay, o histograma e a gravação.</li>
+<li>O BlackHole como saída do sistema, para o tratamento dos auscultadores, o AirPlay, o histograma e a gravação. Com os AirPods, a saída são eles, e o BlackHole continua instalado para o histograma.</li>
 <li>Acesso à rede local, para descobrir os receptores AirPlay.</li>
 <li>Autorização para controlar o Música, para acertar a frequência do BlackHole ao gravar, mostrar o Música na janela e contar as suas audições.</li>
 <li>O <code>fonoteca.py</code> e o Python 3.14 em <code>/usr/local/bin</code>, para o registo automático na fonoteca e para as audições do Música.</li>

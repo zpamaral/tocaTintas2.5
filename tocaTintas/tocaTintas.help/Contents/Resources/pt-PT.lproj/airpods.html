@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AirPods — tocaTintas</title>
+<meta name="description" content="Com uns AirPods, ou outros auscultadores Bluetooth, como saída do sistema, o tocaTintas toca directamente para eles. O tratamento é o dos próprios AirPods: a equalização, o…">
+<meta name="keywords" content="O «A tocar» do sistema, Áudio espacial, O histograma, Passagem automática">
+<meta name="robots" content="index, anchors">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<a name="airpods"></a>
+<div class="envolve">
+<nav class="percurso"><span><a href="auscultadores.html">◂ Auscultadores</a></span><span><a href="index.html">Temas</a></span><span><a href="airplay.html">AirPlay ▸</a></span></nav>
+<main>
+<h2 id="airpods">AirPods</h2>
+<p>Com uns AirPods, ou outros auscultadores Bluetooth, como saída do sistema, o tocaTintas toca directamente para eles. O tratamento é o dos próprios AirPods: a equalização, o cancelamento de ruído e o áudio espacial. O crossfeed e a equalização AutoEQ não se aplicam, e o botão dos auscultadores não tem efeito.</p>
+<a name="airpods-o-a-tocar-do-sistema"></a><h3 id="airpods-o-a-tocar-do-sistema">O «A tocar» do sistema</h3>
+<p>O tocaTintas aparece no «A tocar» do Centro de Controlo e do menu, com o título, o artista, o álbum, a capa e o tempo decorrido. Isto vale para qualquer saída, e não só para os AirPods. Daí, e das teclas multimédia do teclado, chegam tocar, pausa, parar, seguinte e anterior. Os saltos dentro da faixa não estão disponíveis.</p>
+<p>Nos AirPods, as hastes comandam o tocaTintas:</p>
+<ul>
+<li><strong>um aperto</strong>, em qualquer das hastes, pausa e retoma;</li>
+<li><strong>dois apertos</strong> passam à faixa seguinte;</li>
+<li><strong>três apertos</strong> voltam à anterior;</li>
+<li><strong>tirar um auricular do ouvido</strong> pausa.</li>
+</ul>
+<p>Com o Música na janela, estes comandos vão para o Música, como os botões (ver <a href="janela-principal.html"><strong>JANELA PRINCIPAL</strong></a>).</p>
+<a name="airpods-audio-espacial"></a><h3 id="airpods-audio-espacial">Áudio espacial</h3>
+<p>O «Espacializar estéreo» dos AirPods, com e sem seguimento da cabeça, só fica disponível se o leitor o pedir expressamente. O leitor habitual do tocaTintas não o pode pedir. Por isso, com a saída em Bluetooth, as faixas tocam por outro motor, que entrega o som ao sistema em blocos e pede a espacialização do estéreo. Encontra-se no menu do som ou no Centro de Controlo, carregando em <strong>›</strong> ao lado dos AirPods.</p>
+<p>O motor escolhe-se no início de cada faixa. Se a saída mudar a meio, dos AirPods para a cavilha ou o contrário, o tocaTintas troca de motor e continua no mesmo ponto, sem parar a faixa.</p>
+<p>O motor novo toca FLAC, ALAC, AAC, MP3, WAV e AIFF. O WavPack, o Monkey’s Audio e o Opus continuam pelo caminho de sempre, sem áudio espacial. O ReplayGain não se aplica, tal como nos outros auscultadores, porque só o AirPlay o usa.</p>
+<a name="airpods-o-histograma"></a><h3 id="airpods-o-histograma">O histograma</h3>
+<p>O som não passa pelo BlackHole, e o cava ficaria sem nada para ler. Por isso, o motor envia ao mesmo tempo uma cópia de cada bloco para o BlackHole, com o mesmo relógio. As barras acompanham o que se ouve nos AirPods, sem atraso a acertar. Se o BlackHole estiver silenciado, a cópia chega a zeros e o histograma fica parado. Isso acontece, por exemplo, depois de se carregar na tecla de silenciar com ele como saída.</p>
+<a name="airpods-passagem-automatica"></a><h3 id="airpods-passagem-automatica">Passagem automática</h3>
+<p>É o macOS que passa o som para os AirPods quando se põem nos ouvidos. Com música a tocar, ele só o faz se o som estiver a sair pelas colunas do Mac. Com auscultadores na cavilha, os AirPods não tiram o som, e escolhem-se à mão no menu do som.</p>
+<p>A ponte dos auscultadores mantém o CamillaDSP sempre activo, mesmo em pausa, e o macOS conta isso como música a tocar. Se o sistema ficar convencido de que a rota é Bluetooth quando já não é, deixa de passar o som automaticamente enquanto o tocaTintas estiver aberto. Isto aconteceu uma vez, depois de várias trocas manuais. Desfaz-se com uma passagem com o tocaTintas fechado, ou com <code>sudo killall audioaccessoryd</code>.</p>
+</main>
+<nav class="percurso fim"><span><a href="auscultadores.html">◂ Auscultadores</a></span><span><a href="index.html">Temas</a></span><span><a href="airplay.html">AirPlay ▸</a></span></nav>
+</div>
+</body>
+</html>
