@@ -39,6 +39,37 @@ BOOL ZPSaidaEBluetooth(void) {
     return transporte == kAudioDeviceTransportTypeBluetooth || transporte == kAudioDeviceTransportTypeBluetoothLE;
 }
 
+// O identificador (UID) do BlackHole, para o espelho do cava. nil se não houver.
+static NSString *ZPUIDDoBlackHole(void) {
+    AudioObjectPropertyAddress addr = {
+        kAudioHardwarePropertyDevices, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain
+    };
+    UInt32 size = 0;
+    if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &addr, 0, NULL, &size) != noErr || size == 0) return nil;
+    AudioObjectID *ids = malloc(size);
+    if (!ids) return nil;
+    NSString *uid = nil;
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &addr, 0, NULL, &size, ids) == noErr) {
+        for (UInt32 i = 0; i < size / sizeof(AudioObjectID) && !uid; ++i) {
+            CFStringRef nome = NULL;
+            UInt32 t = sizeof(nome);
+            AudioObjectPropertyAddress a = {
+                kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain
+            };
+            if (AudioObjectGetPropertyData(ids[i], &a, 0, NULL, &t, &nome) != noErr || !nome) continue;
+            BOOL eBlackHole = [(__bridge NSString *)nome rangeOfString:@"BlackHole" options:NSCaseInsensitiveSearch].location != NSNotFound;
+            CFRelease(nome);
+            if (!eBlackHole) continue;
+            CFStringRef u = NULL;
+            t = sizeof(u);
+            a.mSelector = kAudioDevicePropertyDeviceUID;
+            if (AudioObjectGetPropertyData(ids[i], &a, 0, NULL, &t, &u) == noErr && u) uid = CFBridgingRelease(u);
+        }
+    }
+    free(ids);
+    return uid;
+}
+
 #pragma mark - Leitura a partir de memória
 
 static OSStatus ZPLerMemoria(void *dados, SInt64 posicao, UInt32 pedido, void *destino, UInt32 *lido) {
@@ -58,6 +89,11 @@ static SInt64 ZPTamanhoMemoria(void *dados) {
 
 @interface ZPLeitorEspacial ()
 @property (strong, nonatomic) AVSampleBufferAudioRenderer *renderer;
+// O mesmo som para o BlackHole, onde o cava o lê para o histograma. Com os
+// AirPods a saída do sistema não é o BlackHole e a ponte está parada; sem isto o
+// histograma ficava vazio. Partilha o relógio do sincronizador, que compensa a
+// latência de cada saída, por isso o histograma acompanha o que se ouve.
+@property (strong, nonatomic, nullable) AVSampleBufferAudioRenderer *espelho;
 @property (strong, nonatomic) AVSampleBufferRenderSynchronizer *sincronizador;
 @property (strong, nonatomic) dispatch_queue_t fila;      // tudo o que toca no ExtAudioFile corre aqui
 @property (strong, nonatomic, nullable) NSData *bytes;    // mantém viva a memória do AudioFile
@@ -143,6 +179,12 @@ static SInt64 ZPTamanhoMemoria(void *dados) {
     _renderer.allowedAudioSpatializationFormats = AVAudioSpatializationFormatMonoStereoAndMultichannel;
     _sincronizador = [AVSampleBufferRenderSynchronizer new];
     [_sincronizador addRenderer:_renderer];
+    NSString *blackHole = ZPUIDDoBlackHole();
+    if (blackHole) {
+        _espelho = [AVSampleBufferAudioRenderer new];
+        _espelho.audioOutputDeviceUniqueID = blackHole;
+        [_sincronizador addRenderer:_espelho];
+    }
     _fila = dispatch_queue_create("JPSdA.tocaTintas.leitorEspacial", DISPATCH_QUEUE_SERIAL);
     return YES;
 }
@@ -152,6 +194,7 @@ static SInt64 ZPTamanhoMemoria(void *dados) {
     if (_observadorDoFim) [_sincronizador removeTimeObserver:_observadorDoFim];
     [_sincronizador setRate:0.0];
     [_renderer flush];
+    [_espelho flush];
     ExtAudioFileRef d = _descodificador;
     AudioFileID f = _ficheiro;
     float *b = _bloco;
@@ -167,6 +210,13 @@ static SInt64 ZPTamanhoMemoria(void *dados) {
 }
 
 #pragma mark - Descodificação (na fila)
+
+// Cada bloco vai para os AirPods e, se o houver, para o espelho do cava. O
+// espelho consome ao mesmo ritmo, por isso não se lhe pergunta se está pronto.
+- (void)entregar:(CMSampleBufferRef)amostras {
+    [self.renderer enqueueSampleBuffer:amostras];
+    [self.espelho enqueueSampleBuffer:amostras];
+}
 
 // O bloco seguinte, ou NULL no fim do ficheiro.
 - (nullable CMSampleBufferRef)proximoBloco CF_RETURNS_RETAINED {
@@ -207,7 +257,7 @@ static SInt64 ZPTamanhoMemoria(void *dados) {
             dispatch_async(dispatch_get_main_queue(), ^{ [fraco vigiarOFimEm:fim]; });
             return;
         }
-        [self.renderer enqueueSampleBuffer:amostras];
+        [self entregar:amostras];
         CFRelease(amostras);
     }
 }
@@ -267,7 +317,7 @@ static SInt64 ZPTamanhoMemoria(void *dados) {
             while (self->_proximaTrama < alvo && self.renderer.isReadyForMoreMediaData) {
                 CMSampleBufferRef amostras = [self proximoBloco];
                 if (!amostras) break;
-                [self.renderer enqueueSampleBuffer:amostras];
+                [self entregar:amostras];
                 CFRelease(amostras);
             }
         });
@@ -314,6 +364,7 @@ static SInt64 ZPTamanhoMemoria(void *dados) {
         self->_descodificacaoAcabou = NO;
     });
     [self.renderer flush];
+    [self.espelho flush];
     _terminou = NO;
     if (_arrancou) {
         [self comecarAAlimentar];
