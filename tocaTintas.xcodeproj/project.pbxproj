@@ -22,6 +22,7 @@
 		1F1955352E4AAA2700488F3A /* QuickLook.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FF2BC7C2E358EA900133BF3 /* QuickLook.framework */; };
 		1F2614532C809B140041651D /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 1F2614552C809B140041651D /* Localizable.strings */; };
 		1F2E27723096E283001B0268 /* ZPCatalogoDaApple.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F2E27713096E283001B0268 /* ZPCatalogoDaApple.m */; };
+		1F2E2775309DCEC9001B0268 /* ZPAgoraATocar.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F2E2774309DCEC9001B0268 /* ZPAgoraATocar.m */; };
 		1F2FB2BB2E494BE7008CD88C /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F2FB2BA2E494BE7008CD88C /* Foundation.framework */; };
 		1F2FB2BD2E494C00008CD88C /* UniformTypeIdentifiers.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F2FB2BC2E494C00008CD88C /* UniformTypeIdentifiers.framework */; };
 		1F37C8C52CD5446700346A66 /* cava in Resources */ = {isa = PBXBuildFile; fileRef = 1F37C8C42CD5446700346A66 /* cava */; };
@@ -128,6 +129,8 @@
 		1F2614562C809B260041651D /* en */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.strings; lineEnding = 0; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		1F2E27703096E283001B0268 /* ZPCatalogoDaApple.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPCatalogoDaApple.h; sourceTree = "<group>"; };
 		1F2E27713096E283001B0268 /* ZPCatalogoDaApple.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPCatalogoDaApple.m; sourceTree = "<group>"; };
+		1F2E2773309DCEC9001B0268 /* ZPAgoraATocar.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPAgoraATocar.h; sourceTree = "<group>"; };
+		1F2E2774309DCEC9001B0268 /* ZPAgoraATocar.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPAgoraATocar.m; sourceTree = "<group>"; };
 		1F2FB2BA2E494BE7008CD88C /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		1F2FB2BC2E494C00008CD88C /* UniformTypeIdentifiers.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UniformTypeIdentifiers.framework; path = System/Library/Frameworks/UniformTypeIdentifiers.framework; sourceTree = SDKROOT; };
 		1F37C8C42CD5446700346A66 /* cava */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = cava; sourceTree = "<group>"; };
@@ -274,6 +277,8 @@
 				1F12F2B82C7C86D60064C694 /* Property List.plist */,
 				1F12F2A82C7C85480064C694 /* ViewController.h */,
 				1F12F2A92C7C85480064C694 /* ViewController.m */,
+				1F2E2773309DCEC9001B0268 /* ZPAgoraATocar.h */,
+				1F2E2774309DCEC9001B0268 /* ZPAgoraATocar.m */,
 				1FA3F84630940D8500ACF01D /* ZPBarraDeProgresso.h */,
 				1FA3F84730940D8500ACF01D /* ZPBarraDeProgresso.m */,
 				1FA3F84930949C2000ACF01D /* ZPPosGravacao.h */,
@@ -613,6 +618,7 @@
 				1F2E27723096E283001B0268 /* ZPCatalogoDaApple.m in Sources */,
 				1F7D75202C95DCAF0046E0AC /* M3UPlaylist.m in Sources */,
 				1FC8C3F22CE63CE500271175 /* ZPAirPlayStreamer.m in Sources */,
+				1F2E2775309DCEC9001B0268 /* ZPAgoraATocar.m in Sources */,
 				1FA3F84B30949C2000ACF01D /* ZPPosGravacao.m in Sources */,
 				1F12F2AA2C7C85480064C694 /* ViewController.m in Sources */,
 				1F12F2B12C7C854C0064C694 /* main.m in Sources */,

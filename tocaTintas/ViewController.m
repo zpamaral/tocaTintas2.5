@@ -62,7 +62,7 @@ SOFTWARE.
 #import "ZPAudioCapture.h"
 #import "ZPAirPlayStreamer.h"
 #import "ZPLigacoesDoMusicaWindowController.h"
-#import <MediaPlayer/MediaPlayer.h>   // O «A tocar» do sistema e os comandos dos AirPods e do teclado
+#import "ZPAgoraATocar.h"   // O «A tocar» do sistema e os comandos dos AirPods e do teclado
 
 #define NUM_BUFFERS 3  // Three is typically a good number for real-time audio playback
 #define ENABLE_BS2B_BRIDGE 1 // Running bs2b_bridge
@@ -11627,41 +11627,15 @@ static NSString * const kZPAudicaoDoCatalogoKey = @"ZPAudicaoDoCatalogo";
 // estiver de facto a tocar (o Música, tipicamente).
 
 - (void)configurarAgoraATocar {
-    MPRemoteCommandCenter *centro = [MPRemoteCommandCenter sharedCommandCenter];
     __weak typeof(self) fraco = self;
-    MPRemoteCommandHandlerStatus (^mandar)(NSString *, NSString *) = ^MPRemoteCommandHandlerStatus(NSString *nosso, NSString *doMusica) {
+    ZPAgoraATocarConfigurar(^BOOL(NSString *comando) {
         __strong typeof(fraco) forte = fraco;
-        if (!forte) return MPRemoteCommandHandlerStatusCommandFailed;
-        if (forte.aMostrarOMusica) {
-            return ZPMusicCommand(doMusica) ? MPRemoteCommandHandlerStatusSuccess
-                                            : MPRemoteCommandHandlerStatusCommandFailed;
-        }
-        [forte executarComandoAppleScript:nosso];
-        return MPRemoteCommandHandlerStatusSuccess;
-    };
-    [centro.playCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *e) {
-        return mandar(@"play", @"play");
-    }];
-    [centro.pauseCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *e) {
-        return mandar(@"pause", @"pause");
-    }];
-    [centro.togglePlayPauseCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *e) {
-        return mandar(@"playpause", @"playpause");
-    }];
-    [centro.stopCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *e) {
-        return mandar(@"stop", @"stop");
-    }];
-    [centro.nextTrackCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *e) {
-        return mandar(@"next track", @"next track");
-    }];
-    [centro.previousTrackCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *e) {
-        return mandar(@"previous track", @"previous track");
-    }];
-    centro.changePlaybackPositionCommand.enabled = NO;
-    centro.seekForwardCommand.enabled = NO;
-    centro.seekBackwardCommand.enabled = NO;
-    centro.skipForwardCommand.enabled = NO;
-    centro.skipBackwardCommand.enabled = NO;
+        if (!forte) return NO;
+        // Os nomes do tocaTintas e do Música são os mesmos.
+        if (forte.aMostrarOMusica) return ZPMusicCommand(comando);
+        [forte executarComandoAppleScript:comando];
+        return YES;
+    });
 
     // O título e a capa chegam depois do arranque (as etiquetas lêem-se fora do
     // thread principal), por isso há também um relógio. É barato: compara uma
@@ -11675,13 +11649,11 @@ static NSString * const kZPAudicaoDoCatalogoKey = @"ZPAudicaoDoCatalogo";
 }
 
 - (void)actualizarAgoraATocar {
-    MPNowPlayingInfoCenter *centro = [MPNowPlayingInfoCenter defaultCenter];
     FourCharCode estado = [self scriptPlayerState];
 
     if (estado == 'TtSs') {
         if (self.assinaturaAgoraATocar) {
-            centro.nowPlayingInfo = nil;
-            centro.playbackState = MPNowPlayingPlaybackStateStopped;
+            ZPAgoraATocarLimpar();
             self.assinaturaAgoraATocar = nil;
             self.posicaoAgoraATocar = 0.0;
         }
@@ -11706,23 +11678,7 @@ static NSString * const kZPAudicaoDoCatalogoKey = @"ZPAudicaoDoCatalogo";
     if ([assinatura isEqualToString:self.assinaturaAgoraATocar]) return;
     self.assinaturaAgoraATocar = assinatura;
 
-    NSMutableDictionary *info = [@{
-        MPMediaItemPropertyTitle: titulo,
-        MPMediaItemPropertyArtist: artista,
-        MPMediaItemPropertyAlbumTitle: album,
-        MPNowPlayingInfoPropertyMediaType: @(MPNowPlayingInfoMediaTypeAudio),
-        MPNowPlayingInfoPropertyElapsedPlaybackTime: @(self.posicaoAgoraATocar),
-        MPNowPlayingInfoPropertyPlaybackRate: @(aTocar ? 1.0 : 0.0),
-    } mutableCopy];
-    if (duracao > 0.0) info[MPMediaItemPropertyPlaybackDuration] = @(duracao);
-    if (capa.size.width > 0) {
-        info[MPMediaItemPropertyArtwork] =
-            [[MPMediaItemArtwork alloc] initWithBoundsSize:capa.size requestHandler:^NSImage *(CGSize tamanho) {
-                return capa;
-            }];
-    }
-    centro.nowPlayingInfo = info;
-    centro.playbackState = aTocar ? MPNowPlayingPlaybackStatePlaying : MPNowPlayingPlaybackStatePaused;
+    ZPAgoraATocarPublicar(titulo, artista, album, duracao, self.posicaoAgoraATocar, aTocar, capa);
 }
 
 #pragma mark - AppleScript
