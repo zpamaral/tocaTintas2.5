@@ -257,9 +257,13 @@ static SInt64 ZPTamanhoMemoria(void *dados) {
     if (!_arrancou) {
         _arrancou = YES;
         // Meio segundo na fila antes de o relógio andar: com o relógio a andar e
-        // a fila vazia, os primeiros blocos chegavam já atrasados.
-        SInt64 alvo = (SInt64)(kZPSegundosDeArranque * _formato.mSampleRate);
+        // a fila vazia, os primeiros blocos chegavam já atrasados. O início pode
+        // não ser zero: a troca de motor a meio da faixa (ver o ViewController,
+        // -acertarMotorASaida) põe a posição antes de tocar.
+        __block SInt64 inicio = 0;
         dispatch_sync(self.fila, ^{
+            inicio = self->_proximaTrama;
+            SInt64 alvo = inicio + (SInt64)(kZPSegundosDeArranque * self->_formato.mSampleRate);
             while (self->_proximaTrama < alvo && self.renderer.isReadyForMoreMediaData) {
                 CMSampleBufferRef amostras = [self proximoBloco];
                 if (!amostras) break;
@@ -268,7 +272,7 @@ static SInt64 ZPTamanhoMemoria(void *dados) {
             }
         });
         [self comecarAAlimentar];
-        [self.sincronizador setRate:1.0 time:kCMTimeZero];
+        [self.sincronizador setRate:1.0 time:CMTimeMake(inicio, (int32_t)_formato.mSampleRate)];
         return YES;
     }
     self.sincronizador.rate = 1.0;
@@ -288,7 +292,7 @@ static SInt64 ZPTamanhoMemoria(void *dados) {
 }
 
 - (NSTimeInterval)currentTime {
-    if (!_arrancou) return 0.0;
+    if (!_arrancou) return (double)_proximaTrama / _formato.mSampleRate;
     double t = CMTimeGetSeconds(self.sincronizador.currentTime);
     return t > 0.0 ? MIN(t, self.duration) : 0.0;
 }

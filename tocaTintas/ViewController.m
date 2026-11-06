@@ -3283,6 +3283,7 @@ static const NSUInteger ZPTentativasDaFrequencia = 20;   // × 0,5 s
 
         BOOL connected = [strongSelf headphonesAreConnected];
         [strongSelf updateBs2bForHeadphonesConnected:connected];
+        [strongSelf acertarMotorASaida];
     });
 
     // Estado inicial (app arranca já com phones ligados?)
@@ -11617,6 +11618,48 @@ static NSString * const kZPAudicaoDoCatalogoKey = @"ZPAudicaoDoCatalogo";
     // A janela volta ao tocaTintas, e o ⏸️ com ela: o verde de uma pausa do
     // Música não pode ficar.
     [self updatePauseButtonAppearance:self.isPlaybackPaused];
+}
+
+#pragma mark - Motor conforme a saída
+
+// O leitor espacial (ZPLeitorEspacial) não segue a saída do sistema como o
+// AVAudioPlayer: o renderer fica preso ao dispositivo onde começou. Tirados os
+// AirPods a meio de uma faixa, o relógio continuava a andar e não saía som
+// nenhum — nem para a ponte, nem para o cava (2026-11-06). Por isso, quando a
+// saída muda e o leitor em curso é da classe errada para ela, troca-se: um
+// leitor novo da classe certa, na mesma posição, a tocar ou em pausa como
+// estava. Serve também o outro sentido: ligados os AirPods a meio de uma faixa,
+// o áudio espacial fica logo disponível.
+//
+// Só os formatos do AVAudioPlayer; WavPack, APE e Opus vão pela AudioQueue, que
+// segue a saída do sistema.
+- (void)acertarMotorASaida {
+    AVAudioPlayer *actual = self.audioPlayer;
+    NSURL *faixa = self.currentTrackURL;
+    if (!actual || !faixa) return;
+    BOOL espacial = [actual isKindOfClass:[ZPLeitorEspacial class]];
+    BOOL bluetooth = ZPSaidaEBluetooth();
+    if (espacial == bluetooth) return;
+
+    BOOL aTocar = actual.isPlaying;
+    NSTimeInterval posicao = actual.currentTime;
+    Class leitor = bluetooth ? [ZPLeitorEspacial class] : [AVAudioPlayer class];
+    NSError *erro = nil;
+    AVAudioPlayer *novo = [[leitor alloc] initWithContentsOfURL:faixa error:&erro];
+    if (!novo) {
+        NSLog(@"[Motor] Não consegui passar «%@» para %@: %@", faixa.lastPathComponent,
+              NSStringFromClass(leitor), erro.localizedDescription);
+        return;
+    }
+    NSLog(@"[Motor] Saída %@: «%@» passa para %@ aos %.1f s%@.", bluetooth ? @"Bluetooth" : @"local",
+          faixa.lastPathComponent, NSStringFromClass(leitor), posicao, aTocar ? @"" : @" (em pausa)");
+    actual.delegate = nil;   // o fim do antigo não pode avançar a lista
+    [actual stop];
+    novo.delegate = self;
+    [novo prepareToPlay];
+    novo.currentTime = posicao;
+    self.audioPlayer = novo;
+    if (aTocar) [novo play];
 }
 
 #pragma mark - Centro A tocar
