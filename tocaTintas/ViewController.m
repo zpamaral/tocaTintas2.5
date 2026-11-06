@@ -62,6 +62,7 @@ SOFTWARE.
 #import "ZPAudioCapture.h"
 #import "ZPAirPlayStreamer.h"
 #import "ZPLigacoesDoMusicaWindowController.h"
+#import <MediaPlayer/MediaPlayer.h>   // O «A tocar» do sistema e os comandos dos AirPods e do teclado
 
 #define NUM_BUFFERS 3  // Three is typically a good number for real-time audio playback
 #define ENABLE_BS2B_BRIDGE 1 // Running bs2b_bridge
@@ -434,6 +435,12 @@ static WavpackStreamReader memoryReader = {
 @property (strong, nonatomic) id observadorDoMusicaNaJanela;
 @property (strong, nonatomic) NSTimer *relogioDoMusica;
 @property (assign, nonatomic) BOOL aMostrarOMusica;
+// O «A tocar» do sistema (ver «Centro A tocar»): a assinatura do que lá está,
+// para só se reescrever quando muda, e a última posição conhecida, porque em
+// pausa os motores de AudioQueue não dão relógio.
+@property (strong, nonatomic) NSTimer *relogioAgoraATocar;
+@property (copy, nonatomic) NSString *assinaturaAgoraATocar;
+@property (assign, nonatomic) double posicaoAgoraATocar;
 @property (assign, nonatomic) BOOL musicaATocar;
 @property (assign, nonatomic) double musicaPosicao;
 @property (assign, nonatomic) double musicaDuracao;
@@ -3701,6 +3708,7 @@ static const NSUInteger ZPTentativasDaFrequencia = 20;   // × 0,5 s
     [self initializeAirPlaySettings];
     [self startBs2bHeadphoneAutoStart];
     [self setupBs2bHeadphoneMonitoring];
+    [self configurarAgoraATocar];
     // Para o clique no aviso das faixas do Música abrir a janela delas.
     [UNUserNotificationCenter currentNotificationCenter].delegate = self;
     [self comecarASincronizarComOMusica];
@@ -8748,6 +8756,9 @@ static const NSTimeInterval kCavaEsperaAteApagar = 0.2;
 // Give visual feedback for when pause is active
 - (void)updatePauseButtonAppearance:(BOOL)isActive {
     ZPPintaBotaoDeTransporte(self.pauseButton, isActive ? [NSColor systemGreenColor] : nil);
+    // Passa por aqui cada arranque, pausa, retoma e paragem: o «A tocar» do
+    // sistema acompanha logo, sem esperar pelo relógio de um segundo.
+    [self actualizarAgoraATocar];
 }
 
 // Add visual feedback for when recording is active
@@ -11597,6 +11608,121 @@ static NSString * const kZPAudicaoDoCatalogoKey = @"ZPAudicaoDoCatalogo";
     // A janela volta ao tocaTintas, e o ⏸️ com ela: o verde de uma pausa do
     // Música não pode ficar.
     [self updatePauseButtonAppearance:self.isPlaybackPaused];
+}
+
+#pragma mark - Centro A tocar
+
+// O tocaTintas apresenta-se ao sistema como leitor: o que toca aparece no «A
+// tocar» do Centro de Controlo, e os comandos dos AirPods (apertar a haste,
+// tirá-los dos ouvidos) e as teclas ⏯ ⏭ ⏮ do teclado chegam até ele. Sem isto
+// o macOS 27 também escondia, para o tocaTintas, o «Espacializar estéreo» dos
+// AirPods — a hipótese que levou a fazê-lo (2026-11-06).
+//
+// Os comandos vão pelos mesmos caminhos do resto: com o Música à vista na janela
+// vão para ele, como os botões (-botaoDeTransporte:); senão, pelos comandos
+// AppleScript do tocaTintas, que já fazem o que os botões fazem. Saltar para uma
+// posição não se oferece: o tocaTintas não o sabe fazer.
+//
+// Parado, o tocaTintas sai do «A tocar», para o sistema dar as teclas a quem
+// estiver de facto a tocar (o Música, tipicamente).
+
+- (void)configurarAgoraATocar {
+    MPRemoteCommandCenter *centro = [MPRemoteCommandCenter sharedCommandCenter];
+    __weak typeof(self) fraco = self;
+    MPRemoteCommandHandlerStatus (^mandar)(NSString *, NSString *) = ^MPRemoteCommandHandlerStatus(NSString *nosso, NSString *doMusica) {
+        __strong typeof(fraco) forte = fraco;
+        if (!forte) return MPRemoteCommandHandlerStatusCommandFailed;
+        if (forte.aMostrarOMusica) {
+            return ZPMusicCommand(doMusica) ? MPRemoteCommandHandlerStatusSuccess
+                                            : MPRemoteCommandHandlerStatusCommandFailed;
+        }
+        [forte executarComandoAppleScript:nosso];
+        return MPRemoteCommandHandlerStatusSuccess;
+    };
+    [centro.playCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *e) {
+        return mandar(@"play", @"play");
+    }];
+    [centro.pauseCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *e) {
+        return mandar(@"pause", @"pause");
+    }];
+    [centro.togglePlayPauseCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *e) {
+        return mandar(@"playpause", @"playpause");
+    }];
+    [centro.stopCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *e) {
+        return mandar(@"stop", @"stop");
+    }];
+    [centro.nextTrackCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *e) {
+        return mandar(@"next track", @"next track");
+    }];
+    [centro.previousTrackCommand addTargetWithHandler:^MPRemoteCommandHandlerStatus(MPRemoteCommandEvent *e) {
+        return mandar(@"previous track", @"previous track");
+    }];
+    centro.changePlaybackPositionCommand.enabled = NO;
+    centro.seekForwardCommand.enabled = NO;
+    centro.seekBackwardCommand.enabled = NO;
+    centro.skipForwardCommand.enabled = NO;
+    centro.skipBackwardCommand.enabled = NO;
+
+    // O título e a capa chegam depois do arranque (as etiquetas lêem-se fora do
+    // thread principal), por isso há também um relógio. É barato: compara uma
+    // assinatura e só escreve no sistema quando ela muda.
+    self.relogioAgoraATocar = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *t) {
+        __strong typeof(fraco) forte = fraco;
+        if (!forte) { [t invalidate]; return; }
+        [forte actualizarAgoraATocar];
+    }];
+    [self actualizarAgoraATocar];
+}
+
+- (void)actualizarAgoraATocar {
+    MPNowPlayingInfoCenter *centro = [MPNowPlayingInfoCenter defaultCenter];
+    FourCharCode estado = [self scriptPlayerState];
+
+    if (estado == 'TtSs') {
+        if (self.assinaturaAgoraATocar) {
+            centro.nowPlayingInfo = nil;
+            centro.playbackState = MPNowPlayingPlaybackStateStopped;
+            self.assinaturaAgoraATocar = nil;
+            self.posicaoAgoraATocar = 0.0;
+        }
+        return;
+    }
+
+    BOOL aTocar = (estado == 'TtSp');
+    double posicao = 0.0, duracao = 0.0;
+    BOOL temRelogio = [self currentPlaybackTime:&posicao duration:&duracao];
+    // A mesma faixa de volta ao princípio (repetição, ⏮): a assinatura não muda,
+    // mas o sistema tem de saber, senão continua a contar para lá do fim.
+    if (temRelogio && aTocar && posicao + 2.0 < self.posicaoAgoraATocar) self.assinaturaAgoraATocar = nil;
+    // Em pausa, o AudioQueue não dá relógio: fica a última posição conhecida.
+    if (temRelogio && (aTocar || posicao > 0.0)) self.posicaoAgoraATocar = posicao;
+
+    NSString *titulo = self.titleLabel.stringValue ?: @"";
+    NSString *artista = self.artistLabel.stringValue ?: @"";
+    NSString *album = self.albumLabel.stringValue ?: @"";
+    NSImage *capa = self.coverArtView.image;
+    NSString *assinatura = [NSString stringWithFormat:@"%@|%@|%@|%d|%.0f|%p",
+                            titulo, artista, album, aTocar, duracao, capa];
+    if ([assinatura isEqualToString:self.assinaturaAgoraATocar]) return;
+    self.assinaturaAgoraATocar = assinatura;
+
+    NSMutableDictionary *info = [@{
+        MPMediaItemPropertyTitle: titulo,
+        MPMediaItemPropertyArtist: artista,
+        MPMediaItemPropertyAlbumTitle: album,
+        MPNowPlayingInfoPropertyMediaType: @(MPNowPlayingInfoMediaTypeAudio),
+        MPNowPlayingInfoPropertyElapsedPlaybackTime: @(self.posicaoAgoraATocar),
+        MPNowPlayingInfoPropertyPlaybackRate: @(aTocar ? 1.0 : 0.0),
+    } mutableCopy];
+    if (duracao > 0.0) info[MPMediaItemPropertyPlaybackDuration] = @(duracao);
+    if (capa.size.width > 0) {
+        info[MPMediaItemPropertyArtwork] =
+            [[MPMediaItemArtwork alloc] initWithBoundsSize:capa.size requestHandler:^NSImage *(CGSize tamanho) {
+                return capa;
+            }];
+    }
+    centro.nowPlayingInfo = info;
+    centro.playbackState = aTocar ? MPNowPlayingPlaybackStatePlaying : MPNowPlayingPlaybackStatePaused;
 }
 
 #pragma mark - AppleScript
