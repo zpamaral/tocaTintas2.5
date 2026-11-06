@@ -63,6 +63,7 @@ SOFTWARE.
 #import "ZPAirPlayStreamer.h"
 #import "ZPLigacoesDoMusicaWindowController.h"
 #import "ZPAgoraATocar.h"   // O «A tocar» do sistema e os comandos dos AirPods e do teclado
+#import "ZPLeitorEspacial.h"   // O leitor com áudio espacial, para a saída em Bluetooth
 
 #define NUM_BUFFERS 3  // Three is typically a good number for real-time audio playback
 #define ENABLE_BS2B_BRIDGE 1 // Running bs2b_bridge
@@ -9934,10 +9935,14 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
     NSError *error = nil;
     NSData *dataToUse = [self takePrefetchedDataForTrack:trackURL];
 
+    // Com a saída em Bluetooth (AirPods), o leitor que deixa o macOS
+    // espacializar o estéreo — ver ZPLeitorEspacial.h. Escolhe-se aqui, no
+    // início de cada faixa; a meio dela não se troca.
+    Class leitor = ZPSaidaEBluetooth() ? [ZPLeitorEspacial class] : [AVAudioPlayer class];
     if (dataToUse) {
-        self.audioPlayer = [[AVAudioPlayer alloc] initWithData:dataToUse error:&error];
+        self.audioPlayer = [[leitor alloc] initWithData:dataToUse error:&error];
     } else {
-        self.audioPlayer = [[AVAudioPlayer alloc] initWithContentsOfURL:trackURL error:&error];
+        self.audioPlayer = [[leitor alloc] initWithContentsOfURL:trackURL error:&error];
     }
 
     if (error) {
@@ -9985,10 +9990,14 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
 
     NSData *dataToUse = [self takePrefetchedDataForTrack:trackURL];
 
+    // Com a saída em Bluetooth (AirPods), o leitor que deixa o macOS
+    // espacializar o estéreo — ver ZPLeitorEspacial.h. Escolhe-se aqui, no
+    // início de cada faixa; a meio dela não se troca.
+    Class leitor = ZPSaidaEBluetooth() ? [ZPLeitorEspacial class] : [AVAudioPlayer class];
     if (dataToUse) {
-        self.audioPlayer = [[AVAudioPlayer alloc] initWithData:dataToUse error:&error];
+        self.audioPlayer = [[leitor alloc] initWithData:dataToUse error:&error];
     } else {
-        self.audioPlayer = [[AVAudioPlayer alloc] initWithContentsOfURL:trackURL error:&error];
+        self.audioPlayer = [[leitor alloc] initWithContentsOfURL:trackURL error:&error];
     }
     if (error) {
         #ifdef DEBUG

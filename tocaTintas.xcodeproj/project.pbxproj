@@ -23,6 +23,7 @@
 		1F2614532C809B140041651D /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 1F2614552C809B140041651D /* Localizable.strings */; };
 		1F2E27723096E283001B0268 /* ZPCatalogoDaApple.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F2E27713096E283001B0268 /* ZPCatalogoDaApple.m */; };
 		1F2E2775309DCEC9001B0268 /* ZPAgoraATocar.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F2E2774309DCEC9001B0268 /* ZPAgoraATocar.m */; };
+		1F2E2778309DD440001B0268 /* ZPLeitorEspacial.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F2E2777309DD440001B0268 /* ZPLeitorEspacial.m */; };
 		1F2FB2BB2E494BE7008CD88C /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F2FB2BA2E494BE7008CD88C /* Foundation.framework */; };
 		1F2FB2BD2E494C00008CD88C /* UniformTypeIdentifiers.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1F2FB2BC2E494C00008CD88C /* UniformTypeIdentifiers.framework */; };
 		1F37C8C52CD5446700346A66 /* cava in Resources */ = {isa = PBXBuildFile; fileRef = 1F37C8C42CD5446700346A66 /* cava */; };
@@ -131,6 +132,8 @@
 		1F2E27713096E283001B0268 /* ZPCatalogoDaApple.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPCatalogoDaApple.m; sourceTree = "<group>"; };
 		1F2E2773309DCEC9001B0268 /* ZPAgoraATocar.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPAgoraATocar.h; sourceTree = "<group>"; };
 		1F2E2774309DCEC9001B0268 /* ZPAgoraATocar.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPAgoraATocar.m; sourceTree = "<group>"; };
+		1F2E2776309DD440001B0268 /* ZPLeitorEspacial.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPLeitorEspacial.h; sourceTree = "<group>"; };
+		1F2E2777309DD440001B0268 /* ZPLeitorEspacial.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPLeitorEspacial.m; sourceTree = "<group>"; };
 		1F2FB2BA2E494BE7008CD88C /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		1F2FB2BC2E494C00008CD88C /* UniformTypeIdentifiers.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UniformTypeIdentifiers.framework; path = System/Library/Frameworks/UniformTypeIdentifiers.framework; sourceTree = SDKROOT; };
 		1F37C8C42CD5446700346A66 /* cava */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = cava; sourceTree = "<group>"; };
@@ -277,6 +280,8 @@
 				1F12F2B82C7C86D60064C694 /* Property List.plist */,
 				1F12F2A82C7C85480064C694 /* ViewController.h */,
 				1F12F2A92C7C85480064C694 /* ViewController.m */,
+				1F2E2776309DD440001B0268 /* ZPLeitorEspacial.h */,
+				1F2E2777309DD440001B0268 /* ZPLeitorEspacial.m */,
 				1F2E2773309DCEC9001B0268 /* ZPAgoraATocar.h */,
 				1F2E2774309DCEC9001B0268 /* ZPAgoraATocar.m */,
 				1FA3F84630940D8500ACF01D /* ZPBarraDeProgresso.h */,
@@ -620,6 +625,7 @@
 				1FC8C3F22CE63CE500271175 /* ZPAirPlayStreamer.m in Sources */,
 				1F2E2775309DCEC9001B0268 /* ZPAgoraATocar.m in Sources */,
 				1FA3F84B30949C2000ACF01D /* ZPPosGravacao.m in Sources */,
+				1F2E2778309DD440001B0268 /* ZPLeitorEspacial.m in Sources */,
 				1F12F2AA2C7C85480064C694 /* ViewController.m in Sources */,
 				1F12F2B12C7C854C0064C694 /* main.m in Sources */,
 				1F7D75232C963F600046E0AC /* ZPOpusDecoder.m in Sources */,
@@ -833,7 +839,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 4.0.0;
+				CURRENT_PROJECT_VERSION = 4.1.0;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = FJ238DJ67E;
 				ENABLE_APP_SANDBOX = NO;
@@ -856,7 +862,7 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 4.0.0;
+				MARKETING_VERSION = 4.1.0;
 				OTHER_CFLAGS = "-Wno-documentation";
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -881,7 +887,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 4.0.0;
+				CURRENT_PROJECT_VERSION = 4.1.0;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = FJ238DJ67E;
 				ENABLE_APP_SANDBOX = NO;
@@ -908,7 +914,7 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 4.0.0;
+				MARKETING_VERSION = 4.1.0;
 				OTHER_CFLAGS = "-Wno-documentation";
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -928,7 +934,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ZPQLverwv/ZPQLverwv.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4.0.0;
+				CURRENT_PROJECT_VERSION = 4.1.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -950,7 +956,7 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 4.0.0;
+				MARKETING_VERSION = 4.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPQLverwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -963,7 +969,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ZPQLverwv/ZPQLverwv.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4.0.0;
+				CURRENT_PROJECT_VERSION = 4.1.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -984,7 +990,7 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 4.0.0;
+				MARKETING_VERSION = 4.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPQLverwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -997,7 +1003,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ZPQLiconwv/ZPQLiconwv.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4.0.0;
+				CURRENT_PROJECT_VERSION = 4.1.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -1019,7 +1025,7 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 4.0.0;
+				MARKETING_VERSION = 4.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPQLiconwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -1037,7 +1043,7 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = ZPQLiconwv/ZPQLiconwv.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4.0.0;
+				CURRENT_PROJECT_VERSION = 4.1.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -1058,7 +1064,7 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 4.0.0;
+				MARKETING_VERSION = 4.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPQLiconwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -1077,7 +1083,7 @@
 				CODE_SIGN_ENTITLEMENTS = ZPSpotLightwv/ZPSpotLightwv.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4.0.0;
+				CURRENT_PROJECT_VERSION = 4.1.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -1099,7 +1105,7 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 4.0.0;
+				MARKETING_VERSION = 4.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPSpotLightwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -1113,7 +1119,7 @@
 				CODE_SIGN_ENTITLEMENTS = ZPSpotLightwv/ZPSpotLightwv.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 4.0.0;
+				CURRENT_PROJECT_VERSION = 4.1.0;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readonly;
@@ -1134,7 +1140,7 @@
 					"$(PROJECT_DIR)/tocaTintas.xcodeproj/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 27.0;
-				MARKETING_VERSION = 4.0.0;
+				MARKETING_VERSION = 4.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = JPSdA.tocaTintas.ZPSpotLightwv;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
