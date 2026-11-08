@@ -316,10 +316,37 @@ static NSString *ZPSemSufixoDaApple(NSString *album) {
 // (a portuguesa deu «Alternativa» no Low); depois a portuguesa, para o que só
 // lá houver. Devolve @{ @"album": …, @"faixas": @[…] } com os campos do iTunes
 // Search API, ou nil.
+//
+// Os nomes, esses, vêm da loja do Mac, a do Música: a americana não é coerente
+// consigo própria. No «ОМ» do Grünberg (2026-11-08) deu o álbum em cirílico e
+// as faixas em inglês, e o Música mostra tudo em cirílico. O mesmo álbum tem o
+// mesmo collectionId e os mesmos trackId em todas as lojas.
 static NSDictionary *ZPAlbumNoCatalogo(NSString *artista, NSString *album) {
     NSDictionary *a = [ZPCatalogoDaApple albumDe:artista chamado:album titulo:nil lojas:@[ @"us", @"pt" ] exacto:YES];
     NSArray *faixas = a ? [ZPCatalogoDaApple faixasDoAlbum:a] : nil;
-    return faixas.count ? @{ @"album": a, @"faixas": faixas } : nil;
+    if (!faixas.count) return nil;
+    NSString *loja = [ZPCatalogoDaApple lojaDoMac];
+    if (![a[@"loja"] isEqual:loja]) {
+        NSMutableDictionary *daqui = [a mutableCopy];
+        daqui[@"loja"] = loja;
+        NSMutableDictionary<id, NSDictionary *> *porId = [NSMutableDictionary dictionary];
+        for (NSDictionary *t in [ZPCatalogoDaApple faixasDoAlbum:daqui]) if (t[@"trackId"]) porId[t[@"trackId"]] = t;
+        NSMutableArray *renomeadas = [NSMutableArray arrayWithCapacity:faixas.count];
+        for (NSDictionary *t in faixas) {
+            NSDictionary *l = porId[t[@"trackId"]];
+            NSMutableDictionary *n = [t mutableCopy];
+            for (NSString *k in @[ @"trackName", @"collectionName", @"artistName" ]) if ([l[k] length]) n[k] = l[k];
+            [renomeadas addObject:n];
+        }
+        NSString *nome = [porId.allValues.firstObject objectForKey:@"collectionName"];
+        if ([nome isKindOfClass:[NSString class]] && nome.length) {
+            NSMutableDictionary *m = [a mutableCopy];
+            m[@"collectionName"] = nome;
+            a = m;
+        }
+        faixas = renomeadas;
+    }
+    return @{ @"album": a, @"faixas": faixas };
 }
 
 // A edição no MusicBrainz, só se bater sem ambiguidade: o mesmo número de
@@ -606,6 +633,26 @@ static NSString *ZPNomeDeFicheiro(NSString *s) {
 }
 
 static id ZPOuNada(id v) { return (v && v != [NSNull null]) ? v : nil; }
+
+// A faixa como o Música a mostrava, em JSON, para a etiqueta APPLE_MUSICA. Os
+// nomes do ficheiro vêm do MusicBrainz ou do catálogo e podem ser outros (o
+// «ОМ» do Grünberg, em 2026-11-08, saiu com os títulos em inglês da loja
+// americana, e o Música mostra-os em cirílico). Por esta etiqueta a fonoteca
+// liga as audições pelo Música ao ficheiro sem comparar nomes — com os mesmos
+// campos que o tocaTintas lhe passa no «ouvir-musica». O persistent ID não
+// serve: nas faixas do catálogo muda de cada vez que tocam.
+static NSString *ZPDescricaoDoMusica(NSDictionary *m) {
+    NSDictionary *d = @{ @"artista": ZPOuNada(m[@"artista"]) ?: @"",
+                         @"album":   ZPOuNada(m[@"album"]) ?: @"",
+                         @"disco":   ZPOuNada(m[@"disco"]) ?: @0,
+                         @"faixa":   ZPOuNada(m[@"faixa"]) ?: @0,
+                         @"titulo":  ZPOuNada(m[@"titulo"]) ?: @"",
+                         @"duracao": ZPOuNada(m[@"duracao"]) ?: @0 };
+    NSData *j = [NSJSONSerialization dataWithJSONObject:d
+                                                options:NSJSONWritingSortedKeys | NSJSONWritingWithoutEscapingSlashes
+                                                  error:NULL];
+    return j ? [[NSString alloc] initWithData:j encoding:NSUTF8StringEncoding] : nil;
+}
 
 // O artista como o MusicBrainz o credita: «Moin feat. Sophia Al-Maria & Ben
 // Vince». Os convidados vão aqui e não no título, ao contrário da Apple.
@@ -1211,6 +1258,7 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
             por(@"MUSICBRAINZ_RELEASEGROUPID", mb[@"release-group"][@"id"]);
             por(@"MUSICBRAINZ_TRACKID", mt[@"recording"][@"id"]);
             por(@"MUSICBRAINZ_RELEASETRACKID", mt[@"id"]);
+            if ([m[@"titulo"] length]) por(@"APPLE_MUSICA", ZPDescricaoDoMusica(m));
             if (sonoridade > kZPSemSonoridade) {
                 por(@"REPLAYGAIN_TRACK_GAIN", [NSString stringWithFormat:@"%+.2f dB", ganho]);
                 por(@"REPLAYGAIN_TRACK_PEAK", [NSString stringWithFormat:@"%.8f", [f[@"pico"] doubleValue]]);
