@@ -9298,6 +9298,28 @@ static NSFileHandle *ZPRegistoParaAcrescentar(NSString *caminho) {
     return fd < 0 ? nil : [[NSFileHandle alloc] initWithFileDescriptor:fd closeOnDealloc:YES];
 }
 
+// Uma faixa tocada antes de o registar lhe pôr o FONOTECA_ID fica com a chave
+// das etiquetas, a do contagens.json, guardada até a app fechar: o «Blue Bell
+// Knoll» dos Cocteau Twins, acabado de gravar, tocou às 10:28 de 2026-11-08,
+// segundos antes do registo, e ficou a mostrar «tocou 1 vez» com 66 na base.
+// Depois de cada registo, as dessas pastas voltam a ler-se das etiquetas.
+- (void)esquecerChavesSemFonotecaEm:(NSArray<NSString *> *)pastas {
+    NSMutableArray<NSString *> *prefixos = [NSMutableArray array];
+    for (NSString *p in pastas) {
+        NSString *q = p.precomposedStringWithCanonicalMapping;
+        [prefixos addObject:[q hasSuffix:@"/"] ? q : [q stringByAppendingString:@"/"]];
+    }
+    for (NSString *caminho in self.chavesDeContagem.allKeys) {
+        if (ZPUUIDDaChave(self.chavesDeContagem[caminho])) continue;
+        NSString *c = caminho.precomposedStringWithCanonicalMapping;
+        for (NSString *prefixo in prefixos) {
+            if ([c hasPrefix:prefixo]) { [self.chavesDeContagem removeObjectForKey:caminho]; break; }
+        }
+    }
+    // A faixa à vista, se era uma delas, mostra já a contagem da base.
+    if (self.playCountTrackPath && !self.chavesDeContagem[self.playCountTrackPath]) [self refreshPlayCountLabel];
+}
+
 - (void)correrRegistoNaFonoteca {
     // Ainda a correr: os caminhos ficam guardados e voltam a ser agendados
     // quando este acabar.
@@ -9353,6 +9375,7 @@ static NSFileHandle *ZPRegistoParaAcrescentar(NSString *caminho) {
             // 1: correu, mas houve ficheiros com problemas (ficam no registo);
             // outro valor: nem chegou a correr como devia.
             if (estado != 0) [weakSelf avisarProblemaNoRegisto:pastas estado:estado log:registo];
+            [weakSelf esquecerChavesSemFonotecaEm:pastas];
             // Os .m4a novos trazem o codec (aac/alac) que a lista mostra.
             [weakSelf carregarCodecsDaFonoteca];
             if (weakSelf.caminhosPorRegistar.count > 0) {
