@@ -88,66 +88,65 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <p><code>osascript -e 'tell application "tocaTintas" to</code> <em>comando</em><code>'</code></p>
 
 <h2 id="descricao">Descrição</h2>
-<p>O <strong>tocaTintas</strong> toca a fonoteca guardada em disco, milhares de faixas em FLAC, WavPack, Monkey’s Audio, ALAC e outros formatos, sem a importar para lado nenhum. Percorre a pasta de música, por mais subpastas que tenha, e toca o que lá encontra pela ordem, ao acaso ou em repetição.</p>
-<p>Cada faixa toca com a sua <strong>capa</strong>, a que vem embutida no ficheiro ou, se não houver, a imagem da pasta do álbum. A mesma capa aparece na janela, na notificação, na página «a tocar» e, nos ficheiros WavPack, no próprio ícone do Finder. Um CD metido no leitor recebe a capa do mesmo álbum na fonoteca ou a do Cover Art Archive (ver <a href="#capas"><strong>CAPAS</strong></a>).</p>
-<p>Além disso, faz o que os leitores correntes não fazem:</p>
+<p>O <strong>tocaTintas</strong> toca a fonoteca guardada num volume e poderá gerir faixas em FLAC, WavPack, Monkey’s Audio, ALAC e outros formatos. Para o fazer, percorrerá uma pasta de música e todas as suas subpastas, e poderá tocar tudo o que lá encontre por ordem, ao acaso ou em repetição.</p>
+<p>Cada faixa toca mostrando a sua <strong>capa</strong>. Esta poderá ser a que vem embutida no ficheiro ou, se essa não existir, a que estiver na pasta de imagem de capa do álbum. A capa aparecerá na janela do tocador, na notificação do sistema, na página WWW «a tocar» e no caso dos WavPack nos ícones gerados pelo Finder. Adicionalmente, um CD receberá também uma capa de álbum. Esta poderá ser a que já exista na fonoteca ou uma obtida no Cover Art Archive (ver <a href="#capas"><strong>CAPAS</strong></a>).</p>
+<p>Além disso, faz uma série de ajustes de som:</p>
 <ul>
 <li>crossfeed <a href="https://bs2b.sourceforge.net/">bs2b</a> e equalização <a href="https://github.com/jaakkopasanen/AutoEq">AutoEQ</a> para os auscultadores;</li>
-<li>áudio espacial nos AirPods, com o tocaTintas no «A tocar» do sistema e comandado pelas hastes e pelas teclas multimédia;</li>
-<li>transmissão para receptores AirPlay e AirPlay 2, como o HomePod e a Apple TV;</li>
-<li>leitura de CDs, com os nomes vindos do <a href="https://musicbrainz.org/">MusicBrainz</a> e do <a href="https://gnudb.org/">gnudb</a>;</li>
-<li>contagem das audições numa base de dados da fonoteca, que junta também o que se ouve na aplicação Música;</li>
-<li>gravação do que o Mac toca, bit a bit e à frequência do original, incluindo o Dolby Atmos binaural da aplicação Música;</li>
-<li>um histograma de frequências em tempo real;</li>
-<li>um dicionário AppleScript, para ser comandado de fora.</li>
+<li>áudio espacial nos AirPods, com o tocaTintas integrado no «A tocar» do sistema e comandado pelas hastes dos AirPods e pelas teclas multimédia do teclado;</li>
+<li>transmissão de áudio para receptores AirPlay e AirPlay 2, como o HomePod e a Apple TV;</li>
+<li>leitura de CDs, com metadados ad hoc vindos do <a href="https://musicbrainz.org/">MusicBrainz</a> e do <a href="https://gnudb.org/">gnudb</a>;</li>
+<li>contagem das audições numa base de dados da fonoteca (SQLite), que combina também o que se ouve na aplicação Música para produzir uma contagem integral da música independentemente da sua origem;</li>
+<li>gravação do que o Mac tocar, bit a bit e à frequência do original, incluindo o Dolby Atmos binaural da aplicação Música;</li>
+<li>um histograma de frequências em tempo real e sincronizado mesmo quando a reprodução é remota via AirPlay;</li>
+<li>suporte de AppleScript, para ser comandado de fora e para integração com o Música.</li>
 </ul>
 
 <h2 id="janela-principal">Janela principal</h2>
 <figure>
 <img src="imagens/janela.png" alt="Janela principal do tocaTintas a tocar Figure Eights, de Buddy Rich e Max Roach" width="750" height="282">
-<figcaption>Fig. 1 — a janela principal, a tocar «Figure Eights» de <em>Rich Versus Roach</em>.</figcaption>
+<figcaption>Fig. 1 — o tocador a tocar «Figure Eights» de <em>Rich Versus Roach</em>.</figcaption>
 </figure>
 <p>À esquerda fica a capa. Ao centro estão o artista, o álbum e a faixa, em etiquetas que deslizam quando o texto não cabe, e à direita o histograma. Por baixo de tudo fica a barra de progresso.</p>
 
 <p class="rotulo"><strong>etiquetas deslizantes</strong></p>
-<p>Um texto que não cabe aparece cortado a meio com «…» (<em>Bach: Goldberg…BWV 988</em>), como em qualquer etiqueta do macOS. De tempos a tempos, desliza da direita para a esquerda até se ver todo, seguido de uma cópia que traz o princípio de volta ao lugar. No fim, volta à forma cortada. As bordas esbatem-se, para que o texto não entre nem saia de repente.</p>
-<p>As três etiquetas revezam-se, e só uma desliza de cada vez, pela ordem artista, álbum e faixa. As que cabem são saltadas. Quando começa uma faixa nova, tudo fica parado 2 s antes da primeira passagem, e entre duas passagens há 8 s. O texto anda a 50 pt/s, cerca de quatro caracteres e meio por segundo. Uma passagem só começa se a faixa durar até ela acabar, para que um título não fique a meio caminho quando a faixa seguinte o substitui.</p>
-<p>O movimento é feito pelo Core Animation, no servidor de composição. O texto desenha-se uma vez por passagem, e a aplicação só acorda duas vezes, no princípio e no fim. Redesenhar a 60 Hz custava cerca de 4 % do processador; assim, quase não custa nada.</p>
+<p>Um texto que não caiba aparece truncado com «…» (<em>Bach: Goldberg…BWV 988</em>), como em qualquer etiqueta do macOS. Periodicamente, deslizará da direita para a esquerda para se poder ler todo. No fim, voltará à forma truncada. As bordas esbatem-se, para que o texto mude suavemente.</p>
+<p>As três etiquetas revezam-se, e só uma deslizará de cada vez pela ordem: artista, álbum e faixa. As que cabem são saltadas. Quando começar uma faixa nova, o texto não deslizará durante 2 s. Uma passagem de texto só começará se a faixa durar tempo suficiente, para que um título não esteja a meio caminho quando a faixa seguinte começar.</p>
 
 <p class="rotulo"><strong>escolher a música</strong></p>
-<p>O menu em baixo, à esquerda, lista as faixas da pasta corrente, cada uma com o formato entre parênteses: <code>(flac)</code>, <code>(wv)</code> e, nos <code>.m4a</code>, <code>(aac)</code> ou <code>(alac)</code>, conforme o que a fonoteca diz que lá está. Pode escrever-se o princípio do nome para o completar. Os acentos contam como se escrevem no teclado, e um título que comece por um número («12 Études») também se encontra por esse número.</p>
+<p>O menu em baixo, à esquerda, lista as faixas da pasta corrente, cada uma com o formato entre parênteses: <code>(flac)</code>, <code>(wv)</code> e, nos <code>.m4a</code>, <code>(aac)</code> ou <code>(alac)</code>, conforme o que a fonoteca disser que lá está. Pode escrever-se o princípio do nome de uma faixa para a procurar. e programa autocompletará com o que encontrar que for coincidindo. O sistema funciona para caracteres acentuados e um título que comece por um número («12 Études») também se poderá procurar escrevendo esse número.</p>
 
 <p class="rotulo"><strong>⏮ ▶ ⏸ ⏹ ⏭</strong></p>
-<p>Anterior, tocar, pausa, parar e seguinte. Quando a janela mostra o que a aplicação Música está a tocar, os botões comandam o Música (ver a seguir).</p>
+<p>Anterior, tocar, pausa, parar e seguinte. Quando o programa estiver a interagir com o Música e o tocador mostrar o que a aplicação Música estiver a tocar, os botões comandarão o Música (ver a seguir).</p>
 
 <p class="rotulo"><strong>repetir</strong>, <strong>baralhar</strong></p>
-<p>O botão de repetir volta a tocar a faixa em curso quando ela chega ao fim, sem parar, até ser desligado. Cada repetição conta como uma audição nova. O botão de baralhar baralha a lista em vigor uma vez, e a ordem mantém-se até ser desligado. Nenhuma faixa se repete antes de todas terem tocado.</p>
+<p>O botão de repetir volta a tocar a faixa em curso quando ela chega ao fim, continuamente, até ser desligado. Cada repetição contará como uma audição nova. O botão de baralhar baralha a lista escolhida (ou a fonoteca inteira) uma vez, e essa ordem manter-se-á até ao botão ser desligado. Nenhuma faixa se repete antes de todas terem sido tocadas.</p>
 
 <p class="rotulo"><strong>⏺</strong></p>
 <p>Grava para WAV (ver <a href="#gravacao"><strong>GRAVAÇÃO</strong></a>).</p>
 
 <p class="rotulo"><strong>⏏</strong></p>
-<p>Ejecta o CD. Só fica activo quando há um disco no leitor.</p>
+<p>Ejecta o CD. Este botão só ficará activo quando houver um disco no leitor.</p>
 
 <p class="rotulo"><strong>auscultadores</strong> (à esquerda, por baixo da capa)</p>
-<p>Liga e desliga o tratamento dos auscultadores, o crossfeed e a equalização, <strong>sem mexer no volume</strong>, para se poder comparar o som com e sem ele. Azul quer dizer ligado e branco desligado. Sem auscultadores ligados, o botão apita e nada muda.</p>
+<p>Liga e desliga o tratamento de som para os auscultadores. O tratamento inclui crossfeed e equalização. Este tratamento funciona <strong>sem mexer no volume</strong>, para se poder comparar o som com e sem tratamento. Cor quer dizer ligado e branco desligado. Sem auscultadores ligados, o botão apitará se premido mas nada mudará.</p>
 
 <p class="rotulo"><strong>AirPlay</strong> (à direita, por baixo do histograma)</p>
-<p>Escolhe o receptor. Com <strong>⌘-clique</strong>, a sessão com o receptor corrente é reaberta, o que resolve os casos em que ele adormeceu ou a rede falhou por instantes.</p>
+<p>Escolhe o receptor. Com <strong>⌘-clique</strong>, a sessão com o receptor corrente será reaberta, o que resolverá os casos em que o receptor tenha adormecido ou quando a rede tiver sido interrompida durante algum tempo.</p>
 
 <h3>O que a aplicação Música toca</h3>
-<p>Quando o tocaTintas está parado, nem a tocar nem em pausa, a janela mostra o que a aplicação Música estiver a tocar: a capa, o artista, o álbum, o título e a barra de progresso. O título leva ♫ à frente, para se saber de onde vem. Isto serve sobretudo para gravar, porque se vê ali o que está a entrar no ficheiro. Logo que o tocaTintas toque alguma coisa sua, a janela volta a ser dele.</p>
-<p>O Música avisa cada faixa nova, cada pausa e cada paragem. Entre avisos, a barra avança sozinha e é acertada pela posição verdadeira a cada cinco segundos. Se o Música não responder, a janela mantém o que mostra e volta a perguntar daí a cinco segundos. Só desiste à terceira falha seguida, até ao aviso seguinte do Música.</p>
+<p>Quando o programa Música estiver a tocar e o tocaTintas não estiver, o tocador mostrará a música que o programa Música estiver tocando: a capa, o artista, o álbum, o título e a barra de progresso. O título leva ♫, o número da faixa e o número total de faixas do álbum à frente do título da faixa, para que seja claro que vem do Música e não da fonoteca. Este modo serve sobretudo para gravar. Logo que o tocaTintas toque alguma coisa sua, a janela voltará a ser sua.</p>
+
 <p class="rotulo"><strong>os botões</strong></p>
-<p>Com o Música na janela, os botões ⏮ ▶ ⏸ ⏹ ⏭ comandam o Música. O ⏸ alterna entre pausa e reprodução, como no tocaTintas. O ⏮ vai sempre à faixa anterior, também como no tocaTintas, e não ao princípio da faixa, como o botão do próprio Música. O ⏹ pára o Música e devolve a janela ao tocaTintas. Para tocar uma faixa do tocaTintas com o Música à vista, escolhe-se a faixa na lista ou pára-se primeiro o Música. Se o Música não responder, nada acontece: tocar de repente outra coisa seria mais estranho do que um clique sem efeito. Os comandos AppleScript continuam a ser só do tocaTintas.</p>
+<p>Com o Música no tocador, os botões ⏮ ▶ ⏸ ⏹ ⏭ comandam o Música. O ⏸ alterna entre pausa e reprodução, como no tocaTintas. O ⏮ vai sempre à faixa anterior, também como no tocaTintas, e não ao princípio da faixa, como o botão do próprio Música. O ⏹ pára o Música e devolve a janela ao tocaTintas. Para voltar ao tocaTintas mesmo com o Música a correr, escolhe-se uma faixa da fonoteca ou simplesmente pára-se primeiro o Música.</p>
 <p class="rotulo"><strong>a contagem</strong></p>
-<p>Por baixo, à direita, aparece quantas vezes a faixa já tocou, incluindo «tocou 0 vezes», que é a forma de saber que é a primeira. Para as faixas da biblioteca do Música, a contagem é a do próprio Música. Para as faixas do catálogo do Apple Music que não estão na biblioteca, e para as das estações, o Música não guarda contagem nenhuma. Nesse caso, a contagem é a da base da fonoteca, que inclui as audições da mesma música nos ficheiros e nos CDs (ver <a href="#audicoes-do-musica"><strong>AUDIÇÕES DO MÚSICA</strong></a>).</p>
+<p>No canto inferior direito do tocador é mostrado quantas vezes a faixa já tocou. Para as faixas da biblioteca do Música, a contagem é a do próprio Música. O Música não guarda qualquer contagem para as faixas do catálogo do Apple Music que não tiverem uma cópia local e para as das estações. Nestes casos, gera-se uma entrada normalizada de contagem na base de dados. Esta contagem na base de dados do tocaTintas combinará essas audições do Apple Music com as audições da mesma música nos ficheiros e nos CDs (ver <a href="#audicoes-do-musica"><strong>AUDIÇÕES DO MÚSICA</strong></a>).</p>
 <p class="rotulo"><strong>a capa</strong></p>
-<p>Para as faixas da biblioteca, a capa é a que o Música dá. Para as do catálogo e das estações, o Música entrega pelo AppleScript a capa da faixa anterior, ou nenhuma, embora o seu minileitor mostre a certa. Por isso, o tocaTintas vai buscar a capa dessas faixas ao catálogo da Apple, pela pesquisa pública do iTunes, na loja do país do Mac, a 600 px. Procura primeiro o artista e, entre os álbuns dele, o que tem esse nome. Isto encontra os discos de nomes comuns, que uma pesquisa por texto esconde debaixo de outros. Se não o encontrar assim, pesquisa o álbum pelo artista e pelo nome e, por fim, a faixa pelo artista e pelo título, e dela tira o álbum. O nome do álbum compara-se sem contar maiúsculas e acentos e, se for preciso, sem sufixos de edição como «(Deluxe Version)», «- EP» ou «- Single». Entre os álbuns que servem, o do mesmo artista tem prioridade, porque há, por exemplo, mais de um «Bloom». Sem correspondência fica a imagem genérica, porque a capa de outro disco engana mais do que nenhuma. A capa chega uns instantes depois do resto.</p>
+<p>Para as faixas da biblioteca do Música, a capa será a que o Música der. Para as faixas do catálogo e das estações do Apple Music, o tocaTintas irá buscar a capa directamente ao catálogo da Apple através da pesquisa pública do iTunes da loja do país onde o Mac estiver. Procurará primeiro o artista e, entre os álbuns dele, o que tenha o nome do que estiver a ser tocado. Se isto não funcionar, pesquisará o álbum pelo artista e pelo nome e, por fim, a faixa pelo artista e pelo título, e dela inferirá o nome do álbum. O nome do álbum compara-se sem contar maiúsculas e acentos e, se for preciso, sem sufixos de edição como «(Deluxe Version)», «- EP» ou «- Single». Entre os álbuns que coincidam, os do mesmo artista terão prioridade. Não havendo correspondência, ficará a imagem genérica, pois capa nenhuma será melhor do que capa errada. Por tudo isto, a capa poderá chegar uns instantes depois do resto.</p>
 
 <h2 id="formatos">Formatos</h2>
-<p><a href="https://xiph.org/flac/">FLAC</a>, <a href="https://www.wavpack.com/">WavPack</a> (<code>.wv</code>), <a href="https://www.monkeysaudio.com/">Monkey’s Audio</a> (<code>.ape</code>), <a href="https://github.com/macosforge/alac">ALAC</a> e AAC (<code>.m4a</code>), AIFF, MP3 e <a href="https://opus-codec.org/">Opus</a>. Quando a mesma faixa existe em vários formatos, a preferência segue a ordem desta lista.</p>
-<p>As etiquetas lêem-se do próprio ficheiro: comentários Vorbis no FLAC e no Opus, e APEv2 no fim do ficheiro no WavPack e no Monkey’s Audio.</p>
+<p><a href="https://xiph.org/flac/">FLAC</a>, <a href="https://www.wavpack.com/">WavPack</a> (<code>.wv</code>), <a href="https://www.monkeysaudio.com/">Monkey’s Audio</a> (<code>.ape</code>), <a href="https://github.com/macosforge/alac">ALAC</a> e AAC (<code>.m4a</code>), AIFF, MP3 e <a href="https://opus-codec.org/">Opus</a>. Quando a mesma faixa existir em vários formatos, a preferência segue a ordem desta lista.</p>
+<p>As etiquetas lêem-se do próprio ficheiro: comentários Vorbis no FLAC e no Opus, e APEv2 no WavPack e no Monkey’s Audio.</p>
 
 <h2 id="capas">Capas</h2>
 <p class="rotulo"><strong>Ficheiros</strong></p>
@@ -157,49 +156,48 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <li><code>cover.jpg</code>, <code>folder.jpg</code>, <code>front.jpg</code>, <code>cover.png</code> e <code>folder.png</code>;</li>
 <li>qualquer imagem da pasta, por ordem alfabética.</li>
 </ol>
-<p>O terceiro passo existe por causa do abcde. Ao embutir a capa nos vários formatos, ele chega a apagar a <code>cover.jpg</code> e a deixar só as <code>cover-resized-NNNN.jpg</code>. Os <code>.ape</code> que produz não trazem capa nenhuma.</p>
+<p>O terceiro passo existe por causa do abcde. Ao embutir a capa nos vários formatos, ele poderá apagar a <code>cover.jpg</code> e a deixar só as <code>cover-resized-NNNN.jpg</code>.</p>
 <p class="rotulo"><strong>CDs</strong></p>
-<p>As fontes consultam-se pela ordem escolhida no separador <strong>CD</strong>: a imagem da pasta do mesmo álbum na fonoteca ou a do <a href="https://coverartarchive.org/">Cover Art Archive</a>. Neste último, tenta-se primeiro a capa da edição que o MusicBrainz identificou, depois a de outra edição do mesmo disco e, por fim, a do grupo de lançamento, que pode ser a de outra edição do mesmo álbum, mesmo noutro formato. O gnudb não tem capas.</p>
+<p>As fontes consultam-se pela ordem escolhida no separador <strong>CD</strong> das Preferências do tocaTintas: a imagem da pasta do mesmo álbum na fonoteca ou a do <a href="https://coverartarchive.org/">Cover Art Archive</a>. Neste último, tenta-se primeiro a capa da edição que o MusicBrainz identificou, depois a de outra edição do mesmo disco e, por fim, a do grupo de lançamento, que pode ser a de outra edição do mesmo álbum, mesmo noutro formato. O gnudb não tem capas.</p>
 <p class="rotulo"><strong>Aplicação Música</strong></p>
 <p>Ver <a href="#janela-principal">o que a aplicação Música toca</a>, na janela principal.</p>
 <p class="rotulo"><strong>Sem capa</strong></p>
-<p>Um CD sem capa em nenhuma fonte e uma faixa cujas etiquetas não se consigam ler ficam com a imagem genérica do tocaTintas.</p>
+<p>Um CD cuja capa não tenha sido encontrada e uma faixa sem capa ficarão com a imagem genérica do tocaTintas.</p>
 
 <h2 id="fonoteca">Fonoteca</h2>
-<p>A pasta de música escolhe-se nas Preferências, no separador <strong>Música</strong>. O tocaTintas percorre todas as subpastas e encontra sozinho os ficheiros de áudio.</p>
-<p>Dentro dessa pasta pode estar <code>CDs/.fonoteca.sqlite</code>, a base de dados mantida pelo <strong>verificar_md5IV.sh</strong> e pelo <strong>fonoteca.py</strong>. Cada música tem um UUID, que é o mesmo na etiqueta <code>FONOTECA_ID</code> do ficheiro e na faixa do CD de onde veio. O tocaTintas acrescenta-lhe as audições, que dão o «tocou 7 vezes» da janela, e os discos que tocou antes de terem sido riporinados. Quando preenche um campo, só o faz se ele estiver vazio, e nunca apaga nem substitui nada (ver <a href="#base-da-fonoteca"><strong>A BASE DE DADOS DA FONOTECA</strong></a>).</p>
-<p>A base pode estar num disco externo a dormir. Todo o acesso passa por uma fila própria, fora do thread principal, e se a base não existir, o tocaTintas tenta outra vez da vez seguinte, porque o disco pode ainda não estar montado.</p>
+<p>A pasta de música escolhe-se nas Preferências, no separador <strong>Música</strong>. O tocaTintas percorrerá então todas as subpastas e encontrará os ficheiros de áudio nelas contidos.</p>
+<p>Dentro dessa pasta principal poderá estar <code>.fonoteca.sqlite</code>, a base de dados mantida pelo <strong>verificar_md5IV.sh</strong> e pelo <strong>fonoteca.py</strong>. Nessa base de dados, cada música tem um UUID, que é o mesmo na etiqueta <code>FONOTECA_ID</code> do ficheiro e na faixa do CD donde veio. O tocaTintas acrescenta-lhe o número de audições e os discos que tocou antes de terem sido riporinados. Quando preenche um campo, só o faz se ele estiver vazio, e nunca apaga nem substitui informação (ver <a href="#base-da-fonoteca"><strong>A BASE DE DADOS DA FONOTECA</strong></a>).</p>
+<p>A base de dados pode estar num disco externo mesmo que esteja em pausa. Todo o fluxo de acesso à base de dados passa por uma fila própria, fora do thread principal, e se a base não estiver disponível, o tocaTintas continuará a tentar actualizar a base de dados até ao disco acordar ou ser outra vez montado.</p>
 <h3>Registo automático</h3>
-<p>Um álbum novo, ou uma pasta que mudou de nome ou de sítio, entra na base sem ser preciso correr o verificar_md5IV.sh. O tocaTintas acompanha a pasta de música pelo FSEvents do macOS e, quando ela fica um minuto sem mudanças, corre o <code>fonoteca.py registar</code> sobre as pastas que mudaram. O minuto de espera existe porque um rip ou um corte escrevem durante muito tempo, e o registo pode gravar o <code>FONOTECA_ID</code> nos ficheiros, o que nunca deve acontecer num ficheiro a meio.</p>
-<p>O registo trata dos ficheiros novos, dos que mudaram de sítio (reconhecidos pelo MD5 do áudio e pelo <code>FONOTECA_ID</code>), dos que desapareceram e das audições que tinham ficado sem ficheiro. Não verifica o áudio, que continua a ser trabalho do verificar_md5IV.sh. A saída fica em <code>registar.log</code>. Se houver ficheiros com problemas, ou se o registo não chegar a correr, aparece uma notificação.</p>
-<p>As somas MD5 do áudio guardam-se num único <code>.md5sum.txt</code>, na pasta da base (<code>CDs/</code>). O verificar_md5IV.sh refá-lo a partir da base de cada vez que corre, e apaga os <code>.md5sum.txt</code> antigos que encontre nas subpastas.</p>
+<p>Um álbum novo, ou uma pasta que tenha mudado de nome ou de sítio, entrará na base de dados sem ser preciso correr manualmente quaisquer programas. O tocaTintas acompanha a pasta de música pelo FSEvents do macOS e, quando ela ficar um minuto sem mudanças, correrá automaticamente o <code>fonoteca.py registar</code> nas as pastas que mudaram. O minuto de espera existe porque um rip ou um corte escrevem durante muito tempo, e o registo pode gravar o <code>FONOTECA_ID</code> nos ficheiros, o que nunca deve acontecer num ficheiro incompleto.</p>
+<p>O registo trata dos ficheiros novos, dos que mudaram de sítio (reconhecidos pelo MD5 do áudio e pelo <code>FONOTECA_ID</code>), dos que desapareceram e das audições que não tenham ficheiro. Não verifica a integridade da informação do áudio, que continua a ser trabalho do verificar_md5IV.sh via determinação e comparação de MD5. A saída fica em <code>registar.log</code>. Se houver ficheiros com problemas, ou se o registo não chegar a correr, aparecerá uma notificação.</p>
+<p>As MD5 do áudio guardam-se num único <code>.md5sum.txt</code>, na pasta da base (<code>CDs/</code>). O verificar_md5IV.sh refá-lo a partir da base de cada vez que corre, e apagará os <code>.md5sum.txt</code> antigos que encontre nas subpastas.</p>
 <h3>Verificação diária</h3>
-<p>Uma vez por dia, o tocaTintas corre o <code>fonoteca.py consistencia</code>, que só lê e não muda nada. Procura o que ficou entre duas contas: ficheiros de áudio na pasta de música que a base não tem, e faixas do Música que deviam estar ligadas à versão local do seu álbum e não estão. Se encontrar alguma coisa, aparece a notificação «Fonoteca: há contas por acertar», com o primeiro problema, e o resto fica em <code>sincronizar-musica.log</code>. Se estiver tudo certo, não diz nada. A verificação corre mesmo com o Música fechado.</p>
+<p>Uma vez por dia, o tocaTintas corre o <code>fonoteca.py consistencia</code>, que só lê e não muda nada. Reconcilia a base de dados com a realidade: ficheiros de áudio na pasta de música que a base não tem, e faixas do Música que deviam estar ligadas à versão local do seu álbum e não estão. Se encontrar alguma coisa, aparecerá a notificação «Fonoteca: há contas por acertar», com o primeiro problema, e o resto fica em <code>sincronizar-musica.log</code>. Se estiver tudo certo, não diz nada. A verificação correrá mesmo com o Música fechado.</p>
 
 <h2 id="base-da-fonoteca">A base de dados da fonoteca</h2>
 <figure>
 <img src="imagens/fonoteca.png" alt="DB Browser for SQLite com a vista fonoteca aberta, ordenada pela última audição" width="1582" height="967" loading="lazy">
-<figcaption>Fig. 3 — a vista <code>fonoteca</code> no DB Browser for SQLite, ordenada pela última audição, antes de lá estarem as músicas que só existem na aplicação Música.</figcaption>
+<figcaption>Fig. 3 — a vista <code>fonoteca</code> no DB Browser for SQLite, ordenada pela última audição.</figcaption>
 </figure>
-<p>A base separa três coisas que um leitor de música costuma confundir: a <strong>música</strong> (uma gravação), o <strong>ficheiro</strong> (onde ela está agora, num dado formato) e o <strong>disco</strong> (o CD de onde veio). Uma música pode ter vários ficheiros, por exemplo um FLAC e um AAC da mesma gravação, e pode estar em vários discos, como uma compilação e o álbum original. As audições contam-se na música, e por isso não se perdem quando um ficheiro muda de nome, de pasta ou de formato. A aplicação Música entra como uma quarta fonte, com as suas próprias faixas.</p>
-<p>Os números entre parênteses são os de 29 de Outubro de 2026.</p>
+<p>A base de dados indentifica três coisas: a <strong>música</strong> (uma gravação), o <strong>ficheiro</strong> (onde ela está agora, num dado formato) e o <strong>disco</strong> (o CD de onde veio). Uma dada música pode ter vários ficheiros, por exemplo um FLAC e um AAC da mesma gravação, e pode estar em vários discos, como uma compilação e o álbum original. As audições contam-se na música, e por isso não se perdem quando um ficheiro muda de nome, de pasta ou de formato. A aplicação Música entra como uma quarta fonte, com as suas próprias faixas.</p>
+
 <h3>Tabelas</h3>
 <p class="rotulo"><strong>musicas</strong> (37&nbsp;675)</p>
-<p>Uma linha por gravação. A chave é um UUID v4, o mesmo que está na etiqueta <code>FONOTECA_ID</code> dos ficheiros. Guarda o título, o artista, o álbum, o disco, a faixa e a duração, e, como referência, os identificadores do MusicBrainz da gravação e do lançamento. Cerca de metade são músicas que só existem na aplicação Música.</p>
+<p>Uma linha por gravação. A chave é um UUID v4, o mesmo que está na etiqueta <code>FONOTECA_ID</code> dos ficheiros. Guarda o título, o artista, o álbum, o disco, a faixa e a duração, e, como referência, os identificadores do MusicBrainz da gravação e do lançamento. Cerca de metade são músicas que só existem no programa Música.</p>
 <p class="rotulo"><strong>ficheiros</strong> (19&nbsp;471)</p>
-<p>Uma linha por ficheiro de áudio, com a música a que pertence, o <strong>MD5 do áudio</strong>, o formato, o caminho e a última vez que o caminho foi confirmado. O MD5 é o das tramas ou dos pacotes de áudio tal como estão, sem etiquetas nem capa, para que mudá-las não o altere. Só o Monkey’s Audio é descodificado para PCM. Um ficheiro que desapareça fica com o caminho a NULL em vez de ser apagado. Assim, a sua história continua na base, e o MD5 permite reconhecê-lo se voltar a aparecer noutro sítio.</p>
+<p>Uma linha por ficheiro de áudio, com a música a que pertence, o <strong>MD5 do áudio</strong>, o formato, o caminho e a última vez que o caminho foi confirmado. A MD5 é exclusivamenta a do som: das tramas ou dos pacotes de áudio tal como estão, sem considerar os metadados, para que mudá-los não a altere. Só o Monkey’s Audio é descodificado para PCM. Um ficheiro que desapareça, ficaria com o caminho a NULL em vez de ser apagado da base de dados. Assim, a sua história continuaria na base de dados, e a MD5 permitiria reconhecê-lo se voltasse a aparecer mais tarde.</p>
 <p class="rotulo"><strong>discos</strong> (1&nbsp;237)</p>
-<p>Os CDs, pelo identificador CDDB de oito dígitos e, quando se conhecem, pela TOC completa e pelo disc ID do MusicBrainz. O CDDB sozinho não basta, porque discos diferentes podem partilhá-lo. Por isso, o que é único é o par CDDB e TOC.</p>
+<p>Os CDs, pelo identificador CDDB de oito dígitos e, quando se conhecem, pela TOC completa e pelo disc ID do MusicBrainz. Usar só o CDDB não basta, porque discos diferentes podem partilhá-lo. Por isso, o que é único é o par CDDB e TOC.</p>
 <p class="rotulo"><strong>faixas_cd</strong> (15&nbsp;991)</p>
-<p>A ligação entre discos e músicas: a faixa <em>n</em> do disco <em>d</em> é a música <em>m</em>. É por aqui que um CD metido no leitor encontra os nomes, a capa e o ganho na fonoteca, e que uma audição do CD conta para a mesma música que o ficheiro riporinado.</p>
+<p>A ligação entre discos e músicas: a faixa <em>n</em> do disco <em>d</em> é a música <em>m</em>. É por esta via que um CD metido no leitor encontra os nomes, a capa e o ganho na fonoteca, e que uma audição do CD e um ficheiro riporinado contam para a mesma música.</p>
 <p class="rotulo"><strong>faixas_musica</strong> (37&nbsp;896)</p>
 <p>As faixas da aplicação Música, pelo persistent ID que o Música lhes dá, cada uma ligada à sua música. O estado diz como foi ligada: automaticamente, por escolha, com uma música própria criada para ela, ou ainda pendente de escolha. Guarda também o que o Música mostra (artista, álbum, faixa, título e duração), a contagem que o Música tinha quando a faixa entrou na base e a última contagem já registada. As faixas do catálogo tocadas fora da biblioteca têm uma chave tirada da própria faixa, porque o persistent ID delas muda a cada reprodução. Ver <a href="#audicoes-do-musica"><strong>AUDIÇÕES DO MÚSICA</strong></a>.</p>
 <p class="rotulo"><strong>candidatas_musica</strong> (5&nbsp;098)</p>
 <p>Para cada faixa pendente, as músicas a que pode corresponder, pela ordem de preferência, com o critério que as encontrou e a diferença de duração.</p>
 <p class="rotulo"><strong>audicoes</strong> (992)</p>
-<p>Uma linha por audição, com a música, a data e hora (ISO 8601, em UTC), a origem (<code>ficheiro</code>, <code>cd</code> ou <code>musica</code>) e o ficheiro, o disco ou a faixa do Música que tocou. Uma faixa do tocaTintas conta ao fim de 5 segundos de audição efectiva. As pausas não contam, nem avançar antes disso, e cada reprodução conta uma vez. As regras da aplicação Música estão em <a href="#audicoes-do-musica"><strong>AUDIÇÕES DO MÚSICA</strong></a>.</p>
-<p class="rotulo"><strong>contagens_importadas</strong> (14&nbsp;616)</p>
-<p>As contagens que o tocaTintas guardava antes de haver base, em <code>~/Library/Application Support/tocaTintas/contagens.json</code>. Foram trazidas uma única vez pelo <code>fonoteca.py importar</code>, que recusa repetir a importação. Somam-se às audições, mas não têm datas: só as audições novas as têm.</p>
+<p>Uma linha por audição, com a música, a data e hora (ISO 8601, em UTC), a origem (<code>ficheiro</code>, <code>cd</code> ou <code>musica</code>) e o ficheiro, o disco ou a faixa do Música que tocou. Uma faixa do tocaTintas conta ao fim de 5 segundos de audição efectiva. Pausar e retomar não avançarão a contagem, nem avançar antes dos 5 segundos, e cada reprodução contará uma vez. As regras da aplicação Música estão em <a href="#audicoes-do-musica"><strong>AUDIÇÕES DO MÚSICA</strong></a>.</p>
+
 <h3>Vistas</h3>
 <p class="rotulo"><strong>contagens</strong></p>
 <p>Por música, o total de audições e a data da última. O total soma as contagens importadas, as que o Música tinha quando as suas faixas foram ligadas à música e as audições registadas.</p>
