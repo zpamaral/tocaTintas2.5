@@ -236,4 +236,36 @@ static id ZPSeFor(id v, Class c) { return [v isKindOfClass:c] ? v : nil; }
     });
 }
 
++ (void)posicaoDe:(NSString *)artista album:(NSString *)album titulo:(NSString *)titulo duracao:(double)duracao
+        concluido:(void (^)(NSInteger, NSInteger))concluido {
+    dispatch_async([self fila], ^{
+        NSDictionary *a = [self albumDe:artista chamado:album titulo:titulo lojas:@[ [self lojaDoMac] ] exacto:NO];
+        NSArray<NSDictionary *> *faixas = a ? [self faixasDoAlbum:a] : @[];
+        NSString *chave = ZPChaveDoNome(titulo);
+        NSDictionary *achada = nil;
+        for (NSDictionary *t in faixas) {
+            NSString *nome = ZPSeFor(t[@"trackName"], [NSString class]);
+            if (nome && [ZPChaveDoNome(nome) isEqualToString:chave]) { achada = t; break; }
+        }
+        if (!achada && duracao > 0) {
+            NSUInteger perto = 0;
+            for (NSDictionary *t in faixas) {
+                if (fabs([ZPSeFor(t[@"trackTimeMillis"], [NSNumber class]) doubleValue] / 1000.0 - duracao) < 1.5) {
+                    achada = t;
+                    ++perto;
+                }
+            }
+            if (perto != 1) achada = nil;
+        }
+        // O «trackCount» da Apple não é de fiar (ver o ZPPosGravacao): contam-se
+        // as faixas do mesmo disco.
+        NSInteger faixa = [ZPSeFor(achada[@"trackNumber"], [NSNumber class]) integerValue], total = 0;
+        if (faixa > 0) {
+            for (NSDictionary *t in faixas) if ([t[@"discNumber"] isEqual:achada[@"discNumber"]]) ++total;
+        }
+        if (total < faixa) faixa = total = 0;
+        dispatch_async(dispatch_get_main_queue(), ^{ concluido(faixa, total); });
+    });
+}
+
 @end

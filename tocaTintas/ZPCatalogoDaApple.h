@@ -78,6 +78,16 @@ NS_ASSUME_NONNULL_BEGIN
         titulo:(nullable NSString *)titulo
      concluido:(void (^)(NSData *_Nullable capa))concluido;
 
+// O número de uma faixa do Música no seu disco e quantas o disco tem, pelo
+// catálogo da loja do Mac (o Música dá 0 aos dois nas faixas do catálogo). A
+// faixa acha-se pelo nome; senão pela duração, a menos de 1,5 s, se só uma
+// cair aí. Entregue no thread principal; 0 e 0 se não se souber. Não bloqueia.
++ (void)posicaoDe:(NSString *)artista
+            album:(NSString *)album
+           titulo:(NSString *)titulo
+          duracao:(double)duracao
+        concluido:(void (^)(NSInteger faixa, NSInteger total))concluido;
+
 @end
 
 NS_ASSUME_NONNULL_END

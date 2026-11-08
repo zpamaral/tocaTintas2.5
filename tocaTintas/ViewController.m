@@ -447,6 +447,10 @@ static WavpackStreamReader memoryReader = {
 @property (assign, nonatomic) double musicaDuracao;
 @property (strong, nonatomic) NSDate *musicaQuando;
 @property (copy, nonatomic) NSString *musicaFaixaMostrada;
+// «3/13», a posição da faixa do Música no disco, só durante as gravações (ver
+// -escreverTituloDoMusica:chave:); a chave é a da faixa a que se refere.
+@property (copy, nonatomic) NSString *posicaoDoMusica;
+@property (copy, nonatomic) NSString *posicaoDoMusicaChave;
 @property (assign, nonatomic) NSUInteger musicaTiques;
 @property (assign, nonatomic) NSUInteger musicaFalhas;
 // A faixa do catálogo (fora da biblioteca do Música) que está a tocar, quanto
@@ -11360,7 +11364,6 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
     BOOL doCatalogo = ZPEDoCatalogo(m);
     [self acompanharOCatalogo:doCatalogo ? m : nil];
 
-    NSString *titulo = ZPTituloDoMusica(m);
     NSString *chave = ZPChaveDoMusica(m);
     BOOL faixaNova = !self.aMostrarOMusica || ![chave isEqualToString:self.musicaFaixaMostrada];
     if (faixaNova) {
@@ -11369,7 +11372,6 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
         // fica como o Música o deu, que é o que o catálogo e as chaves esperam.
         [self.artistLabel setStringValue:[self replaceSingleQuoteAndSmartQuotes:m[@"artista"]]];
         [self.albumLabel setStringValue:[self replaceSingleQuoteAndSmartQuotes:m[@"album"]]];
-        [self.titleLabel setStringValue:[self replaceSingleQuoteAndSmartQuotes:titulo]];
         self.playCountLabel.stringValue = @"";
         self.contagemDoCatalogo = nil;
         if (doCatalogo) [self lerContagemDoCatalogo:m];
@@ -11397,12 +11399,15 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
         }
     }
 
+    // A cada pergunta: uma gravação que comece ou acabe a meio da faixa muda-o.
+    BOOL tituloMudou = [self escreverTituloDoMusica:m chave:chave];
+
     // Escreve-se a cada pergunta, e não só ao mudar de faixa: o Música soma a
     // audição quando a faixa acaba, e a contagem nova aparece na pergunta
     // seguinte. Uma do catálogo mostra a da base, que chega à parte.
     NSNumber *ouvida = doCatalogo ? self.contagemDoCatalogo : m[@"ouvida"];
     if (ouvida) [self escreverContagemDoMusica:ouvida.integerValue];
-    if (faixaNova) [self actualizarAPaginaDoMusica];
+    if (faixaNova || tituloMudou) [self actualizarAPaginaDoMusica];
 
     self.aMostrarOMusica = YES;
     self.musicaATocar = [m[@"estado"] isEqualToString:@"playing"];
@@ -11447,6 +11452,43 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
 // do Mac, a 600 px. Sem nenhuma fica a imagem genérica: uma capa de outro disco
 // engana mais do que nenhuma. Chega mais tarde: só se põe se a faixa à vista
 // ainda for a mesma.
+// O título do Música na janela. Durante uma gravação, com a posição da faixa no
+// disco: «♫ 3/13 Fridays» — vê-se quanto falta do álbum que está a
+// entrar no ficheiro. O Música dá-a nas faixas da biblioteca; nas do catálogo
+// dá 0, e pede-se ao catálogo da Apple (chega depois). Só se escreve se mudou:
+// a etiqueta desliza, e escrevê-la de novo recomeçava-a. Diz se mudou.
+- (BOOL)escreverTituloDoMusica:(NSDictionary *)m chave:(NSString *)chave {
+    NSString *titulo = ZPTituloDoMusica(m);
+    if (self.isRecording) {
+        if (![self.posicaoDoMusicaChave isEqualToString:chave]) {
+            self.posicaoDoMusicaChave = chave;
+            self.posicaoDoMusica = nil;
+            NSInteger faixa = [m[@"faixa"] integerValue], total = [m[@"faixas"] integerValue];
+            if (faixa > 0 && total >= faixa) {
+                self.posicaoDoMusica = [NSString stringWithFormat:@"%ld/%ld", (long)faixa, (long)total];
+            } else if ([m[@"album"] length]) {
+                __weak typeof(self) fraco = self;
+                [ZPCatalogoDaApple posicaoDe:m[@"artista"] album:m[@"album"] titulo:m[@"titulo"]
+                                     duracao:[m[@"duracao"] doubleValue]
+                                   concluido:^(NSInteger f, NSInteger n) {
+                    __strong typeof(fraco) forte = fraco;
+                    if (f <= 0 || !forte.aMostrarOMusica || ![forte.posicaoDoMusicaChave isEqualToString:chave]
+                        || ![forte.musicaFaixaMostrada isEqualToString:chave]) return;
+                    forte.posicaoDoMusica = [NSString stringWithFormat:@"%ld/%ld", (long)f, (long)n];
+                    if ([forte escreverTituloDoMusica:m chave:chave]) [forte actualizarAPaginaDoMusica];
+                }];
+            }
+        }
+        if (self.posicaoDoMusica) {
+            titulo = [NSString stringWithFormat:@"♫ %@ %@", self.posicaoDoMusica, m[@"titulo"]];
+        }
+    }
+    NSString *mostrar = [self replaceSingleQuoteAndSmartQuotes:titulo];
+    if ([self.titleLabel.stringValue isEqualToString:mostrar]) return NO;
+    [self.titleLabel setStringValue:mostrar];
+    return YES;
+}
+
 - (void)procurarCapaDoMusicaNoCatalogo:(NSString *)artista album:(NSString *)album
                                 titulo:(NSString *)titulo faixa:(NSString *)chave {
     if (album.length == 0) return;

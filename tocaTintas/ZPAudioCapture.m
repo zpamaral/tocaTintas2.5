@@ -262,7 +262,7 @@ NSDictionary *ZPMusicNowPlaying(void) {
              "    set e to player state as string\n"
              "    if e is \"stopped\" then return {e}\n"
              "    set t to current track\n"
-             "    return {e, player position, name of t, artist of t, album of t, duration of t, track number of t, played count of t, persistent ID of t, class of t as string, disc number of t}\n"
+             "    return {e, player position, name of t, artist of t, album of t, duration of t, track number of t, played count of t, persistent ID of t, class of t as string, disc number of t, track count of t}\n"
              "  end tell\n"
              "end timeout"];
     }
@@ -291,6 +291,8 @@ NSDictionary *ZPMusicNowPlaying(void) {
               // biblioteca: o Música não lhe guarda contagem.
               @"classe":  (r.numberOfItems >= 10 ? [r descriptorAtIndex:10].stringValue : nil) ?: @"",
               @"disco":   @(r.numberOfItems >= 11 ? [r descriptorAtIndex:11].int32Value : 0),
+              // As faixas do disco: 0 nas do catálogo, como o número da faixa.
+              @"faixas":  @(r.numberOfItems >= 12 ? [r descriptorAtIndex:12].int32Value : 0),
               // O relógio do anfitrião antes e depois da pergunta, para a TOC
               // (ver -[ZPAudioCapture tramaDoHost:]).
               @"hostAntes":  @(antes),
