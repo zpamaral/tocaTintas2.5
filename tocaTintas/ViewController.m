@@ -269,7 +269,7 @@ static WavpackStreamReader memoryReader = {
     get_length,
     can_seek
 };
-@interface ViewController () <AVAudioPlayerDelegate, UNUserNotificationCenterDelegate>
+@interface ViewController () <AVAudioPlayerDelegate, UNUserNotificationCenterDelegate, NSMenuItemValidation>
 
 @property (nonatomic, strong) NSTextField *playCountLabel;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *trackPlayCounts;   // chave da música → reproduções
