@@ -5,9 +5,6 @@
       location = "group:tocaTintas.xcodeproj">
    </FileRef>
    <FileRef
-      location = "group:tocaTintas/tocaTintas.help">
-   </FileRef>
-   <FileRef
       location = "group:Pods/Pods.xcodeproj">
    </FileRef>
 </Workspace>

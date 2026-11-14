@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Audições da aplicação Música — tocaTintas</title>
-<meta name="description" content="O que se ouve na aplicação Música também conta na base da fonoteca, e conta na música certa. Se a mesma gravação existir num ficheiro ou num CD, as audições juntam-se às dessa…">
+<meta name="description" content="O que se ouvir na aplicação Música também contará na base de dados da fonoteca. Se a mesma gravação existir num ficheiro ou num CD, as audições somam-se às dessa música. Se não…">
 <meta name="keywords" content="As três regras, Sincronização, Como se liga uma faixa, A janela «Ligar faixas do Música», Ligar, ↩, ou duplo clique, Saltar, Aceitar o álbum, ▶︎ Ouvir 10 s, Apple Music, Música, contagens, played count, sincronizar, ligar faixas, pendentes, catálogo">
 <meta name="robots" content="index, anchors">
 <link rel="stylesheet" href="estilo.css">
@@ -15,18 +15,18 @@
 <nav class="percurso"><span><a href="base-da-fonoteca.html">◂ A base de dados da fonoteca</a></span><span><a href="index.html">Temas</a></span><span><a href="listas-m3u.html">Listas M3U e M3U8 ▸</a></span></nav>
 <main>
 <h2 id="audicoes-do-musica">Audições da aplicação Música</h2>
-<p>O que se ouve na aplicação Música também conta na base da fonoteca, e conta na música certa. Se a mesma gravação existir num ficheiro ou num CD, as audições juntam-se às dessa música. Se não existir, a faixa do Música fica com uma música própria.</p>
+<p>O que se ouvir na aplicação Música também contará na base de dados da fonoteca. Se a mesma gravação existir num ficheiro ou num CD, as audições somam-se às dessa música. Se não existir, a faixa do Música ficará com uma entrade de música própria.</p>
 <a name="audicoes-do-musica-as-tres-regras"></a><h3 id="audicoes-do-musica-as-tres-regras">As três regras</h3>
 <table>
-<tr><th>O que toca</th><th>Quando conta</th><th>Quem conta</th></tr>
+<tr><th>toca</th><th>conta</th><th>quem</th></tr>
 <tr><td>Um ficheiro ou um CD, no tocaTintas</td><td>aos 5 s de audição</td><td>o tocaTintas</td></tr>
 <tr><td>Uma faixa da biblioteca do Música</td><td>quando a faixa chega ao fim</td><td>o Música, com o seu «played count»</td></tr>
 <tr><td>Uma faixa do catálogo fora da biblioteca, ou de uma estação</td><td>aos 5 s de audição</td><td>o tocaTintas</td></tr>
 </table>
-<p>A terceira regra existe porque o Música não guarda contagem para as faixas que não estão na biblioteca: para ele, ficam sempre a zero. Nesse caso, quem conta é o tocaTintas, pela mesma regra dos seus ficheiros, enquanto mostra o Música na janela. As pausas não contam, e cada reprodução conta uma vez. Se a faixa for depois acrescentada à biblioteca, o tocaTintas deixa de a contar e a contagem passa a ser a do Música.</p>
-<p>O Música continua a tocar quando o tocaTintas fecha ou reinicia. Por isso, a audição em curso fica guardada a cada segundo. Ao voltar, se o Música ainda estiver na mesma faixa e não tiver voltado ao princípio, a audição continua onde estava: o que já tinha tocado soma, e o que já tinha contado não conta outra vez.</p>
+<p>A terceira regra existe porque o Música não guarda contagens para as faixas que não estejam na biblioteca. Nesse caso, quem conta é o tocaTintas, pela mesma regra com que conta as audições dos seus ficheiros. Se a faixa for depois acrescentada à biblioteca local do Música, o tocaTintas deixará de a contar e a contagem passará a ser a do Música (mas registada e contabilizada na base de dados).</p>
+<p>O Música continuará a tocar quando o tocaTintas fechar ou reiniciar. Por isso, a audição em curso é verificada a cada segundo que passe. Ao voltar, se o Música ainda estiver na mesma faixa e não tiver voltado ao princípio, a audição continuará onde estava: o que já tinha tocado soma, e o que já tinha contado não conta outra vez.</p>
 <a name="audicoes-do-musica-sincronizacao"></a><h3 id="audicoes-do-musica-sincronizacao">Sincronização</h3>
-<p>O <code>fonoteca.py sincronizar-musica</code> lê a biblioteca do Música de uma vez, em poucos segundos, e só se o Música estiver aberto. O tocaTintas corre-o um minuto depois de arrancar e depois de meia em meia hora. Também se pode correr à mão em <strong>Ficheiro</strong> ▸ <strong>Sincronizar com o Música</strong>.</p>
+<p>O <code>fonoteca.py sincronizar-musica</code> lê a biblioteca do Música de uma vez, em poucos segundos, mas só se o Música estiver a correr. O tocaTintas executa-o a primeira vez um minuto depois de arrancar e subsequentemente de meia em meia hora. Também se pode correr à mão em <strong>Ficheiro</strong> ▸ <strong>Sincronizar com o Música</strong>.</p>
 <p>A cada sincronização:</p>
 <ul>
 <li>cada faixa nova é ligada à sua música, fica pendente de escolha ou recebe uma música própria. A contagem que o Música já tinha passa a contar logo que a faixa está ligada;</li>

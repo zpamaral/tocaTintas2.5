@@ -21,6 +21,7 @@ continuar a mostrar o antigo, que guarda em cache: ver o fim deste ficheiro.
 """
 
 import html
+import os
 import plistlib
 import re
 import shutil
@@ -285,7 +286,10 @@ def publicar():
         if alvo.exists() and alvo.read_bytes() == f.read_bytes():
             continue
         alvo.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(f, alvo)
+        # Não o copy2: o chflags dele falha no volume SMB («Invalid argument»)
+        # depois de o conteúdo já lá estar. Bastam o conteúdo e as datas.
+        shutil.copyfile(f, alvo)
+        os.utime(alvo, ns=(f.stat().st_atime_ns, f.stat().st_mtime_ns))
         copiados.append(str(f.relative_to(AQUI)))
     print(f'Publicado em {SERVIDOR}: ' + (', '.join(copiados) if copiados else 'nada mudou'))
 

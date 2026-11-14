@@ -9965,7 +9965,8 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
 
     // Com a saída em Bluetooth (AirPods), o leitor que deixa o macOS
     // espacializar o estéreo — ver ZPLeitorEspacial.h. Escolhe-se aqui, no
-    // início de cada faixa; a meio dela não se troca.
+    // início de cada faixa; se a saída mudar a meio dela, quem troca de
+    // leitor é o -acertarMotorASaida.
     Class leitor = ZPSaidaEBluetooth() ? [ZPLeitorEspacial class] : [AVAudioPlayer class];
     if (dataToUse) {
         self.audioPlayer = [[leitor alloc] initWithData:dataToUse error:&error];
@@ -10020,7 +10021,8 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
 
     // Com a saída em Bluetooth (AirPods), o leitor que deixa o macOS
     // espacializar o estéreo — ver ZPLeitorEspacial.h. Escolhe-se aqui, no
-    // início de cada faixa; a meio dela não se troca.
+    // início de cada faixa; se a saída mudar a meio dela, quem troca de
+    // leitor é o -acertarMotorASaida.
     Class leitor = ZPSaidaEBluetooth() ? [ZPLeitorEspacial class] : [AVAudioPlayer class];
     if (dataToUse) {
         self.audioPlayer = [[leitor alloc] initWithData:dataToUse error:&error];
