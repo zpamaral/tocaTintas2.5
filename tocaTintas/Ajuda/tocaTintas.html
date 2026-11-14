@@ -124,6 +124,7 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <p>Anterior, tocar, pausa, parar e seguinte. Quando o programa estiver a interagir com o Música e o tocador mostrar o que a aplicação Música estiver a tocar, os botões comandarão o Música (ver a seguir).</p>
 
 <p>As mesmas teclas estão no menu <strong>Reprodução</strong>, com as de repetir, baralhar, gravar (o ⏺) e ejectar. Cada opção carrega no botão correspondente e faz exactamente o mesmo que ele. As que estiverem ligadas aparecem marcadas.</p>
+<p>Os atalhos são os do Música: a barra de espaços toca ou pausa, ⌘. pára, ⌘← e ⌘→ vão à faixa anterior e à seguinte e ⌘E ejecta o CD. Só valem na janela do tocador. Enquanto o cursor estiver na caixa das músicas, a barra de espaços e as setas servem para escrever.</p>
 
 <p class="rotulo"><strong>repetir</strong>, <strong>baralhar</strong></p>
 <p>O botão de repetir volta a tocar a faixa em curso quando ela chega ao fim, continuamente, até ser desligado. Cada repetição contará como uma audição nova. O botão de baralhar baralha a lista escolhida (ou a fonoteca inteira) uma vez, e essa ordem manter-se-á até ao botão ser desligado. Nenhuma faixa se repete antes de todas terem sido tocadas.</p>
@@ -304,6 +305,7 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <p class="rotulo"><strong>Reprodução</strong> ▸ <strong>Criar estação</strong></p>
 <p>Faz uma lista de 50 faixas a partir da que está a tocar ou em pausa: ela própria, à cabeça, e as da fonoteca que mais se lhe assemelham no som, por ordem de semelhança. A estação comporta-se como uma lista M3U acabada de abrir: a faixa em curso continua a tocar, já dentro dela, e <strong>Ficheiro</strong> ▸ <strong>Sair do modo corrente</strong> volta à fonoteca. Com o baralhamento ligado, a estação é baralhada. Com o tocador parado e sem o Música na janela, a opção fica a cinzento.</p>
 <p>A semelhança mede-se pelas <strong>assinaturas</strong>: um vector de 512 números por música, tirado de três excertos de 10 segundos (aos 25, 50 e 75&nbsp;% da faixa) por uma rede neuronal, o codificador de áudio do CLAP (<code>laion/larger_clap_general</code>), que corre no Neural Engine. Duas músicas são tanto mais parecidas quanto maior for o co-seno entre as suas assinaturas. O modelo ouve o som e não lê as etiquetas: reconhece bem o estilo e a instrumentação, e não sabe nada da língua nem da nacionalidade.</p>
+<p>Enquanto a estação for a lista corrente, o título da faixa leva um «ᛘ» à frente, como o «♫» das faixas do Música. A marca é só da janela: o aviso, o «A tocar» e o AppleScript dão o título sem ela.</p>
 <p>Na escolha das vizinhas há três regras: nunca outra versão da mesma canção (um título igual, sem contar com maiúsculas, acentos e o que vem entre parênteses), no máximo três faixas por artista e duas por álbum. Nas eruditas, o artista é o compositor. Numa colectânea de vários artistas, conta o álbum.</p>
 <p>Não há sorteio: a mesma semente dá a mesma estação enquanto a fonoteca for a mesma. Um álbum novo, depois de registado e de ter as suas assinaturas, já pode entrar na estação seguinte.</p>
 <h3>A semente</h3>
@@ -317,6 +319,7 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <p class="rotulo"><strong>Ficheiro</strong> ▸ <strong>Guardar estação…</strong> (⌘S)</p>
 <p>Guarda a estação corrente como lista <code>.m3u8</code>, com os caminhos absolutos das faixas. Da primeira vez pergunta o nome e o sítio: o painel abre na pasta <code>Listas</code> da pasta de música, se ela existir, e propõe «Estação — <em>artista</em> — <em>título</em>». Depois disso a opção perde as reticências e volta a escrever no mesmo ficheiro, sem perguntar. A lista guardada fica em <strong>Ficheiro</strong> ▸ <strong>Abrir recentes</strong>.</p>
 <p class="rotulo"><strong>Ficheiro</strong> ▸ <strong>Guardar estação como…</strong> (⇧⌘S)</p>
+<p>Esta opção só aparece no menu enquanto a tecla ⇧ estiver carregada: toma o lugar de <strong>Guardar estação…</strong>.</p>
 <p>Pergunta sempre o nome e o sítio, para guardar a mesma estação com outro nome ou noutra pasta.</p>
 <p>As duas opções só estão activas enquanto a estação for a lista em vigor.</p>
 <h3>O vectorizar</h3>

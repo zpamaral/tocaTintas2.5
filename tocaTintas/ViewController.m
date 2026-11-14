@@ -269,7 +269,7 @@ static WavpackStreamReader memoryReader = {
     get_length,
     can_seek
 };
-@interface ViewController () <AVAudioPlayerDelegate, UNUserNotificationCenterDelegate, NSMenuItemValidation>
+@interface ViewController () <AVAudioPlayerDelegate, UNUserNotificationCenterDelegate, NSMenuItemValidation, NSMenuDelegate>
 
 @property (nonatomic, strong) NSTextField *playCountLabel;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *trackPlayCounts;   // chave da música → reproduções
@@ -4703,6 +4703,7 @@ static NSDictionary *ZPExtraDaFaixaParaFonoteca(NSDictionary *disco, NSInteger n
         #ifdef DEBUG
         NSLog(@"Loaded M3U playlist with %lu tracks.", (unsigned long)self.audioFiles.count);
         #endif
+    [self actualizarMarcaDaEstacao];   // outra lista por cima de uma estação: a marca sai
 }
 
 #pragma mark - Estação
@@ -4739,6 +4740,31 @@ static NSURL *ZPVectorizar(void) {
     return self.isPlaylistModeActive && self.estacaoCorrente != nil && self.audioFiles == self.estacaoCorrente;
 }
 
+// Em modo estação o título leva um «ᛘ» (U+16D8, uma antena) à frente, como o
+// «♫» das faixas do Música. É só da etiqueta: quem lê o título de lá para outro
+// fim (aviso, «A tocar», AppleScript, nome da estação) usa o -tituloSemMarca.
+static NSString * const ZPMarcaDaEstacao = @"ᛘ ";
+
+- (NSString *)comMarcaDaEstacao:(NSString *)titulo {
+    BOOL tem = [titulo hasPrefix:ZPMarcaDaEstacao];
+    BOOL deve = titulo.length > 0 && !self.aMostrarOMusica && [self haEstacaoCorrente];
+    if (deve == tem) return titulo;
+    return deve ? [ZPMarcaDaEstacao stringByAppendingString:titulo] : [titulo substringFromIndex:ZPMarcaDaEstacao.length];
+}
+
+- (NSString *)tituloSemMarca {
+    NSString *titulo = self.titleLabel.stringValue ?: @"";
+    return [titulo hasPrefix:ZPMarcaDaEstacao] ? [titulo substringFromIndex:ZPMarcaDaEstacao.length] : titulo;
+}
+
+// Para a faixa que já estava a tocar quando se entra ou sai da estação.
+- (void)actualizarMarcaDaEstacao {
+    if (self.aMostrarOMusica) return;
+    NSString *titulo = self.titleLabel.stringValue ?: @"";
+    NSString *novo = [self comMarcaDaEstacao:titulo];
+    if (![novo isEqualToString:titulo]) self.titleLabel.stringValue = novo;
+}
+
 - (void)avisarDaEstacao:(NSString *)mensagem pormenor:(NSString *)pormenor {
     NSAlert *alerta = [[NSAlert alloc] init];
     alerta.messageText = mensagem;
@@ -4761,7 +4787,7 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
     NSString *semente = [self sementeDaEstacao];
     if (!semente) return;
     // O nome com que se guardará: o que a janela mostra agora, que é a semente.
-    NSString *nome = ZPNomeDaEstacao(self.artistLabel.stringValue, self.titleLabel.stringValue,
+    NSString *nome = ZPNomeDaEstacao(self.artistLabel.stringValue, [self tituloSemMarca],
                                      semente.lastPathComponent.stringByDeletingPathExtension);
     // A semente vem à cabeça da lista e fica lá se for o ficheiro que está a
     // tocar. De uma faixa de CD a semente é o FLAC: ficando, ouvia-se duas
@@ -4872,6 +4898,7 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
             forte.estacaoCorrente = forte.audioFiles;
             forte.estacaoNome = nome;
             forte.estacaoFicheiro = nil;
+            [forte actualizarMarcaDaEstacao];
             #ifdef DEBUG
             NSLog(@"[Estação] «%@»: %lu faixas.", nome, (unsigned long)faixas.count);
             #endif
@@ -5015,6 +5042,59 @@ typedef NS_ENUM(NSInteger, ZPTecla) {
     return YES;
 }
 
+// A barra de espaços faz de ⏯: parado, carrega no ▶; a tocar ou em pausa,
+// carrega no ⏸, que alterna. Com o Música na janela é sempre o ⏸ (playpause).
+- (NSInteger)teclaDoEspaco {
+    return (self.aMostrarOMusica || [self scriptPlayerState] != 'TtSs') ? ZPTeclaPausa : ZPTeclaTocar;
+}
+
+- (void)menuNeedsUpdate:(NSMenu *)menu {
+    if (menu != self.menuDaReproducao) return;
+    NSInteger doEspaco = [self teclaDoEspaco];
+    for (NSMenuItem *item in menu.itemArray) {
+        if (item.action != @selector(teclaDoMenu:) || (item.tag != ZPTeclaTocar && item.tag != ZPTeclaPausa)) continue;
+        item.keyEquivalent = item.tag == doEspaco ? @" " : @"";
+        item.keyEquivalentModifierMask = 0;
+    }
+}
+
+- (void)carregarNaTecla:(NSInteger)tecla {
+    NSButton *botao = [self botaoDaTecla:tecla];
+    if (botao.enabled) [botao performClick:nil];
+}
+- (void)atalhoDoEspaco:(id)sender  { [self carregarNaTecla:[self teclaDoEspaco]]; }
+- (void)atalhoParar:(id)sender     { [self carregarNaTecla:ZPTeclaParar]; }
+- (void)atalhoAnterior:(id)sender  { [self carregarNaTecla:ZPTeclaAnterior]; }
+- (void)atalhoSeguinte:(id)sender  { [self carregarNaTecla:ZPTeclaSeguinte]; }
+- (void)atalhoEjectar:(id)sender   { [self carregarNaTecla:ZPTeclaEjectar]; }
+
+// Os atalhos do menu Reprodução são reconhecidos aqui e não pelo AppKit, por
+// duas razões: só valem na janela do tocador (num painel, o ⌘. cancela e a
+// barra de espaços carrega em botões), e a barra de espaços e as setas não
+// podem ser tiradas a quem está a escrever na caixa das músicas.
+- (BOOL)menuHasKeyEquivalent:(NSMenu *)menu forEvent:(NSEvent *)event target:(id *)target action:(SEL *)action {
+    if (menu != self.menuDaReproducao || event.type != NSEventTypeKeyDown || event.window != self.view.window) return NO;
+    NSString *teclas = event.charactersIgnoringModifiers;
+    if (teclas.length != 1) return NO;
+    unichar tecla = [teclas characterAtIndex:0];
+    NSEventModifierFlags mods = event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagShift |
+                                                       NSEventModifierFlagOption | NSEventModifierFlagControl);
+    BOOL aEscrever = [event.window.firstResponder isKindOfClass:[NSText class]];
+    SEL accao = NULL;
+    if (mods == 0) {
+        if (tecla == ' ' && !aEscrever) accao = @selector(atalhoDoEspaco:);
+    } else if (mods == NSEventModifierFlagCommand) {
+        if (tecla == '.') accao = @selector(atalhoParar:);
+        else if (tecla == 'e') accao = @selector(atalhoEjectar:);
+        else if (tecla == NSLeftArrowFunctionKey && !aEscrever) accao = @selector(atalhoAnterior:);
+        else if (tecla == NSRightArrowFunctionKey && !aEscrever) accao = @selector(atalhoSeguinte:);
+    }
+    if (!accao) return NO;
+    *target = self;
+    *action = accao;
+    return YES;
+}
+
 // Chamado uma vez no arranque, depois do -prepararCDDeAudio (que põe os seus
 // itens no menu Ficheiro): o menu Reprodução, a seguir ao Ficheiro, e os dois
 // «Guardar estação» no Ficheiro, antes de «Sair do modo corrente».
@@ -5033,7 +5113,11 @@ typedef NS_ENUM(NSInteger, ZPTecla) {
     NSMenuItem *guardar = [[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"station_save_menu", @"Guardar estação…")
                                                      action:@selector(guardarEstacao:) keyEquivalent:@"s"];
     NSMenuItem *guardarComo = [[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"station_save_as_menu", @"Guardar estação como…")
-                                                         action:@selector(guardarEstacaoComo:) keyEquivalent:@"S"];   // ⇧⌘S
+                                                         action:@selector(guardarEstacaoComo:) keyEquivalent:@"s"];
+    // Alternativa do anterior: toma o lugar dele no menu enquanto o ⇧ estiver
+    // carregado. Tem de ter a mesma tecla e de vir logo a seguir.
+    guardarComo.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
+    guardarComo.alternate = YES;
     guardar.target = self;
     guardarComo.target = self;
     [sair.menu insertItem:[NSMenuItem separatorItem] atIndex:[sair.menu indexOfItem:sair]];
@@ -5061,8 +5145,20 @@ typedef NS_ENUM(NSInteger, ZPTecla) {
         NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:tecla[1] action:@selector(teclaDoMenu:) keyEquivalent:@""];
         item.target = self;
         item.tag = [tecla[0] integerValue];
+        // Os atalhos do Música. O da barra de espaços anda entre o Tocar e a
+        // Pausa (-menuNeedsUpdate:). Aqui só se mostram: quem os reconhece é o
+        // -menuHasKeyEquivalent:…, para não roubarem teclas a quem escreve.
+        unichar seta = item.tag == ZPTeclaAnterior ? NSLeftArrowFunctionKey : NSRightArrowFunctionKey;
+        switch (item.tag) {
+            case ZPTeclaParar:    item.keyEquivalent = @"."; break;
+            case ZPTeclaEjectar:  item.keyEquivalent = @"e"; break;
+            case ZPTeclaAnterior:
+            case ZPTeclaSeguinte: item.keyEquivalent = [NSString stringWithCharacters:&seta length:1]; break;
+            default: break;
+        }
         [menu addItem:item];
     }
+    menu.delegate = self;
     NSMenuItem *criar = [[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"station_create_menu", @"Criar estação")
                                                    action:@selector(criarEstacao:) keyEquivalent:@""];
     criar.target = self;
@@ -5138,6 +5234,7 @@ typedef NS_ENUM(NSInteger, ZPTecla) {
         [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
         // Idem: volta-se à biblioteca, a vizinha da faixa em curso é outra.
         [self prefetchNextTrack];
+        [self actualizarMarcaDaEstacao];
     });
     //[self playAudio]; // Start playback from the first track
 }
@@ -6091,7 +6188,7 @@ static NSData *gOpusKeptData = nil;
         }
         trackInfo = [trackInfo stringByAppendingString:decoder.title ?: @"Unknown Title"];
         dispatch_block_t updateTitleLabelBlock = ^{
-            self.titleLabel.stringValue = trackInfo;
+            self.titleLabel.stringValue = [self comMarcaDaEstacao:trackInfo];
         };
 
         // Dispatch the block on the main queue to update the title label
@@ -6390,7 +6487,7 @@ static NSData *gOpusKeptData = nil;
             // Access the UI elements safely on the main thread
             NSString *artist = self.artistLabel.stringValue;
             NSString *album = self.albumLabel.stringValue;
-            NSString *title = self.titleLabel.stringValue;
+            NSString *title = [self tituloSemMarca];
 
             // Trigger the notification now that metadata is fully extracted
             [self triggerNowPlayingNotificationWithTitle:title artist:artist album:album];
@@ -6531,7 +6628,7 @@ NSString *print_vorbis_comment(const FLAC__StreamMetadata_VorbisComment_Entry *e
     dispatch_async(dispatch_get_main_queue(), ^{
         [self.artistLabel setStringValue:artist];
         [self.albumLabel setStringValue:album];
-        [self.titleLabel setStringValue:formattedTitle];
+        [self.titleLabel setStringValue:[self comMarcaDaEstacao:formattedTitle]];
         [self.trackNumberLabel setStringValue:trackNumber];
     });
 
@@ -7052,7 +7149,7 @@ static NSData *gWvKeptData = nil;
         NSString *formattedTitle = [NSString stringWithFormat:@"%@. %@", trackNumber, title];
         [self.artistLabel setStringValue:artist];
         [self.albumLabel setStringValue:album];
-        [self.titleLabel setStringValue:formattedTitle];
+        [self.titleLabel setStringValue:[self comMarcaDaEstacao:formattedTitle]];
 
         NSImage *capa = coverArtData ? [[NSImage alloc] initWithData:coverArtData] : nil;
         [self.coverArtView setImage:(capa.size.width > 0 ? capa : nil)];
@@ -7947,7 +8044,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
         NSString *formattedTitle = [NSString stringWithFormat:@"%@. %@", trackNumber, title];
         [self.artistLabel setStringValue:artist];
         [self.albumLabel setStringValue:album];
-        [self.titleLabel setStringValue:formattedTitle];
+        [self.titleLabel setStringValue:[self comMarcaDaEstacao:formattedTitle]];
 
         // Display cover art, if any
         if (coverArtData) {
@@ -8269,7 +8366,7 @@ static NSString *ZPIconeDaPaginaEmDataURI(void) {
     dispatch_sync(dispatch_get_main_queue(), ^{
         artistName = self.artistLabel.stringValue ?: @"";
         albumName = self.albumLabel.stringValue ?: @"";
-        songTitle = self.titleLabel.stringValue ?: @"";
+        songTitle = [self tituloSemMarca];
         coverArtImage = self.coverArtView.image;
         // Com o Música na janela, a contagem é a que ela mostra (a dele, ou a
         // da base para as faixas do catálogo), «tocou 0 vezes» incluído.
@@ -11374,7 +11471,7 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
                     dispatch_async(dispatch_get_main_queue(), ^{
                         [self.artistLabel setStringValue:artist];
                         [self.albumLabel setStringValue:album];
-                        [self.titleLabel setStringValue:formattedTitle];
+                        [self.titleLabel setStringValue:[self comMarcaDaEstacao:formattedTitle]];
                         [self.coverArtView setImage:coverArt ?: nil];
                     });
 
@@ -12173,7 +12270,7 @@ static NSString * const kZPAudicaoDoCatalogoKey = @"ZPAudicaoDoCatalogo";
     // Em pausa, o AudioQueue não dá relógio: fica a última posição conhecida.
     if (temRelogio && (aTocar || posicao > 0.0)) self.posicaoAgoraATocar = posicao;
 
-    NSString *titulo = self.titleLabel.stringValue ?: @"";
+    NSString *titulo = [self tituloSemMarca];
     NSString *artista = self.artistLabel.stringValue ?: @"";
     NSString *album = self.albumLabel.stringValue ?: @"";
     NSImage *capa = self.coverArtView.image;
@@ -12228,7 +12325,7 @@ static NSSet<NSString *> *ZPChavesAppleScript(void) {
     return [self currentPlaybackTime:&agora duration:&duracao] ? duracao : 0.0;
 }
 
-- (NSString *)scriptCurrentTitle  { return self.titleLabel.stringValue ?: @""; }
+- (NSString *)scriptCurrentTitle  { return [self tituloSemMarca]; }
 - (NSString *)scriptCurrentArtist { return self.artistLabel.stringValue ?: @""; }
 - (NSString *)scriptCurrentAlbum  { return self.albumLabel.stringValue ?: @""; }
 
