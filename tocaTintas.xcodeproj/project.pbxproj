@@ -21,6 +21,8 @@
 		1F1955342E4AAA1E00488F3A /* QuickLookUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FF2BC7E2E358EF200133BF3 /* QuickLookUI.framework */; };
 		1F1955352E4AAA2700488F3A /* QuickLook.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FF2BC7C2E358EA900133BF3 /* QuickLook.framework */; };
 		1F2614532C809B140041651D /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 1F2614552C809B140041651D /* Localizable.strings */; };
+		1F26DC4330A8AF41008B82F3 /* vectorizar in Resources */ = {isa = PBXBuildFile; fileRef = 1F26DC4230A8AF41008B82F3 /* vectorizar */; };
+		1F26DC4430A8AF41008B82F3 /* clap_audio.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = 1F26DC4130A8AF41008B82F3 /* clap_audio.mlmodelc */; };
 		1F2E27723096E283001B0268 /* ZPCatalogoDaApple.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F2E27713096E283001B0268 /* ZPCatalogoDaApple.m */; };
 		1F2E2775309DCEC9001B0268 /* ZPAgoraATocar.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F2E2774309DCEC9001B0268 /* ZPAgoraATocar.m */; };
 		1F2E2778309DD440001B0268 /* ZPLeitorEspacial.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F2E2777309DD440001B0268 /* ZPLeitorEspacial.m */; };
@@ -128,6 +130,8 @@
 		1F2614502C8099760041651D /* pt-PT */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "pt-PT"; path = "pt-PT.lproj/Main.strings"; sourceTree = "<group>"; };
 		1F2614542C809B140041651D /* pt-PT */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.strings; lineEnding = 0; name = "pt-PT"; path = "pt-PT.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		1F2614562C809B260041651D /* en */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.strings; lineEnding = 0; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		1F26DC4130A8AF41008B82F3 /* clap_audio.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = clap_audio.mlmodelc; sourceTree = "<group>"; };
+		1F26DC4230A8AF41008B82F3 /* vectorizar */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = vectorizar; sourceTree = "<group>"; };
 		1F2E27703096E283001B0268 /* ZPCatalogoDaApple.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPCatalogoDaApple.h; sourceTree = "<group>"; };
 		1F2E27713096E283001B0268 /* ZPCatalogoDaApple.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPCatalogoDaApple.m; sourceTree = "<group>"; };
 		1F2E2773309DCEC9001B0268 /* ZPAgoraATocar.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPAgoraATocar.h; sourceTree = "<group>"; };
@@ -357,6 +361,8 @@
 		1F37C8C92CD5491A00346A66 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				1F26DC4130A8AF41008B82F3 /* clap_audio.mlmodelc */,
+				1F26DC4230A8AF41008B82F3 /* vectorizar */,
 				1FBE937B2D0B130E00E14743 /* placeholder.png */,
 				1F73F9C12CFE0C2D007C70AD /* refresh_icon.png */,
 				1FF2BD3E2CEF75CE009726BF /* ListAudioDevices */,
@@ -530,6 +536,8 @@
 			files = (
 				1FE1EEA53095D17A000A0DAE /* tocaTintas.help in Resources */,
 				1F7E10B030432FCF00C86ED4 /* eq_autoeq.tgz in Resources */,
+				1F26DC4330A8AF41008B82F3 /* vectorizar in Resources */,
+				1F26DC4430A8AF41008B82F3 /* clap_audio.mlmodelc in Resources */,
 				1FBE937C2D0B130E00E14743 /* placeholder.png in Resources */,
 				1F73F9C22CFE0C2D007C70AD /* refresh_icon.png in Resources */,
 				1F04EB2E2E5BBA9500323023 /* audio_stuff_info in Resources */,

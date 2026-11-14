@@ -189,3 +189,26 @@
 
 /* Меню «Окно»: возвращает окно плеера, даже если оно было закрыто */
 "menu_show_player" = "Плеер";
+
+/* Меню «Воспроизведение»: кнопки плеера и станция */
+"playback_menu" = "Воспроизведение";
+"playback_play" = "Воспроизвести";
+"playback_pause" = "Пауза";
+"playback_stop" = "Остановить";
+"playback_previous" = "Предыдущая";
+"playback_next" = "Следующая";
+"playback_repeat" = "Повтор";
+"playback_shuffle" = "Случайный порядок";
+"playback_record" = "Записать";
+"playback_eject" = "Извлечь CD";
+"station_create_menu" = "Создать станцию";
+"station_save_menu" = "Сохранить станцию…";
+"station_save_menu_plain" = "Сохранить станцию";
+"station_save_as_menu" = "Сохранить станцию как…";
+"station_name" = "Станция — %@ — %@";
+"station_name_short" = "Станция — %@";
+"station_failed" = "Не удалось создать станцию.";
+"station_no_database" = "База фонотеки недоступна.";
+"station_no_helper" = "В приложении нет «vectorizar».";
+"station_save_failed" = "Не удалось сохранить станцию.";
+"station_no_preview" = "В фонотеке нет этой дорожки, а магазин Apple не дал её фрагмента.";

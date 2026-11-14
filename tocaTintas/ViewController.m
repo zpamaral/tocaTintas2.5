@@ -386,6 +386,14 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSTask *consistenciaTask;
 @property (nonatomic, strong) ZPLigacoesDoMusicaWindowController *ligacoesDoMusica;
 @property (nonatomic, assign) BOOL isPlaylistModeActive; // Indicates if an M3U8 playlist is loaded
+// A estação (ver «Estação»): a lista que o vectorizar devolveu, enquanto for ela
+// a lista em vigor, e o nome com que se gravará.
+@property (nonatomic, strong) NSArray<NSURL *> *estacaoCorrente;
+@property (nonatomic, copy) NSString *estacaoNome;
+@property (nonatomic, strong) NSURL *estacaoFicheiro;   // onde já foi guardada; nil enquanto não o for
+@property (nonatomic, assign) BOOL estacaoAPreparar;    // à espera da base, do catálogo ou do vectorizar
+@property (nonatomic, strong) NSTask *assinaturasTask;
+@property (nonatomic, strong) NSMenu *menuDaReproducao;
 
 @property (nonatomic, strong) NSArray<NSURL *> *audioFiles;
 @property (nonatomic, assign) NSInteger currentTrackIndex;
@@ -1630,6 +1638,8 @@ CoreAudioPlaybackState playbackState;
 
     // CD de áudio: item do menu, montagem e desmontagem, e um disco já no leitor.
     [self prepararCDDeAudio];
+    // O menu Reprodução, com as teclas do tocador e a estação.
+    [self prepararMenuDaReproducao];
     
     // Initialize ZPAudioCapture instance
     self.audioCapture = [[ZPAudioCapture alloc] init];
@@ -4606,7 +4616,11 @@ static NSDictionary *ZPExtraDaFaixaParaFonoteca(NSDictionary *disco, NSInteger n
     // Register the playlist URL with NSDocumentController
     [[NSDocumentController sharedDocumentController] noteNewRecentDocumentURL:playlistURL];
 
-    
+    [self adoptarLista:trackURLs];
+}
+
+// Passa a tocar por esta lista: a de um ficheiro M3U ou a de uma estação.
+- (void)adoptarLista:(NSArray<NSURL *> *)trackURLs {
     // Abrir uma lista não interrompe o que se está a ouvir: se a faixa em curso
     // também pertencer à lista, a reprodução continua nela. Com o tocador parado
     // não há faixa em curso nenhuma, e era esse o erro de antes — tomava-se o
@@ -4689,6 +4703,375 @@ static NSDictionary *ZPExtraDaFaixaParaFonoteca(NSDictionary *disco, NSInteger n
         #ifdef DEBUG
         NSLog(@"Loaded M3U playlist with %lu tracks.", (unsigned long)self.audioFiles.count);
         #endif
+}
+
+#pragma mark - Estação
+
+static NSFileHandle *ZPRegistoParaAcrescentar(NSString *caminho);   // definido em «Registo na fonoteca»
+
+// Uma estação é uma lista feita na hora: a faixa em curso e as que mais se lhe
+// assemelham, pelas assinaturas que a base da fonoteca guarda (tabela
+// assinaturas). Quem as calcula e quem escolhe as vizinhas é o «vectorizar», um
+// executável à parte, dentro da aplicação (fonte em vectorizar/vectorizar.m,
+// binário em Resources/, feito pelo vectorizar/compilar.sh); aqui só se
+// lhe passa a semente e se toca o que ele devolve, como uma lista M3U.
+
+// O executável: em Contents/Resources, como o bs2b_bridge, o raop_play e o
+// cava, com o modelo (clap_audio.mlmodelc) ao lado. nil se a aplicação foi
+// montada sem ele.
+static NSURL *ZPVectorizar(void) {
+    NSURL *url = [[NSBundle mainBundle] URLForResource:@"vectorizar" withExtension:nil];
+    return url && [[NSFileManager defaultManager] isExecutableFileAtPath:url.path] ? url : nil;
+}
+
+// A faixa de que se parte, quando é o tocaTintas que toca (ou está em pausa).
+// De um CD, é o FLAC correspondente, se a fonoteca o tiver (a assinatura já
+// está feita); senão a própria faixa do disco, que o vectorizar lê na hora.
+- (NSString *)sementeDaEstacao {
+    if (self.aMostrarOMusica || ![self isPlaybackEngaged]) return nil;
+    NSURL *faixa = self.shuffledToOriginalMap[self.currentTrackURL] ?: self.currentTrackURL;
+    if (!faixa.isFileURL) return nil;
+    NSURL *flac = self.cdFaixas[faixa.path][@"ficheiro"];
+    return flac ? flac.path : faixa.path;
+}
+
+- (BOOL)haEstacaoCorrente {
+    return self.isPlaylistModeActive && self.estacaoCorrente != nil && self.audioFiles == self.estacaoCorrente;
+}
+
+- (void)avisarDaEstacao:(NSString *)mensagem pormenor:(NSString *)pormenor {
+    NSAlert *alerta = [[NSAlert alloc] init];
+    alerta.messageText = mensagem;
+    alerta.informativeText = pormenor ?: @"";
+    NSWindow *janela = self.view.window;
+    if (janela) [alerta beginSheetModalForWindow:janela completionHandler:nil];
+    else [alerta runModal];
+}
+
+static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *recurso) {
+    if (artista.length && titulo.length) {
+        return [NSString stringWithFormat:NSLocalizedString(@"station_name", @"Estação — %@ — %@"), artista, titulo];
+    }
+    return [NSString stringWithFormat:NSLocalizedString(@"station_name_short", @"Estação — %@"), titulo.length ? titulo : recurso];
+}
+
+- (IBAction)criarEstacao:(id)sender {
+    if (self.estacaoAPreparar) return;
+    if (self.aMostrarOMusica) { [self criarEstacaoDoMusica]; return; }
+    NSString *semente = [self sementeDaEstacao];
+    if (!semente) return;
+    // O nome com que se guardará: o que a janela mostra agora, que é a semente.
+    NSString *nome = ZPNomeDaEstacao(self.artistLabel.stringValue, self.titleLabel.stringValue,
+                                     semente.lastPathComponent.stringByDeletingPathExtension);
+    // A semente vem à cabeça da lista e fica lá se for o ficheiro que está a
+    // tocar. De uma faixa de CD a semente é o FLAC: ficando, ouvia-se duas
+    // vezes de seguida.
+    NSURL *emCurso = self.shuffledToOriginalMap[self.currentTrackURL] ?: self.currentTrackURL;
+    BOOL eAQueToca = [semente.stringByStandardizingPath isEqualToString:emCurso.path.stringByStandardizingPath];
+    [self correrEstacaoCom:semente nome:nome manterSemente:eAQueToca apagar:nil];
+}
+
+// Com o Música na janela, a semente é a faixa dele. Se a fonoteca a tiver
+// ligada a uma música com ficheiro, é essa (a assinatura já está feita, e a
+// estação começa pela versão local). Senão — o caso das faixas do catálogo da
+// Apple —, a assinatura tira-se do excerto de 30 s que a loja dá, e a semente
+// não entra na lista, porque não há ficheiro dela para tocar.
+- (void)criarEstacaoDoMusica {
+    NSDictionary *m = ZPMusicNowPlaying();
+    if (![m[@"titulo"] length]) return;
+    NSString *(^nfc)(NSString *) = ^NSString *(NSString *s) { return s.precomposedStringWithCanonicalMapping ?: @""; };
+    NSString *artista = m[@"artista"] ?: @"", *album = m[@"album"] ?: @"", *titulo = m[@"titulo"];
+    double duracao = [m[@"duracao"] doubleValue];
+    NSString *nome = ZPNomeDaEstacao([self replaceSingleQuoteAndSmartQuotes:artista], [self replaceSingleQuoteAndSmartQuotes:titulo], titulo);
+    NSArray *args = @[nfc(artista), nfc(album), nfc(titulo), @(duracao), [m[@"pid"] length] ? m[@"pid"] : @""];
+    self.estacaoAPreparar = YES;
+    dispatch_async(self.filaDaFonoteca, ^{
+        NSString *uuid = nil;
+        if ([self abrirFonoteca]) {
+            uuid = ZPFonotecaValor(self.fonoteca,
+                "SELECT fm.musica FROM faixas_musica fm"
+                " WHERE (fm.pid = ?5 OR (fm.artista = ?1 AND fm.album = ?2 AND fm.titulo = ?3 AND ABS(fm.duracao - ?4) < 1.0))"
+                "   AND EXISTS (SELECT 1 FROM ficheiros f WHERE f.musica = fm.musica AND f.caminho IS NOT NULL)"
+                " ORDER BY fm.pid = ?5 DESC LIMIT 1", args);
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.estacaoAPreparar = NO;
+            if ([uuid isKindOfClass:[NSString class]]) {
+                [self correrEstacaoCom:uuid nome:nome manterSemente:YES apagar:nil];
+                return;
+            }
+            self.estacaoAPreparar = YES;
+            [ZPCatalogoDaApple excertoDe:artista album:album titulo:titulo duracao:duracao concluido:^(NSURL *excerto) {
+                self.estacaoAPreparar = NO;
+                if (!excerto) {
+                    [self avisarDaEstacao:NSLocalizedString(@"station_failed", @"Não foi possível criar a estação.")
+                                 pormenor:NSLocalizedString(@"station_no_preview", @"A fonoteca não tem esta faixa, e a loja da Apple não deu um excerto dela.")];
+                    return;
+                }
+                [self correrEstacaoCom:excerto.path nome:nome manterSemente:NO apagar:excerto];
+            }];
+        });
+    });
+}
+
+// Corre o vectorizar e adopta a lista que ele devolver. `semente` é um caminho
+// ou o UUID de uma música da fonoteca; `apagar`, um ficheiro temporário que só
+// serviu para isto.
+- (void)correrEstacaoCom:(NSString *)semente nome:(NSString *)nome manterSemente:(BOOL)manter apagar:(NSURL *)apagar {
+    void (^limpar)(void) = ^{ if (apagar) [[NSFileManager defaultManager] removeItemAtURL:apagar error:NULL]; };
+    NSURL *vectorizar = ZPVectorizar();
+    NSString *base = [[self loadSongsDirectoryPath] stringByAppendingPathComponent:@".fonoteca.sqlite"];
+    if (!vectorizar || ![[NSFileManager defaultManager] fileExistsAtPath:base]) {
+        limpar();
+        [self avisarDaEstacao:NSLocalizedString(@"station_failed", @"Não foi possível criar a estação.")
+                     pormenor:vectorizar ? NSLocalizedString(@"station_no_database", @"A base da fonoteca não está acessível.")
+                                         : NSLocalizedString(@"station_no_helper", @"A aplicação não traz o «vectorizar».")];
+        return;
+    }
+    NSTask *task = [[NSTask alloc] init];
+    task.executableURL = vectorizar;
+    task.arguments = @[@"estacao", base, semente];
+    task.standardInput = [NSFileHandle fileHandleWithNullDevice];
+    NSPipe *saida = [NSPipe pipe], *erros = [NSPipe pipe];
+    task.standardOutput = saida;
+    task.standardError = erros;
+    NSError *erro = nil;
+    if (![task launchAndReturnError:&erro]) {
+        limpar();
+        [self avisarDaEstacao:NSLocalizedString(@"station_failed", @"Não foi possível criar a estação.") pormenor:erro.localizedDescription];
+        return;
+    }
+    self.estacaoAPreparar = YES;
+    __weak typeof(self) fraco = self;
+    // Lê-se fora do thread principal: a base está no disco externo, que pode
+    // estar a dormir, e uma semente sem assinatura ainda tem de ser lida.
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSData *dados = [saida.fileHandleForReading readDataToEndOfFile];
+        NSData *queixas = [erros.fileHandleForReading readDataToEndOfFile];
+        [task waitUntilExit];
+        limpar();
+        int estado = task.terminationStatus;
+        NSString *texto = [[NSString alloc] initWithData:dados encoding:NSUTF8StringEncoding] ?: @"";
+        NSString *queixa = [[[NSString alloc] initWithData:queixas encoding:NSUTF8StringEncoding]
+                            stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        NSMutableArray<NSURL *> *faixas = [NSMutableArray array];
+        for (NSString *linha in [texto componentsSeparatedByString:@"\n"]) {
+            if (linha.length) [faixas addObject:[NSURL fileURLWithPath:linha]];
+        }
+        if (!manter && faixas.count) [faixas removeObjectAtIndex:0];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(fraco) forte = fraco;
+            if (!forte) return;
+            forte.estacaoAPreparar = NO;
+            if (estado != 0 || faixas.count < 2) {
+                NSLog(@"[Estação] vectorizar saiu com %d: %@", estado, queixa);
+                [forte avisarDaEstacao:NSLocalizedString(@"station_failed", @"Não foi possível criar a estação.") pormenor:queixa];
+                return;
+            }
+            [forte adoptarLista:faixas];
+            forte.estacaoCorrente = forte.audioFiles;
+            forte.estacaoNome = nome;
+            forte.estacaoFicheiro = nil;
+            #ifdef DEBUG
+            NSLog(@"[Estação] «%@»: %lu faixas.", nome, (unsigned long)faixas.count);
+            #endif
+        });
+    });
+}
+
+// Guardar e Guardar como…, como num documento: o primeiro Guardar pergunta o
+// nome e o sítio (por omissão a pasta Listas da fonoteca), os seguintes
+// escrevem no mesmo ficheiro sem perguntar; o Guardar como… pergunta sempre.
+- (IBAction)guardarEstacao:(id)sender {
+    if (![self haEstacaoCorrente]) return;
+    if (self.estacaoFicheiro) [self escreverEstacaoEm:self.estacaoFicheiro];
+    else [self guardarEstacaoComo:sender];
+}
+
+- (IBAction)guardarEstacaoComo:(id)sender {
+    if (![self haEstacaoCorrente]) return;
+    NSArray<NSURL *> *estacao = self.estacaoCorrente;
+    NSSavePanel *painel = [NSSavePanel savePanel];
+    painel.allowedContentTypes = @[[UTType typeWithFilenameExtension:@"m3u8"]];
+    if (self.estacaoFicheiro) {
+        painel.directoryURL = self.estacaoFicheiro.URLByDeletingLastPathComponent;
+        painel.nameFieldStringValue = self.estacaoFicheiro.lastPathComponent;
+    } else {
+        NSString *nome = [[self.estacaoNome ?: @"Estação" stringByReplacingOccurrencesOfString:@"/" withString:@"-"]
+                          stringByReplacingOccurrencesOfString:@":" withString:@"-"];
+        painel.nameFieldStringValue = [nome stringByAppendingPathExtension:@"m3u8"];
+        NSString *listas = [[self loadSongsDirectoryPath] stringByAppendingPathComponent:@"Listas"];
+        BOOL pasta = NO;
+        if ([[NSFileManager defaultManager] fileExistsAtPath:listas isDirectory:&pasta] && pasta) {
+            painel.directoryURL = [NSURL fileURLWithPath:listas isDirectory:YES];
+        }
+    }
+    void (^guardar)(NSModalResponse) = ^(NSModalResponse resposta) {
+        // Se entretanto a lista em vigor passou a ser outra, já não é esta estação.
+        if (resposta != NSModalResponseOK || !painel.URL || self.estacaoCorrente != estacao) return;
+        [self escreverEstacaoEm:painel.URL];
+    };
+    NSWindow *janela = self.view.window;
+    if (janela) [painel beginSheetModalForWindow:janela completionHandler:guardar];
+    else guardar([painel runModal]);
+}
+
+- (void)escreverEstacaoEm:(NSURL *)ficheiro {
+    NSMutableArray<NSString *> *caminhos = [NSMutableArray arrayWithCapacity:self.estacaoCorrente.count];
+    for (NSURL *faixa in self.estacaoCorrente) [caminhos addObject:faixa.path];
+    if ([M3UPlaylist saveToFile:ficheiro.path withPlaylist:caminhos]) {
+        self.estacaoFicheiro = ficheiro;
+        [[NSDocumentController sharedDocumentController] noteNewRecentDocumentURL:ficheiro];
+    } else {
+        [self avisarDaEstacao:NSLocalizedString(@"station_save_failed", @"Não foi possível guardar a estação.") pormenor:ficheiro.path];
+    }
+}
+
+// Depois de um registo na fonoteca: as músicas novas ganham assinatura. Corre
+// em segundo plano e escreve no registar.log; sem o vectorizar não faz nada.
+- (void)actualizarAssinaturas {
+    if (self.assinaturasTask) return;
+    NSURL *vectorizar = ZPVectorizar();
+    NSString *base = [[self loadSongsDirectoryPath] stringByAppendingPathComponent:@".fonoteca.sqlite"];
+    if (!vectorizar || ![[NSFileManager defaultManager] fileExistsAtPath:base]) return;
+    NSString *registo = [[[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject
+                          URLByAppendingPathComponent:@"tocaTintas/registar.log"] path];
+    NSFileHandle *log = ZPRegistoParaAcrescentar(registo);
+    NSString *cabecalho = [NSString stringWithFormat:@"\n=== %@ assinaturas\n",
+                           [NSISO8601DateFormatter stringFromDate:[NSDate date] timeZone:[NSTimeZone localTimeZone]
+                                                    formatOptions:NSISO8601DateFormatWithInternetDateTime]];
+    [log writeData:[cabecalho dataUsingEncoding:NSUTF8StringEncoding]];
+    NSTask *task = [[NSTask alloc] init];
+    task.executableURL = vectorizar;
+    task.arguments = @[@"actualizar", base];
+    task.standardInput = [NSFileHandle fileHandleWithNullDevice];
+    task.standardOutput = log ?: [NSFileHandle fileHandleWithNullDevice];
+    task.standardError = log ?: [NSFileHandle fileHandleWithNullDevice];
+    __weak typeof(self) fraco = self;
+    task.terminationHandler = ^(NSTask *acabou) {
+        [log closeFile];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (fraco.assinaturasTask == acabou) fraco.assinaturasTask = nil;
+        });
+    };
+    NSError *erro = nil;
+    if (![task launchAndReturnError:&erro]) {
+        NSLog(@"[Estação] Não consegui correr o vectorizar: %@", erro.localizedDescription);
+        [log closeFile];
+        return;
+    }
+    self.assinaturasTask = task;
+}
+
+#pragma mark - Menu Reprodução
+
+// As teclas do tocador no menu. Cada item carrega no botão correspondente, e
+// por isso faz exactamente o que ele faz: com o Música na janela comanda o
+// Música, e o aspecto dos botões acompanha.
+typedef NS_ENUM(NSInteger, ZPTecla) {
+    ZPTeclaTocar = 1, ZPTeclaPausa, ZPTeclaParar, ZPTeclaAnterior, ZPTeclaSeguinte,
+    ZPTeclaRepetir, ZPTeclaAleatorio, ZPTeclaGravar, ZPTeclaEjectar,
+};
+
+- (NSButton *)botaoDaTecla:(NSInteger)tecla {
+    switch (tecla) {
+        case ZPTeclaTocar:     return self.playButton;
+        case ZPTeclaPausa:     return self.pauseButton;
+        case ZPTeclaParar:     return self.stopButton;
+        case ZPTeclaAnterior:  return self.backwardButton;
+        case ZPTeclaSeguinte:  return self.forwardButton;
+        case ZPTeclaRepetir:   return self.repeatButton;
+        case ZPTeclaAleatorio: return self.shuffleButton;
+        case ZPTeclaGravar:    return self.recordButton;
+        case ZPTeclaEjectar:   return self.ejectButton;
+    }
+    return nil;
+}
+
+- (IBAction)teclaDoMenu:(NSMenuItem *)item {
+    [[self botaoDaTecla:item.tag] performClick:item];
+}
+
+- (BOOL)validateMenuItem:(NSMenuItem *)item {
+    if (item.action == @selector(teclaDoMenu:)) {
+        NSButton *botao = [self botaoDaTecla:item.tag];
+        BOOL ligado = item.tag == ZPTeclaRepetir   ? self.isRepeatModeActive
+                    : item.tag == ZPTeclaAleatorio ? self.isShuffleModeActive
+                    : item.tag == ZPTeclaGravar    ? self.isRecording : NO;
+        item.state = ligado ? NSControlStateValueOn : NSControlStateValueOff;
+        return botao != nil && botao.enabled;
+    }
+    if (item.action == @selector(criarEstacao:)) {
+        return !self.estacaoAPreparar && (self.aMostrarOMusica || [self sementeDaEstacao] != nil);
+    }
+    if (item.action == @selector(guardarEstacao:)) {
+        // Com reticências enquanto for perguntar o nome, como manda a casa.
+        item.title = self.estacaoFicheiro && [self haEstacaoCorrente]
+            ? NSLocalizedString(@"station_save_menu_plain", @"Guardar estação")
+            : NSLocalizedString(@"station_save_menu", @"Guardar estação…");
+        return [self haEstacaoCorrente];
+    }
+    if (item.action == @selector(guardarEstacaoComo:)) return [self haEstacaoCorrente];
+    return YES;
+}
+
+// Chamado uma vez no arranque, depois do -prepararCDDeAudio (que põe os seus
+// itens no menu Ficheiro): o menu Reprodução, a seguir ao Ficheiro, e os dois
+// «Guardar estação» no Ficheiro, antes de «Sair do modo corrente».
+- (void)prepararMenuDaReproducao {
+    NSMenu *principal = NSApp.mainMenu;
+    NSMenuItem *sair = nil;
+    NSInteger posicaoDoFicheiro = -1;
+    for (NSMenuItem *topo in principal.itemArray) {
+        for (NSMenuItem *item in topo.submenu.itemArray) {
+            if (item.action == @selector(exitPlaylistModeAction:)) { sair = item; posicaoDoFicheiro = [principal indexOfItem:topo]; break; }
+        }
+        if (sair) break;
+    }
+    if (!sair || [principal indexOfItemWithSubmenu:self.menuDaReproducao] >= 0) return;
+
+    NSMenuItem *guardar = [[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"station_save_menu", @"Guardar estação…")
+                                                     action:@selector(guardarEstacao:) keyEquivalent:@"s"];
+    NSMenuItem *guardarComo = [[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"station_save_as_menu", @"Guardar estação como…")
+                                                         action:@selector(guardarEstacaoComo:) keyEquivalent:@"S"];   // ⇧⌘S
+    guardar.target = self;
+    guardarComo.target = self;
+    [sair.menu insertItem:[NSMenuItem separatorItem] atIndex:[sair.menu indexOfItem:sair]];
+    [sair.menu insertItem:guardar atIndex:[sair.menu indexOfItem:sair]];
+    [sair.menu insertItem:guardarComo atIndex:[sair.menu indexOfItem:sair]];
+    [sair.menu insertItem:[NSMenuItem separatorItem] atIndex:[sair.menu indexOfItem:sair]];
+
+    NSMenu *menu = [[NSMenu alloc] initWithTitle:NSLocalizedString(@"playback_menu", @"Reprodução")];
+    NSArray<NSArray *> *teclas = @[
+        @[@(ZPTeclaTocar),     NSLocalizedString(@"playback_play", @"Tocar")],
+        @[@(ZPTeclaPausa),     NSLocalizedString(@"playback_pause", @"Pausa")],
+        @[@(ZPTeclaParar),     NSLocalizedString(@"playback_stop", @"Parar")],
+        @[@(ZPTeclaAnterior),  NSLocalizedString(@"playback_previous", @"Anterior")],
+        @[@(ZPTeclaSeguinte),  NSLocalizedString(@"playback_next", @"Seguinte")],
+        @[],
+        @[@(ZPTeclaRepetir),   NSLocalizedString(@"playback_repeat", @"Repetir")],
+        @[@(ZPTeclaAleatorio), NSLocalizedString(@"playback_shuffle", @"Baralhar")],
+        @[],
+        @[@(ZPTeclaGravar),    NSLocalizedString(@"playback_record", @"Gravar")],
+        @[@(ZPTeclaEjectar),   NSLocalizedString(@"playback_eject", @"Ejectar o CD")],
+        @[],
+    ];
+    for (NSArray *tecla in teclas) {
+        if (tecla.count == 0) { [menu addItem:[NSMenuItem separatorItem]]; continue; }
+        NSMenuItem *item = [[NSMenuItem alloc] initWithTitle:tecla[1] action:@selector(teclaDoMenu:) keyEquivalent:@""];
+        item.target = self;
+        item.tag = [tecla[0] integerValue];
+        [menu addItem:item];
+    }
+    NSMenuItem *criar = [[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"station_create_menu", @"Criar estação")
+                                                   action:@selector(criarEstacao:) keyEquivalent:@""];
+    criar.target = self;
+    [menu addItem:criar];
+
+    NSMenuItem *topo = [[NSMenuItem alloc] initWithTitle:menu.title action:NULL keyEquivalent:@""];
+    topo.submenu = menu;
+    [principal insertItem:topo atIndex:posicaoDoFicheiro + 1];
+    self.menuDaReproducao = menu;
 }
 
 // Wrapper IBAction para ligação ao Interface Builder
@@ -9378,6 +9761,8 @@ static NSFileHandle *ZPRegistoParaAcrescentar(NSString *caminho) {
             [weakSelf esquecerChavesSemFonotecaEm:pastas];
             // Os .m4a novos trazem o codec (aac/alac) que a lista mostra.
             [weakSelf carregarCodecsDaFonoteca];
+            // E as músicas novas ganham assinatura, para as estações.
+            [weakSelf actualizarAssinaturas];
             if (weakSelf.caminhosPorRegistar.count > 0) {
                 [weakSelf agendarRegistoNaFonoteca:[NSSet set] tudo:NO];
             }

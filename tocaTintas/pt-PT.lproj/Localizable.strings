@@ -181,3 +181,26 @@
 
 /* Menu Janela: traz de volta a janela do leitor, mesmo depois de fechada */
 "menu_show_player" = "Leitor";
+
+/* Menu Reprodução: as teclas do tocador e a estação */
+"playback_menu" = "Reprodução";
+"playback_play" = "Tocar";
+"playback_pause" = "Pausa";
+"playback_stop" = "Parar";
+"playback_previous" = "Anterior";
+"playback_next" = "Seguinte";
+"playback_repeat" = "Repetir";
+"playback_shuffle" = "Baralhar";
+"playback_record" = "Gravar";
+"playback_eject" = "Ejectar o CD";
+"station_create_menu" = "Criar estação";
+"station_save_menu" = "Guardar estação…";
+"station_save_menu_plain" = "Guardar estação";
+"station_save_as_menu" = "Guardar estação como…";
+"station_name" = "Estação — %@ — %@";
+"station_name_short" = "Estação — %@";
+"station_failed" = "Não foi possível criar a estação.";
+"station_no_database" = "A base da fonoteca não está acessível.";
+"station_no_helper" = "A aplicação não traz o «vectorizar».";
+"station_save_failed" = "Não foi possível guardar a estação.";
+"station_no_preview" = "A fonoteca não tem esta faixa, e a loja da Apple não deu um excerto dela.";

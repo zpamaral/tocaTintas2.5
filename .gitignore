@@ -4,3 +4,4 @@ DerivedData/
 *.xcscmblueprint
 .claude/
 .DS_Store
+Resources/clap_audio.mlmodelc/weights/weight.bin

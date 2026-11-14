@@ -181,3 +181,26 @@
 
 /* Window menu: brings back the player window, even after it was closed */
 "menu_show_player" = "Player";
+
+/* Playback menu: the transport buttons and the station */
+"playback_menu" = "Playback";
+"playback_play" = "Play";
+"playback_pause" = "Pause";
+"playback_stop" = "Stop";
+"playback_previous" = "Previous";
+"playback_next" = "Next";
+"playback_repeat" = "Repeat";
+"playback_shuffle" = "Shuffle";
+"playback_record" = "Record";
+"playback_eject" = "Eject CD";
+"station_create_menu" = "Create Station";
+"station_save_menu" = "Save Station…";
+"station_save_menu_plain" = "Save Station";
+"station_save_as_menu" = "Save Station As…";
+"station_name" = "Station — %@ — %@";
+"station_name_short" = "Station — %@";
+"station_failed" = "The station could not be created.";
+"station_no_database" = "The fonoteca database is not reachable.";
+"station_no_helper" = "The application does not include “vectorizar”.";
+"station_save_failed" = "The station could not be saved.";
+"station_no_preview" = "The fonoteca does not have this track, and the Apple store gave no preview of it.";

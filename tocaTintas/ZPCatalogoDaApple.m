@@ -236,27 +236,37 @@ static id ZPSeFor(id v, Class c) { return [v isKindOfClass:c] ? v : nil; }
     });
 }
 
+// A faixa do catálogo que corresponde a uma do Música: pelo nome; senão pela
+// duração, a menos de 1,5 s, se só uma cair aí. Síncrono.
++ (nullable NSDictionary *)faixaDe:(NSString *)artista album:(NSString *)album titulo:(NSString *)titulo
+                           duracao:(double)duracao todas:(NSArray<NSDictionary *> *_Nullable *_Nullable)todas {
+    NSDictionary *a = [self albumDe:artista chamado:album titulo:titulo lojas:@[ [self lojaDoMac] ] exacto:NO];
+    NSArray<NSDictionary *> *faixas = a ? [self faixasDoAlbum:a] : @[];
+    NSString *chave = ZPChaveDoNome(titulo);
+    NSDictionary *achada = nil;
+    for (NSDictionary *t in faixas) {
+        NSString *nome = ZPSeFor(t[@"trackName"], [NSString class]);
+        if (nome && [ZPChaveDoNome(nome) isEqualToString:chave]) { achada = t; break; }
+    }
+    if (!achada && duracao > 0) {
+        NSUInteger perto = 0;
+        for (NSDictionary *t in faixas) {
+            if (fabs([ZPSeFor(t[@"trackTimeMillis"], [NSNumber class]) doubleValue] / 1000.0 - duracao) < 1.5) {
+                achada = t;
+                ++perto;
+            }
+        }
+        if (perto != 1) achada = nil;
+    }
+    if (todas) *todas = faixas;
+    return achada;
+}
+
 + (void)posicaoDe:(NSString *)artista album:(NSString *)album titulo:(NSString *)titulo duracao:(double)duracao
         concluido:(void (^)(NSInteger, NSInteger))concluido {
     dispatch_async([self fila], ^{
-        NSDictionary *a = [self albumDe:artista chamado:album titulo:titulo lojas:@[ [self lojaDoMac] ] exacto:NO];
-        NSArray<NSDictionary *> *faixas = a ? [self faixasDoAlbum:a] : @[];
-        NSString *chave = ZPChaveDoNome(titulo);
-        NSDictionary *achada = nil;
-        for (NSDictionary *t in faixas) {
-            NSString *nome = ZPSeFor(t[@"trackName"], [NSString class]);
-            if (nome && [ZPChaveDoNome(nome) isEqualToString:chave]) { achada = t; break; }
-        }
-        if (!achada && duracao > 0) {
-            NSUInteger perto = 0;
-            for (NSDictionary *t in faixas) {
-                if (fabs([ZPSeFor(t[@"trackTimeMillis"], [NSNumber class]) doubleValue] / 1000.0 - duracao) < 1.5) {
-                    achada = t;
-                    ++perto;
-                }
-            }
-            if (perto != 1) achada = nil;
-        }
+        NSArray<NSDictionary *> *faixas = nil;
+        NSDictionary *achada = [self faixaDe:artista album:album titulo:titulo duracao:duracao todas:&faixas];
         // O «trackCount» da Apple não é de fiar (ver o ZPPosGravacao): contam-se
         // as faixas do mesmo disco.
         NSInteger faixa = [ZPSeFor(achada[@"trackNumber"], [NSNumber class]) integerValue], total = 0;
@@ -265,6 +275,22 @@ static id ZPSeFor(id v, Class c) { return [v isKindOfClass:c] ? v : nil; }
         }
         if (total < faixa) faixa = total = 0;
         dispatch_async(dispatch_get_main_queue(), ^{ concluido(faixa, total); });
+    });
+}
+
++ (void)excertoDe:(NSString *)artista album:(NSString *)album titulo:(NSString *)titulo duracao:(double)duracao
+        concluido:(void (^)(NSURL *_Nullable))concluido {
+    dispatch_async([self fila], ^{
+        NSDictionary *faixa = [self faixaDe:artista album:album titulo:titulo duracao:duracao todas:NULL];
+        NSString *endereco = ZPSeFor(faixa[@"previewUrl"], [NSString class]);
+        NSData *som = endereco ? [self pedir:[NSURL URLWithString:endereco]] : nil;
+        NSURL *ficheiro = nil;
+        if (som.length) {
+            ficheiro = [[NSURL fileURLWithPath:NSTemporaryDirectory()] URLByAppendingPathComponent:
+                        [NSString stringWithFormat:@"tocaTintas-excerto-%@.m4a", NSUUID.UUID.UUIDString]];
+            if (![som writeToURL:ficheiro atomically:YES]) ficheiro = nil;
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{ concluido(ficheiro); });
     });
 }
 

@@ -88,6 +88,18 @@ NS_ASSUME_NONNULL_BEGIN
           duracao:(double)duracao
         concluido:(void (^)(NSInteger faixa, NSInteger total))concluido;
 
+
+// O excerto de 30 s que a loja dá de cada faixa («previewUrl»), gravado num
+// ficheiro temporário que quem pede apaga quando já não precisar. Serve de
+// semente a uma estação quando a faixa do Música não tem ficheiro. A faixa
+// acha-se como em -posicaoDe:…. Entregue no thread principal; nil se a loja não
+// tiver a faixa ou o excerto. Não bloqueia.
++ (void)excertoDe:(NSString *)artista
+            album:(NSString *)album
+           titulo:(NSString *)titulo
+          duracao:(double)duracao
+        concluido:(void (^)(NSURL *_Nullable ficheiro))concluido;
+
 @end
 
 NS_ASSUME_NONNULL_END

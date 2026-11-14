@@ -63,7 +63,7 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 </head>
 <body>
 <div class="envolve">
-<nav><a href="#nome">Nome</a><a href="#sinopse">Sinopse</a><a href="#descricao">Descrição</a><a href="#janela-principal">Janela principal</a><a href="#formatos">Formatos</a><a href="#capas">Capas</a><a href="#fonoteca">Fonoteca</a><a href="#base-da-fonoteca">Base de dados da fonoteca</a><a href="#audicoes-do-musica">Audições do Música</a><a href="#listas-m3u">Listas M3U e M3U8</a><a href="#cd-de-audio">CD de áudio</a><a href="#caminho-do-som">O caminho do som</a><a href="#auscultadores">Auscultadores</a><a href="#airpods">AirPods</a><a href="#airplay">AirPlay</a><a href="#sincronizacao">Sincronização</a><a href="#emparelhamento">Emparelhamento</a><a href="#gravacao">Gravação</a><a href="#applescript">AppleScript</a><a href="#histograma">Histograma</a><a href="#notificacoes">Notificações</a><a href="#pagina-a-tocar">Página «a tocar»</a><a href="#extensoes">Extensões do Finder</a><a href="#acerca">Acerca e versão</a><a href="#ficheiros">Ficheiros</a><a href="#requisitos">Requisitos</a><a href="#ver-tambem">Ver também</a></nav>
+<nav><a href="#nome">Nome</a><a href="#sinopse">Sinopse</a><a href="#descricao">Descrição</a><a href="#janela-principal">Janela principal</a><a href="#formatos">Formatos</a><a href="#capas">Capas</a><a href="#fonoteca">Fonoteca</a><a href="#base-da-fonoteca">Base de dados da fonoteca</a><a href="#audicoes-do-musica">Audições do Música</a><a href="#listas-m3u">Listas M3U e M3U8</a><a href="#estacao">Estação</a><a href="#cd-de-audio">CD de áudio</a><a href="#caminho-do-som">O caminho do som</a><a href="#auscultadores">Auscultadores</a><a href="#airpods">AirPods</a><a href="#airplay">AirPlay</a><a href="#sincronizacao">Sincronização</a><a href="#emparelhamento">Emparelhamento</a><a href="#gravacao">Gravação</a><a href="#applescript">AppleScript</a><a href="#histograma">Histograma</a><a href="#notificacoes">Notificações</a><a href="#pagina-a-tocar">Página «a tocar»</a><a href="#extensoes">Extensões do Finder</a><a href="#acerca">Acerca e versão</a><a href="#ficheiros">Ficheiros</a><a href="#requisitos">Requisitos</a><a href="#ver-tambem">Ver também</a></nav>
 <main>
 <header class="topo">
 <img src="imagens/icone.png" alt="Ícone do tocaTintas" width="96" height="96">
@@ -83,7 +83,11 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <p><strong>Ficheiro</strong> ▸ <strong>Tocar o CD</strong></p>
 <p><strong>Ficheiro</strong> ▸ <strong>Ligar faixas do Música…</strong></p>
 <p><strong>Ficheiro</strong> ▸ <strong>Sincronizar com o Música</strong></p>
+<p><strong>Ficheiro</strong> ▸ <strong>Guardar estação…</strong> (⌘S)</p>
+<p><strong>Ficheiro</strong> ▸ <strong>Guardar estação como…</strong> (⇧⌘S)</p>
 <p><strong>Ficheiro</strong> ▸ <strong>Sair do modo corrente</strong> (⇧⌘P)</p>
+<p><strong>Reprodução</strong> ▸ <em>as teclas do tocador</em></p>
+<p><strong>Reprodução</strong> ▸ <strong>Criar estação</strong></p>
 <p><strong>Ajuda</strong> ▸ <strong>Ajuda do tocaTintas</strong> (⌘?)</p>
 <p><code>osascript -e 'tell application "tocaTintas" to</code> <em>comando</em><code>'</code></p>
 
@@ -118,6 +122,8 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 
 <p class="rotulo"><strong>⏮ ▶ ⏸ ⏹ ⏭</strong></p>
 <p>Anterior, tocar, pausa, parar e seguinte. Quando o programa estiver a interagir com o Música e o tocador mostrar o que a aplicação Música estiver a tocar, os botões comandarão o Música (ver a seguir).</p>
+
+<p>As mesmas teclas estão no menu <strong>Reprodução</strong>, com as de repetir, baralhar, gravar (o ⏺) e ejectar. Cada opção carrega no botão correspondente e faz exactamente o mesmo que ele. As que estiverem ligadas aparecem marcadas.</p>
 
 <p class="rotulo"><strong>repetir</strong>, <strong>baralhar</strong></p>
 <p>O botão de repetir volta a tocar a faixa em curso quando ela chega ao fim, continuamente, até ser desligado. Cada repetição contará como uma audição nova. O botão de baralhar baralha a lista escolhida (ou a fonoteca inteira) uma vez, e essa ordem manter-se-á até ao botão ser desligado. Nenhuma faixa se repete antes de todas terem sido tocadas.</p>
@@ -162,7 +168,7 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <p class="rotulo"><strong>Aplicação Música</strong></p>
 <p>Ver <a href="#janela-principal">o que a aplicação Música toca</a>, na janela principal.</p>
 <p class="rotulo"><strong>Sem capa</strong></p>
-<p>Um CD cuja capa não tenha sido encontrada e uma faixa sem capa ficarão com a imagem genérica do tocaTintas.</p>
+<p>Um CD cuja capa não tenha sido encontrada ou uma faixa sem capa ficarão com a imagem genérica do tocaTintas.</p>
 
 <h2 id="fonoteca">Fonoteca</h2>
 <p>A pasta de música escolhe-se nas Preferências, no separador <strong>Música</strong>. O tocaTintas percorrerá então todas as subpastas e encontrará os ficheiros de áudio nelas contidos.</p>
@@ -198,6 +204,8 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <p class="rotulo"><strong>audicoes</strong> (992)</p>
 <p>Uma linha por audição, com a música, a data e hora (ISO 8601, em UTC), a origem (<code>ficheiro</code>, <code>cd</code> ou <code>musica</code>) e o ficheiro, o disco ou a faixa do Música que tocou. Uma faixa do tocaTintas conta ao fim de 5 segundos de audição efectiva. Pausar e retomar não avançarão a contagem, nem avançar antes dos 5 segundos, e cada reprodução contará uma vez. As regras da aplicação Música estão em <a href="#audicoes-do-musica"><strong>AUDIÇÕES DO MÚSICA</strong></a>.</p>
 
+<p class="rotulo"><strong>assinaturas</strong> (19&nbsp;682)</p>
+<p>Uma linha por música e por modelo, com o vector de 512 números (em vírgula flutuante de 16 bits, 1024 octetos), o MD5 do áudio de que foi tirado e a data. O nome do modelo inclui a maneira de tirar os excertos (<code>larger_clap_general/3x10s</code>), para que as assinaturas de outro modelo ou de outro método nunca se misturem com estas. Ver <a href="#estacao"><strong>ESTAÇÃO</strong></a>.</p>
 <h3>Vistas</h3>
 <p class="rotulo"><strong>contagens</strong></p>
 <p>Por música, o total de audições e a data da última. O total soma as contagens importadas, as que o Música tinha quando as suas faixas foram ligadas à música e as audições registadas.</p>
@@ -216,6 +224,7 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <li>a TOC e o disc ID de um disco conhecido só pelo CDDB, e o título, o artista e o álbum de uma faixa que não os tenha;</li>
 <li>as escolhas feitas na janela <strong>Ligar faixas do Música</strong>, e as audições das faixas do catálogo da Apple, pelo <code>fonoteca.py ouvir-musica</code>.</li>
 </ul>
+<p>O <strong>vectorizar</strong> escreve só na tabela <strong>assinaturas</strong>, que cria se não existir.</p>
 <p>Os campos da quarta alínea só se escrevem quando estão vazios. O que os os roteiros da fonoteca lá puseram automaticamente nunca será substituído.</p>
 <h3>Exemplos</h3>
 <pre><code>sqlite3 -readonly CDs/.fonoteca.sqlite \
@@ -288,8 +297,35 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <h3>Limitações</h3>
 <ul>
 <li>Os endereços de rede (<code>http://…</code>) não são suportados.</li>
-<li>O tocaTintas lê listas, mas não as grava.</li>
+<li>O tocaTintas lê listas, mas só guarda as das estações (ver <a href="#estacao"><strong>ESTAÇÃO</strong></a>).</li>
 </ul>
+
+<h2 id="estacao">Estação</h2>
+<p class="rotulo"><strong>Reprodução</strong> ▸ <strong>Criar estação</strong></p>
+<p>Faz uma lista de 50 faixas a partir da que está a tocar ou em pausa: ela própria, à cabeça, e as da fonoteca que mais se lhe assemelham no som, por ordem de semelhança. A estação comporta-se como uma lista M3U acabada de abrir: a faixa em curso continua a tocar, já dentro dela, e <strong>Ficheiro</strong> ▸ <strong>Sair do modo corrente</strong> volta à fonoteca. Com o baralhamento ligado, a estação é baralhada. Com o tocador parado e sem o Música na janela, a opção fica a cinzento.</p>
+<p>A semelhança mede-se pelas <strong>assinaturas</strong>: um vector de 512 números por música, tirado de três excertos de 10 segundos (aos 25, 50 e 75&nbsp;% da faixa) por uma rede neuronal, o codificador de áudio do CLAP (<code>laion/larger_clap_general</code>), que corre no Neural Engine. Duas músicas são tanto mais parecidas quanto maior for o co-seno entre as suas assinaturas. O modelo ouve o som e não lê as etiquetas: reconhece bem o estilo e a instrumentação, e não sabe nada da língua nem da nacionalidade.</p>
+<p>Na escolha das vizinhas há três regras: nunca outra versão da mesma canção (um título igual, sem contar com maiúsculas, acentos e o que vem entre parênteses), no máximo três faixas por artista e duas por álbum. Nas eruditas, o artista é o compositor. Numa colectânea de vários artistas, conta o álbum.</p>
+<p>Não há sorteio: a mesma semente dá a mesma estação enquanto a fonoteca for a mesma. Um álbum novo, depois de registado e de ter as suas assinaturas, já pode entrar na estação seguinte.</p>
+<h3>A semente</h3>
+<ul>
+<li><strong>Um ficheiro da fonoteca</strong>: usa-se a assinatura que a base já tem.</li>
+<li><strong>Uma faixa de um CD</strong>: se o disco estiver na fonoteca, usa-se a assinatura do ficheiro correspondente, e a estação começa na faixa seguinte, para a semente não se ouvir duas vezes. Se não estiver, a assinatura é tirada do próprio disco, na hora.</li>
+<li><strong>Um ficheiro que a base não conhece</strong>: a assinatura é tirada na hora, o que demora alguns segundos, e não fica guardada.</li>
+<li><strong>A faixa que o Música está a tocar</strong>, com o Música na janela. Se a fonoteca a tiver ligada a uma música com ficheiro (ver <a href="#audicoes-do-musica"><strong>AUDIÇÕES DO MÚSICA</strong></a>), a semente é essa música, e a estação começa pela versão local. Senão, como nas faixas do catálogo da Apple, a assinatura tira-se do excerto de 30 segundos que a loja dá de cada faixa, e a semente não entra na lista, porque não há ficheiro dela para tocar. O Música continua a tocar: a estação fica pronta no tocaTintas, à espera do ▶.</li>
+</ul>
+<p>O excerto da loja é uma amostra pequena e nem sempre representativa. O de uma ária que comece por uma introdução longa da orquestra dá uma estação de música orquestral, e não de ópera.</p>
+<p class="rotulo"><strong>Ficheiro</strong> ▸ <strong>Guardar estação…</strong> (⌘S)</p>
+<p>Guarda a estação corrente como lista <code>.m3u8</code>, com os caminhos absolutos das faixas. Da primeira vez pergunta o nome e o sítio: o painel abre na pasta <code>Listas</code> da pasta de música, se ela existir, e propõe «Estação — <em>artista</em> — <em>título</em>». Depois disso a opção perde as reticências e volta a escrever no mesmo ficheiro, sem perguntar. A lista guardada fica em <strong>Ficheiro</strong> ▸ <strong>Abrir recentes</strong>.</p>
+<p class="rotulo"><strong>Ficheiro</strong> ▸ <strong>Guardar estação como…</strong> (⇧⌘S)</p>
+<p>Pergunta sempre o nome e o sítio, para guardar a mesma estação com outro nome ou noutra pasta.</p>
+<p>As duas opções só estão activas enquanto a estação for a lista em vigor.</p>
+<h3>O vectorizar</h3>
+<p>As assinaturas e as estações são trabalho do <strong>vectorizar</strong>, um executável que vai dentro da aplicação, com o modelo ao lado (ver <a href="#ficheiros"><strong>FICHEIROS</strong></a>). Usa só o que o macOS traz: o ExtAudioFile para ler o som, o Accelerate para o espectrograma e o Core ML para o modelo. Pode ser corrido à mão:</p>
+<ul>
+<li><code>vectorizar actualizar</code> <em>base</em>: calcula as assinaturas que faltam, das músicas novas e daquelas cujo ficheiro mudou de áudio. O tocaTintas corre-o depois de cada registo automático na fonoteca, e a saída fica em <code>registar.log</code>.</li>
+<li><code>vectorizar estacao</code> <em>base</em> <em>caminho</em> | <em>uuid</em> [<code>-n</code> 50] [<code>--por-artista</code> 3] [<code>--por-album</code> 2]: escreve os caminhos da estação, um por linha.</li>
+</ul>
+<p>A assinatura de uma música tira-se do seu FLAC, se o houver, e senão do primeiro dos outros ficheiros.</p>
 
 <h2 id="cd-de-audio">CD de áudio</h2>
 <p>Quando se mete um CD, o tocaTintas pergunta se o deve tocar. Se sim, as faixas do disco passam a ser a lista em vigor, como uma lista M3U, e <strong>Sair do modo corrente</strong> volta à fonoteca.</p>
@@ -568,7 +604,7 @@ end repeat</code></pre>
 <p class="rotulo"><strong>…/tocaTintas/frequencia.log</strong></p>
 <p>Uma linha por cada mudança de frequência do BlackHole que o tocaTintas faz ou tenta fazer, ao gravar, ao repor ou ao reabrir o AirPlay, com a data e o resultado. As desistências também ficam registadas.</p>
 <p class="rotulo"><strong>…/tocaTintas/registar.log</strong></p>
-<p>A saída do registo automático na fonoteca.</p>
+<p>A saída do registo automático na fonoteca e do cálculo das assinaturas que se lhe segue.</p>
 <p class="rotulo"><strong>…/tocaTintas/sincronizar-musica.log</strong></p>
 <p>A saída das sincronizações com o Música, das audições das faixas do catálogo e da verificação diária.</p>
 <p class="rotulo"><strong>…/tocaTintas/fonoteca-antes-de-migrar-</strong><em>data</em><strong>.sqlite</strong></p>
@@ -582,7 +618,7 @@ end repeat</code></pre>
 <p class="rotulo"><strong>~/Sites/now_playing.html</strong>, <strong>~/Sites/cover.png</strong></p>
 <p>A página da faixa a tocar.</p>
 <p class="rotulo"><strong>tocaTintas.app/Contents/Resources/</strong></p>
-<p>O <strong>bs2b_bridge</strong>, o <strong>raop_play</strong>, o <strong>cava</strong> e o <strong>ListAudioDevices</strong>, o <strong>tocaTintas.sdef</strong>, que é o dicionário AppleScript, e o <strong>tocaTintas.help</strong>, o livro de ajuda com este manual.</p>
+<p>O <strong>bs2b_bridge</strong>, o <strong>raop_play</strong>, o <strong>cava</strong> e o <strong>ListAudioDevices</strong>, o <strong>vectorizar</strong> e o seu modelo (<strong>clap_audio.mlmodelc</strong>, 136&nbsp;MB), o <strong>tocaTintas.sdef</strong>, que é o dicionário AppleScript, e o <strong>tocaTintas.help</strong>, o livro de ajuda com este manual.</p>
 
 <h2 id="requisitos">Requisitos</h2>
 <ul>
