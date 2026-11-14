@@ -20,6 +20,9 @@
 //  Uso:
 //    vectorizar actualizar BASE
 //    vectorizar refinar BASE [--minutos N]
+//    vectorizar associar BASE MAPA --artista A [--titulo T] [--semente S] [-n 24]
+//    vectorizar descobertas MAPA [BASE [--semente S]] [-n 50]
+//    vectorizar esquecer MAPA ID
 //        Calcula as assinaturas que faltam: músicas novas, ou cujo ficheiro
 //        preferido mudou de áudio.
 //    vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--mapa MAPA]
@@ -836,6 +839,515 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     return 0;
 }
 
+#pragma mark - Associar
+
+// A consulta externa. A partir do artista da faixa que toca, pergunta-se à
+// ListenBrainz (dados abertos, sem chave) que artistas ouve quem o ouve, e
+// quais as gravações mais ouvidas desses; cada candidata procura-se na loja da
+// Apple (iTunes Search API), que dá o excerto de 30 s; do excerto tira-se a
+// assinatura, e a assinatura diz em que lugar a candidata ficaria entre as
+// vizinhas da semente na fonoteca. Tudo o que se apura fica no mapa do
+// catálogo, aprovado ou não: uma candidata fraca para esta semente pode servir
+// a outra.
+//
+// Para fora vão só nomes de artistas e títulos. A loja aceita uns 20 pedidos por
+// minuto, e é esse o passo estreito: uma passagem leva minuto e meio.
+
+static NSString * const kAgente = @"tocaTintas-vectorizar/1.0";
+
+// O «User token» da ListenBrainz, se o utilizador o guardou no Porta-chaves:
+//     security add-generic-password -s tocaTintas-ListenBrainz -a token -w
+// Lê-se pelo próprio «security», que é quem o lá pôs: o Porta-chaves não
+// pergunta nada, e não volta a perguntar de cada vez que o vectorizar se
+// recompila. nil se não houver. Nunca se escreve em registo nenhum.
+static NSString *ZPTokenDaListenBrainz(void) {
+    static NSString *token = nil;
+    static dispatch_once_t uma;
+    dispatch_once(&uma, ^{
+        NSTask *t = [[NSTask alloc] init];
+        t.executableURL = [NSURL fileURLWithPath:@"/usr/bin/security"];
+        t.arguments = @[@"find-generic-password", @"-s", @"tocaTintas-ListenBrainz", @"-a", @"token", @"-w"];
+        NSPipe *saida = [NSPipe pipe];
+        t.standardOutput = saida;
+        t.standardError = [NSFileHandle fileHandleWithNullDevice];
+        t.standardInput = [NSFileHandle fileHandleWithNullDevice];
+        if (![t launchAndReturnError:NULL]) return;
+        NSData *d = [saida.fileHandleForReading readDataToEndOfFile];
+        [t waitUntilExit];
+        NSString *lido = [[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]
+                          stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (t.terminationStatus == 0 && lido.length >= 16) token = lido;
+    });
+    return token;
+}
+
+static NSData *ZPPedir(NSString *endereco, NSDictionary<NSString *, NSString *> *parametros) {
+    NSURLComponents *c = [NSURLComponents componentsWithString:endereco];
+    if (parametros.count) {
+        NSMutableArray<NSURLQueryItem *> *itens = [NSMutableArray array];
+        for (NSString *k in parametros) [itens addObject:[NSURLQueryItem queryItemWithName:k value:parametros[k]]];
+        c.queryItems = itens;
+    }
+    if (!c.URL) return nil;
+    NSMutableURLRequest *pedido = [NSMutableURLRequest requestWithURL:c.URL];
+    pedido.timeoutInterval = 30;
+    [pedido setValue:kAgente forHTTPHeaderField:@"User-Agent"];
+    // O token só vai para a ListenBrainz, e só por HTTPS.
+    if ([c.scheme isEqualToString:@"https"] && [c.host hasSuffix:@"listenbrainz.org"] && ZPTokenDaListenBrainz()) {
+        [pedido setValue:[@"Token " stringByAppendingString:ZPTokenDaListenBrainz()] forHTTPHeaderField:@"Authorization"];
+    }
+    __block NSData *dados = nil;
+    dispatch_semaphore_t feito = dispatch_semaphore_create(0);
+    [[[NSURLSession sharedSession] dataTaskWithRequest:pedido completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+        if (!e && [(NSHTTPURLResponse *)r statusCode] == 200) dados = d;
+        dispatch_semaphore_signal(feito);
+    }] resume];
+    dispatch_semaphore_wait(feito, dispatch_time(DISPATCH_TIME_NOW, 40 * NSEC_PER_SEC));
+    return dados;
+}
+
+static id ZPPedirJSON(NSString *endereco, NSDictionary<NSString *, NSString *> *parametros) {
+    NSData *dados = ZPPedir(endereco, parametros);
+    return dados ? [NSJSONSerialization JSONObjectWithData:dados options:0 error:NULL] : nil;
+}
+
+static BOOL ZPMapaTemColuna(sqlite3 *db, const char *tabela, const char *coluna) {
+    sqlite3_stmt *s = NULL;
+    BOOL tem = NO;
+    if (sqlite3_prepare_v2(db, [NSString stringWithFormat:@"PRAGMA table_info(%s)", tabela].UTF8String, -1, &s, NULL) == SQLITE_OK) {
+        while (sqlite3_step(s) == SQLITE_ROW) if ([ZPTexto(s, 1) isEqualToString:@(coluna)]) tem = YES;
+    }
+    sqlite3_finalize(s);
+    return tem;
+}
+
+static sqlite3 *ZPAbrirMapaParaEscrever(NSString *caminho) {
+    sqlite3 *mapa = NULL;
+    if (sqlite3_open_v2(caminho.fileSystemRepresentation, &mapa, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL) != SQLITE_OK) {
+        fprintf(stderr, "Não consegui abrir o mapa «%s».\n", caminho.UTF8String);
+        sqlite3_close(mapa);
+        return NULL;
+    }
+    sqlite3_busy_timeout(mapa, 20000);
+    sqlite3_exec(mapa, "PRAGMA foreign_keys = ON", NULL, NULL, NULL);   // apagar uma faixa leva a assinatura e os juízos
+    const char *esquema =
+        "CREATE TABLE IF NOT EXISTS faixas ("
+        "    id INTEGER PRIMARY KEY, loja INTEGER, pid TEXT UNIQUE, musica TEXT,"
+        "    artista TEXT, album TEXT, titulo TEXT, duracao REAL, endereco TEXT,"
+        "    origem TEXT NOT NULL, semente TEXT, associacao TEXT, vista_em TEXT NOT NULL);"
+        "CREATE INDEX IF NOT EXISTS faixas_loja ON faixas(loja);"
+        "CREATE TABLE IF NOT EXISTS assinaturas ("
+        "    faixa INTEGER PRIMARY KEY REFERENCES faixas(id) ON DELETE CASCADE,"
+        "    modelo TEXT NOT NULL, vector BLOB NOT NULL, calculada_em TEXT NOT NULL);"
+        "CREATE TABLE IF NOT EXISTS tentativas (pid TEXT PRIMARY KEY, motivo TEXT, quando TEXT NOT NULL);"
+        // Quem é cada artista no MusicBrainz, e quando se lhe pediram os vizinhos.
+        "CREATE TABLE IF NOT EXISTS artistas (chave TEXT PRIMARY KEY, nome TEXT, mbid TEXT, vizinhos_em TEXT);"
+        // Os vizinhos que a ListenBrainz deu, e quando se foram ver as faixas de cada um.
+        "CREATE TABLE IF NOT EXISTS vizinhos (artista TEXT NOT NULL, vizinho TEXT NOT NULL, nome TEXT, peso REAL,"
+        "    explorado_em TEXT, PRIMARY KEY (artista, vizinho));"
+        // O que se procurou na loja e não havia, para não voltar a perguntar.
+        "CREATE TABLE IF NOT EXISTS procuradas (chave TEXT PRIMARY KEY, quando TEXT NOT NULL);"
+        // O juízo pelo som: em que lugar a faixa ficaria entre as vizinhas da semente.
+        "CREATE TABLE IF NOT EXISTS juizos (faixa INTEGER NOT NULL REFERENCES faixas(id) ON DELETE CASCADE,"
+        "    semente TEXT NOT NULL, semelhanca REAL NOT NULL, lugar INTEGER NOT NULL, quando TEXT NOT NULL,"
+        "    PRIMARY KEY (faixa, semente));";
+    char *erro = NULL;
+    if (sqlite3_exec(mapa, esquema, NULL, NULL, &erro) != SQLITE_OK) {
+        fprintf(stderr, "Não consegui preparar o mapa: %s\n", erro ?: "?");
+        sqlite3_free(erro);
+        sqlite3_close(mapa);
+        return NULL;
+    }
+    // Coluna que veio depois: quando o utilizador mandou esquecer a descoberta.
+    if (!ZPMapaTemColuna(mapa, "faixas", "esquecida_em")) sqlite3_exec(mapa, "ALTER TABLE faixas ADD COLUMN esquecida_em TEXT", NULL, NULL, NULL);
+    return mapa;
+}
+
+// Executa com parâmetros (NSString, NSNumber, NSData ou NSNull).
+static BOOL ZPMapaExecutar(sqlite3 *db, const char *sql, NSArray *valores) {
+    sqlite3_stmt *s = NULL;
+    if (sqlite3_prepare_v2(db, sql, -1, &s, NULL) != SQLITE_OK) { fprintf(stderr, "%s\n", sqlite3_errmsg(db)); return NO; }
+    int i = 1;
+    for (id v in valores) {
+        if ([v isKindOfClass:[NSString class]]) sqlite3_bind_text(s, i, [v UTF8String], -1, SQLITE_TRANSIENT);
+        else if ([v isKindOfClass:[NSNumber class]]) sqlite3_bind_double(s, i, [v doubleValue]);
+        else if ([v isKindOfClass:[NSData class]]) sqlite3_bind_blob(s, i, [v bytes], (int)[v length], SQLITE_TRANSIENT);
+        else sqlite3_bind_null(s, i);
+        ++i;
+    }
+    BOOL ok = sqlite3_step(s) == SQLITE_DONE;
+    sqlite3_finalize(s);
+    return ok;
+}
+
+static NSString *ZPMapaTexto(sqlite3 *db, const char *sql, NSArray<NSString *> *valores) {
+    sqlite3_stmt *s = NULL;
+    NSString *r = nil;
+    if (sqlite3_prepare_v2(db, sql, -1, &s, NULL) != SQLITE_OK) return nil;
+    int i = 1;
+    for (NSString *v in valores) sqlite3_bind_text(s, i++, v.UTF8String, -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(s) == SQLITE_ROW && sqlite3_column_type(s, 0) != SQLITE_NULL) r = ZPTexto(s, 0);
+    sqlite3_finalize(s);
+    return r;
+}
+
+static NSString *ZPChaveDaFaixa(NSString *artista, NSString *titulo) {
+    return [NSString stringWithFormat:@"%@|%@", ZPChaveDoArtista(artista, @""), ZPChaveDoTitulo(titulo)];
+}
+
+// As assinaturas da fonoteca (a fina de cada música, se houver) numa matriz, e
+// as chaves artista|título das músicas que têm ficheiro.
+static NSUInteger ZPCarregarFonoteca(sqlite3 *db, NSMutableData *vectores, NSMutableSet<NSString *> *chaves) {
+    sqlite3_stmt *s = NULL;
+    NSUInteger n = 0;
+    const char *sql = "SELECT a.vector, m.artista, m.titulo FROM assinaturas a JOIN musicas m ON m.id = a.musica"
+                      " WHERE a.modelo = ?2 OR (a.modelo = ?1 AND NOT EXISTS"
+                      "       (SELECT 1 FROM assinaturas b WHERE b.musica = a.musica AND b.modelo = ?2))";
+    if (sqlite3_prepare_v2(db, sql, -1, &s, NULL) != SQLITE_OK) return 0;
+    sqlite3_bind_text(s, 1, kModelo, -1, SQLITE_STATIC);
+    sqlite3_bind_text(s, 2, kModeloFino, -1, SQLITE_STATIC);
+    while (sqlite3_step(s) == SQLITE_ROW) {
+        if (sqlite3_column_bytes(s, 0) != kBytesDaAssinatura) continue;
+        float um[kDimensao];
+        ZPAssinaturaParaVector(sqlite3_column_blob(s, 0), um);
+        [vectores appendBytes:um length:sizeof(um)];
+        [chaves addObject:ZPChaveDaFaixa(ZPTexto(s, 1), ZPTexto(s, 2))];
+        ++n;
+    }
+    sqlite3_finalize(s);
+    return n;
+}
+
+// A assinatura da semente, se já existir: na fonoteca (UUID ou caminho) ou no
+// mapa («musica:PID»). Aqui não se calcula nada.
+static BOOL ZPAlvoDaSemente(sqlite3 *db, sqlite3 *mapa, NSString *semente, float *alvo) {
+    sqlite3_stmt *s = NULL;
+    BOOL tem = NO;
+    if ([semente hasPrefix:@"musica:"]) {
+        if (sqlite3_prepare_v2(mapa, "SELECT a.vector FROM assinaturas a JOIN faixas f ON f.id = a.faixa WHERE f.pid = ?", -1, &s, NULL) != SQLITE_OK) return NO;
+        sqlite3_bind_text(s, 1, [semente substringFromIndex:7].UTF8String, -1, SQLITE_TRANSIENT);
+    } else {
+        const char *sql = ZPPareceUUID(semente)
+            ? "SELECT vector FROM assinaturas WHERE musica = ?1 AND modelo IN (?2, ?3) ORDER BY modelo = ?3 DESC LIMIT 1"
+            : "SELECT a.vector FROM assinaturas a JOIN ficheiros f ON f.musica = a.musica WHERE f.caminho = ?1"
+              " AND a.modelo IN (?2, ?3) ORDER BY a.modelo = ?3 DESC LIMIT 1";
+        if (sqlite3_prepare_v2(db, sql, -1, &s, NULL) != SQLITE_OK) return NO;
+        NSString *valor = ZPPareceUUID(semente) ? semente.lowercaseString
+                                                : semente.stringByStandardizingPath.precomposedStringWithCanonicalMapping;
+        sqlite3_bind_text(s, 1, valor.UTF8String, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(s, 2, kModelo, -1, SQLITE_STATIC);
+        sqlite3_bind_text(s, 3, kModeloFino, -1, SQLITE_STATIC);
+    }
+    if (sqlite3_step(s) == SQLITE_ROW && sqlite3_column_bytes(s, 0) == kBytesDaAssinatura) {
+        ZPAssinaturaParaVector(sqlite3_column_blob(s, 0), alvo);
+        tem = YES;
+    }
+    sqlite3_finalize(s);
+    return tem;
+}
+
+static NSString *ZPAgoraISO(void) {
+    return [NSISO8601DateFormatter stringFromDate:[NSDate date] timeZone:[NSTimeZone timeZoneWithAbbreviation:@"UTC"]
+                                    formatOptions:NSISO8601DateFormatWithInternetDateTime];
+}
+
+static int ZPModoAssociar(NSString *base, NSString *caminhoDoMapa, NSString *artista, NSString *titulo, NSString *semente,
+                          NSUInteger quantas) {
+    setpriority(PRIO_DARWIN_PROCESS, 0, PRIO_DARWIN_BG);
+    // «Compositor; Intérpretes»: conta o compositor. Colectâneas não dizem nada.
+    NSString *chaveDoArtista = ZPChaveDoArtista(artista, @"");
+    if (chaveDoArtista.length == 0 || [chaveDoArtista hasPrefix:@"álbum:"]) { printf("sem artista que se possa associar\n"); return 0; }
+    NSString *nomeDoArtista = [[artista componentsSeparatedByString:@";"].firstObject
+                               stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    sqlite3 *db = ZPAbrirBase(base);
+    sqlite3 *mapa = ZPAbrirMapaParaEscrever(caminhoDoMapa);
+    if (!db || !mapa) { sqlite3_close(db); sqlite3_close(mapa); return 1; }
+
+    // 1. Quem é o artista (MusicBrainz), uma vez por artista.
+    NSString *mbid = ZPMapaTexto(mapa, "SELECT mbid FROM artistas WHERE chave = ?", @[chaveDoArtista]);
+    if (!mbid) {
+        // O MusicBrainz responde «ocupado» (503) com frequência a quem não se
+        // identifica com contacto: tenta-se duas vezes, e sem resposta fica
+        // para a próxima faixa deste artista.
+        NSDictionary *r = nil;
+        for (int tentativa = 0; tentativa < 2 && ![r[@"artists"] isKindOfClass:[NSArray class]]; ++tentativa) {
+            if (tentativa) [NSThread sleepForTimeInterval:2.5];
+            id resposta = ZPPedirJSON(@"https://musicbrainz.org/ws/2/artist",
+                                      @{ @"fmt": @"json", @"limit": @"1", @"query": [NSString stringWithFormat:@"artist:\"%@\"", nomeDoArtista] });
+            r = [resposta isKindOfClass:[NSDictionary class]] ? resposta : nil;
+        }
+        if (![r[@"artists"] isKindOfClass:[NSArray class]]) {
+            printf("o MusicBrainz não respondeu por «%s»; fica para outra vez\n", nomeDoArtista.UTF8String);
+            sqlite3_close(db); sqlite3_close(mapa);
+            return 0;
+        }
+        NSDictionary *primeiro = [r[@"artists"] firstObject];
+        if (![primeiro[@"id"] isKindOfClass:[NSString class]] || [primeiro[@"score"] integerValue] < 90) {
+            printf("o MusicBrainz não conhece «%s»\n", nomeDoArtista.UTF8String);
+            ZPMapaExecutar(mapa, "INSERT OR REPLACE INTO artistas (chave, nome, mbid) VALUES (?, ?, '')", @[chaveDoArtista, nomeDoArtista]);
+            sqlite3_close(db); sqlite3_close(mapa);
+            return 0;
+        }
+        mbid = primeiro[@"id"];
+        ZPMapaExecutar(mapa, "INSERT OR REPLACE INTO artistas (chave, nome, mbid) VALUES (?, ?, ?)", @[chaveDoArtista, nomeDoArtista, mbid]);
+    }
+    if (mbid.length == 0) { printf("artista sem identificador\n"); sqlite3_close(db); sqlite3_close(mapa); return 0; }
+
+    // 2. Os vizinhos dele (ListenBrainz), renovados de 30 em 30 dias.
+    NSString *fresco = ZPMapaTexto(mapa, "SELECT 1 FROM artistas WHERE chave = ? AND vizinhos_em > strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-30 days')", @[chaveDoArtista]);
+    if (!fresco) {
+        NSArray *r = ZPPedirJSON(@"https://labs.api.listenbrainz.org/similar-artists/json",
+                                 @{ @"artist_mbids": mbid,
+                                    @"algorithm": @"session_based_days_7500_session_300_contribution_5_threshold_10_limit_100_filter_True_skip_30" });
+        if ([r isKindOfClass:[NSArray class]]) {
+            for (NSDictionary *v in r) {
+                if (![v isKindOfClass:[NSDictionary class]] || ![v[@"artist_mbid"] isKindOfClass:[NSString class]]) continue;
+                ZPMapaExecutar(mapa, "INSERT INTO vizinhos (artista, vizinho, nome, peso) VALUES (?1, ?2, ?3, ?4)"
+                                     " ON CONFLICT (artista, vizinho) DO UPDATE SET nome = ?3, peso = ?4",
+                               @[mbid, v[@"artist_mbid"], v[@"name"] ?: @"", @([v[@"score"] doubleValue])]);
+            }
+            ZPMapaExecutar(mapa, "UPDATE artistas SET vizinhos_em = ? WHERE chave = ?", @[ZPAgoraISO(), chaveDoArtista]);
+        } else {
+            printf("a ListenBrainz não deu vizinhos de «%s»\n", nomeDoArtista.UTF8String);
+        }
+    }
+
+    // 3. Os vizinhos de maior peso que ainda não se foram ver, e as gravações
+    //    mais ouvidas de cada um: três por vizinho.
+    NSMutableArray<NSArray<NSString *> *> *vizinhos = [NSMutableArray array];
+    sqlite3_stmt *s = NULL;
+    if (sqlite3_prepare_v2(mapa, "SELECT vizinho, nome FROM vizinhos WHERE artista = ? AND explorado_em IS NULL ORDER BY peso DESC LIMIT ?",
+                           -1, &s, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(s, 1, mbid.UTF8String, -1, SQLITE_TRANSIENT);
+        // Mais vizinhos do que os precisos: de muitos o utilizador já tem tudo,
+        // e esses não dão candidatas. Pára-se quando houver as pedidas.
+        sqlite3_bind_int(s, 2, (int)MAX(quantas, 12));
+        while (sqlite3_step(s) == SQLITE_ROW) [vizinhos addObject:@[ZPTexto(s, 0), ZPTexto(s, 1)]];
+    }
+    sqlite3_finalize(s);
+    if (vizinhos.count == 0) { printf("os vizinhos de «%s» já foram todos vistos\n", nomeDoArtista.UTF8String); sqlite3_close(db); sqlite3_close(mapa); return 0; }
+
+    NSMutableData *vectores = [NSMutableData data];
+    NSMutableSet<NSString *> *locais = [NSMutableSet set];
+    NSUInteger n = ZPCarregarFonoteca(db, vectores, locais);
+    float alvo[kDimensao];
+    BOOL temAlvo = semente.length && n > 0 && ZPAlvoDaSemente(db, mapa, semente, alvo);
+    float semelhancaDaCandidata = 0;
+    float *semelhancas = temAlvo ? malloc(n * sizeof(float)) : NULL;
+    if (temAlvo) vDSP_mmul(vectores.bytes, 1, alvo, 1, semelhancas, 1, n, 1, kDimensao);
+    NSString *nomeDaSemente = [NSString stringWithFormat:@"%@ — %@", artista, titulo];
+
+    MLModel *modelo = nil;
+    ZPMel *melador = NULL;
+    ZPTempos tempos = {0};
+    NSUInteger novas = 0, aprovadas = 0, vistas = 0;
+    for (NSArray<NSString *> *vizinho in vizinhos) {
+        // 4. As canções do vizinho que a loja põe à frente, num só pedido (um de
+        //    três em três segundos). As «mais ouvidas» da ListenBrainz passaram
+        //    a exigir conta; a loja dá-as por ordem de procura, já com o excerto.
+        //
+        //    Com o token da ListenBrainz no Porta-chaves, as canções são as mais
+        //    ouvidas do vizinho, e a loja só serve para as encontrar: um pedido
+        //    por canção, cinco no máximo por vizinho. Se isso falhar, ou sem
+        //    token, fica a ordem da loja.
+        NSDictionary *loja = nil;
+        NSArray *ouvidas = ZPTokenDaListenBrainz()
+            ? ZPPedirJSON([@"https://api.listenbrainz.org/1/popularity/top-recordings-for-artist/" stringByAppendingString:vizinho[0]], nil) : nil;
+        if ([ouvidas isKindOfClass:[NSArray class]] && ouvidas.count) {
+            NSMutableArray *achadas = [NSMutableArray array];
+            NSMutableSet<NSString *> *jaVistas = [NSMutableSet set];
+            NSUInteger pedidos = 0;
+            for (NSDictionary *g in ouvidas) {
+                if (achadas.count >= 3 || pedidos >= 5) break;
+                NSString *t = [g isKindOfClass:[NSDictionary class]] ? g[@"recording_name"] : nil;
+                if (![t isKindOfClass:[NSString class]] || t.length == 0) continue;
+                NSString *a = [g[@"artist_name"] isKindOfClass:[NSString class]] ? g[@"artist_name"] : vizinho[1];
+                NSString *kt = ZPChaveDoTitulo(t);
+                if (kt.length == 0 || [jaVistas containsObject:kt] || [locais containsObject:ZPChaveDaFaixa(a, t)]) continue;
+                [jaVistas addObject:kt];
+                ++pedidos;
+                [NSThread sleepForTimeInterval:3.1];
+                NSDictionary *r = ZPPedirJSON(@"https://itunes.apple.com/search",
+                                              @{ @"term": [NSString stringWithFormat:@"%@ %@", a, t], @"country": @"pt",
+                                                 @"media": @"music", @"entity": @"song", @"limit": @"15" });
+                for (NSDictionary *x in ([r isKindOfClass:[NSDictionary class]] && [r[@"results"] isKindOfClass:[NSArray class]] ? r[@"results"] : @[])) {
+                    if ([x isKindOfClass:[NSDictionary class]] && [x[@"trackName"] isKindOfClass:[NSString class]]
+                        && [ZPChaveDoTitulo(x[@"trackName"]) isEqualToString:kt]) { [achadas addObject:x]; break; }
+                }
+            }
+            loja = @{ @"results": achadas };
+        } else {
+            [NSThread sleepForTimeInterval:3.1];
+            loja = ZPPedirJSON(@"https://itunes.apple.com/search",
+                               @{ @"term": vizinho[1], @"country": @"pt", @"media": @"music", @"entity": @"song",
+                                  @"attribute": @"artistTerm", @"limit": @"25" });
+        }
+        if (![loja isKindOfClass:[NSDictionary class]]) continue;   // falha passageira: fica para outra vez
+        ZPMapaExecutar(mapa, "UPDATE vizinhos SET explorado_em = ? WHERE artista = ? AND vizinho = ?", @[ZPAgoraISO(), mbid, vizinho[0]]);
+        NSUInteger deste = 0;
+        NSMutableSet<NSString *> *titulosDeste = [NSMutableSet set];
+        NSString *chaveDoVizinho = ZPChaveDoArtista(vizinho[1], @"");
+        for (NSDictionary *escolhida in ([loja[@"results"] isKindOfClass:[NSArray class]] ? loja[@"results"] : @[])) {
+            if (deste >= 3 || vistas >= quantas) break;
+            if (![escolhida isKindOfClass:[NSDictionary class]] || ![escolhida[@"previewUrl"] isKindOfClass:[NSString class]]
+                || ![escolhida[@"trackName"] isKindOfClass:[NSString class]] || ![escolhida[@"trackId"] isKindOfClass:[NSNumber class]]) continue;
+            NSString *a = [escolhida[@"artistName"] isKindOfClass:[NSString class]] ? escolhida[@"artistName"] : vizinho[1];
+            NSString *t = escolhida[@"trackName"];
+            // Só o próprio artista (não quem o cita no título), uma versão de
+            // cada canção, e nada que já haja em ficheiro ou no mapa.
+            NSString *ka = ZPChaveDoArtista(a, @"");
+            if (![ka containsString:chaveDoVizinho] && ![chaveDoVizinho containsString:ka]) continue;
+            NSString *kt = ZPChaveDoTitulo(t);
+            if (kt.length == 0 || [titulosDeste containsObject:kt]) continue;
+            if ([locais containsObject:ZPChaveDaFaixa(a, t)]) continue;
+            [titulosDeste addObject:kt];
+            ++deste; ++vistas;
+            NSNumber *idDaLoja = escolhida[@"trackId"];
+            if (ZPMapaTexto(mapa, "SELECT 1 FROM faixas WHERE loja = ?", @[[idDaLoja stringValue] ?: @""])) continue;
+
+            // 5. O excerto e a assinatura dele.
+            NSData *som = ZPPedir(escolhida[@"previewUrl"], nil);
+            if (som.length < 10000) continue;
+            NSString *temporario = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                                    [NSString stringWithFormat:@"vectorizar-excerto-%@.m4a", NSUUID.UUID.UUIDString]];
+            [som writeToFile:temporario atomically:NO];
+            if (!modelo) { modelo = ZPModeloQuandoPreciso(); melador = ZPMelCriar(); }
+            float vector[kDimensao];
+            gSementeSolta = YES;
+            BOOL ok = modelo && ZPVectorDaFaixa(modelo, melador, temporario, 0.0, vector, &tempos);
+            [[NSFileManager defaultManager] removeItemAtPath:temporario error:NULL];
+            if (!ok) continue;
+
+            _Float16 meio[kDimensao];
+            for (int i = 0; i < kDimensao; ++i) meio[i] = (_Float16)vector[i];
+            NSString *endereco = [[escolhida[@"trackViewUrl"] ?: @"" componentsSeparatedByString:@"&uo="] firstObject];
+            if (!ZPMapaExecutar(mapa, "INSERT INTO faixas (loja, artista, album, titulo, duracao, endereco, origem, semente, associacao, vista_em)"
+                                      " VALUES (?, ?, ?, ?, ?, ?, 'associacao', ?, ?, ?)",
+                                @[idDaLoja, escolhida[@"artistName"] ?: a, escolhida[@"collectionName"] ?: @"", escolhida[@"trackName"],
+                                  @([escolhida[@"trackTimeMillis"] doubleValue] / 1000.0), endereco, nomeDaSemente,
+                                  [@"listenbrainz:" stringByAppendingString:vizinho[1]], ZPAgoraISO()])) continue;
+            sqlite3_int64 faixa = sqlite3_last_insert_rowid(mapa);
+            ZPMapaExecutar(mapa, "INSERT OR REPLACE INTO assinaturas VALUES (?, ?, ?, ?)",
+                           @[@(faixa), @(kModeloDoExcerto), [NSData dataWithBytes:meio length:sizeof(meio)], ZPAgoraISO()]);
+            ++novas;
+
+            // 6. O juízo: o lugar que teria entre as vizinhas da semente.
+            if (temAlvo) {
+                vDSP_dotpr(vector, 1, alvo, 1, &semelhancaDaCandidata, kDimensao);
+                NSUInteger lugar = 1;
+                for (NSUInteger i = 0; i < n; ++i) if (semelhancas[i] > semelhancaDaCandidata) ++lugar;
+                ZPMapaExecutar(mapa, "INSERT OR REPLACE INTO juizos VALUES (?, ?, ?, ?, ?)",
+                               @[@(faixa), nomeDaSemente, @(semelhancaDaCandidata), @(lugar), ZPAgoraISO()]);
+                if (lugar <= 200) ++aprovadas;
+                printf("  %5lu.º  %.3f  %s — %s\n", (unsigned long)lugar, semelhancaDaCandidata,
+                       [escolhida[@"artistName"] UTF8String] ?: "", [escolhida[@"trackName"] UTF8String] ?: "");
+            } else {
+                printf("  %s — %s\n", [escolhida[@"artistName"] UTF8String] ?: "", [escolhida[@"trackName"] UTF8String] ?: "");
+            }
+            fflush(stdout);
+        }
+        if (vistas >= quantas) break;
+    }
+    printf("associar «%s»: %lu candidatas vistas, %lu novas no mapa, %lu nas 200 vizinhas da semente\n", nomeDoArtista.UTF8String,
+           (unsigned long)vistas, (unsigned long)novas, (unsigned long)aprovadas);
+    free(semelhancas);
+    sqlite3_close(db);
+    sqlite3_close(mapa);
+    return 0;
+}
+
+// Uma descoberta que o utilizador juntou à biblioteca do Música passa a ser uma
+// faixa como as outras do mapa: ganha o persistent ID e a música da fonoteca, e
+// daí em diante entra nas estações. A assinatura já lá está; não se pede nada
+// a ninguém.
+static void ZPReconciliarMapa(sqlite3 *db, sqlite3 *mapa) {
+    NSMutableDictionary<NSString *, NSNumber *> *descobertas = [NSMutableDictionary dictionary];
+    sqlite3_stmt *s = NULL;
+    if (sqlite3_prepare_v2(mapa, "SELECT id, artista, titulo FROM faixas WHERE origem = 'associacao' AND pid IS NULL", -1, &s, NULL) == SQLITE_OK) {
+        while (sqlite3_step(s) == SQLITE_ROW) descobertas[ZPChaveDaFaixa(ZPTexto(s, 1), ZPTexto(s, 2))] = @(sqlite3_column_int64(s, 0));
+    }
+    sqlite3_finalize(s);
+    if (descobertas.count == 0) return;
+    if (sqlite3_prepare_v2(db, "SELECT x.pid, x.musica, x.artista, x.titulo FROM faixas_musica x"
+                               " WHERE x.tipo = 'streaming' AND x.musica IS NOT NULL", -1, &s, NULL) != SQLITE_OK) return;
+    while (sqlite3_step(s) == SQLITE_ROW) {
+        NSNumber *faixa = descobertas[ZPChaveDaFaixa(ZPTexto(s, 2), ZPTexto(s, 3))];
+        if (!faixa) continue;
+        if (ZPMapaTexto(mapa, "SELECT 1 FROM faixas WHERE pid = ?", @[ZPTexto(s, 0)])) continue;
+        ZPMapaExecutar(mapa, "UPDATE faixas SET pid = ?, musica = ?, origem = 'biblioteca' WHERE id = ?", @[ZPTexto(s, 0), ZPTexto(s, 1), faixa]);
+    }
+    sqlite3_finalize(s);
+}
+
+// As descobertas: o que a associação trouxe e ainda não está na biblioteca do
+// Música nem foi esquecido. Uma linha por canção, com tabulações:
+//     id, lugar, semelhança, artista, título, álbum, endereço, semente que a trouxe, vizinho
+// Com semente, a ordem é a da semelhança com ela (e o lugar é o que a canção
+// teria entre as vizinhas dela na fonoteca): o mapa todo, e não só o que essa
+// semente trouxe. Sem semente, o melhor lugar que cada uma já teve.
+static int ZPModoDescobertas(NSString *caminhoDoMapa, NSString *base, NSString *semente, NSUInteger quantas) {
+    sqlite3 *mapa = ZPAbrirMapaParaEscrever(caminhoDoMapa);
+    if (!mapa) return 1;
+    sqlite3 *db = base.length ? ZPAbrirBase(base) : NULL;
+    if (db) ZPReconciliarMapa(db, mapa);
+    sqlite3_stmt *s = NULL;
+    float alvo[kDimensao];
+    if (db && semente.length && ZPAlvoDaSemente(db, mapa, semente, alvo)) {
+        NSMutableData *vectores = [NSMutableData data];
+        NSUInteger n = ZPCarregarFonoteca(db, vectores, [NSMutableSet set]);
+        float *daFonoteca = malloc(MAX(n, (NSUInteger)1) * sizeof(float));
+        if (n) {
+            vDSP_mmul(vectores.bytes, 1, alvo, 1, daFonoteca, 1, n, 1, kDimensao);
+            vDSP_vsort(daFonoteca, n, 1);   // crescente
+        }
+        NSMutableArray<NSArray *> *linhas = [NSMutableArray array];
+        if (sqlite3_prepare_v2(mapa, "SELECT f.id, a.vector, f.artista, f.titulo, f.album, f.endereco, f.semente, f.associacao"
+                                     "  FROM faixas f JOIN assinaturas a ON a.faixa = f.id"
+                                     " WHERE f.origem = 'associacao' AND f.esquecida_em IS NULL", -1, &s, NULL) == SQLITE_OK) {
+            while (sqlite3_step(s) == SQLITE_ROW) {
+                if (sqlite3_column_bytes(s, 1) != kBytesDaAssinatura) continue;
+                float um[kDimensao], semelhanca = 0;
+                ZPAssinaturaParaVector(sqlite3_column_blob(s, 1), um);
+                vDSP_dotpr(um, 1, alvo, 1, &semelhanca, kDimensao);
+                // Quantas da fonoteca ficam acima: procura binária na lista ordenada.
+                NSUInteger baixo = 0, cima = n;
+                while (baixo < cima) { NSUInteger meio = (baixo + cima) / 2; if (daFonoteca[meio] > semelhanca) cima = meio; else baixo = meio + 1; }
+                [linhas addObject:@[@(semelhanca), [NSString stringWithFormat:@"%lld\t%lu\t%.3f\t%@\t%@\t%@\t%@\t%@\t%@",
+                                    sqlite3_column_int64(s, 0), (unsigned long)(n - baixo + 1), semelhanca, ZPTexto(s, 2), ZPTexto(s, 3),
+                                    ZPTexto(s, 4), ZPTexto(s, 5), ZPTexto(s, 6), ZPTexto(s, 7)]]];
+            }
+        }
+        sqlite3_finalize(s);
+        free(daFonoteca);
+        [linhas sortUsingComparator:^NSComparisonResult(NSArray *x, NSArray *y) { return [y[0] compare:x[0]]; }];
+        for (NSUInteger i = 0; i < MIN(quantas, linhas.count); ++i) printf("%s\n", [linhas[i][1] UTF8String]);
+    } else if (sqlite3_prepare_v2(mapa, "SELECT f.id, MIN(j.lugar), MAX(j.semelhanca), f.artista, f.titulo, f.album, f.endereco, f.semente, f.associacao"
+                                        "  FROM juizos j JOIN faixas f ON f.id = j.faixa"
+                                        " WHERE f.origem = 'associacao' AND f.esquecida_em IS NULL"
+                                        " GROUP BY f.id ORDER BY 2 LIMIT ?", -1, &s, NULL) == SQLITE_OK) {
+        sqlite3_bind_int(s, 1, (int)quantas);
+        while (sqlite3_step(s) == SQLITE_ROW) {
+            printf("%lld\t%d\t%.3f\t%s\t%s\t%s\t%s\t%s\t%s\n", sqlite3_column_int64(s, 0), sqlite3_column_int(s, 1), sqlite3_column_double(s, 2),
+                   ZPTexto(s, 3).UTF8String, ZPTexto(s, 4).UTF8String, ZPTexto(s, 5).UTF8String, ZPTexto(s, 6).UTF8String,
+                   ZPTexto(s, 7).UTF8String, ZPTexto(s, 8).UTF8String);
+        }
+        sqlite3_finalize(s);
+    }
+    sqlite3_close(db);
+    sqlite3_close(mapa);
+    return 0;
+}
+
+// «Esquecer» uma descoberta: fica no mapa, marcada, para a consulta externa
+// não a voltar a trazer; só deixa de aparecer.
+static int ZPModoEsquecer(NSString *caminhoDoMapa, NSString *faixa) {
+    sqlite3 *mapa = ZPAbrirMapaParaEscrever(caminhoDoMapa);
+    if (!mapa) return 1;
+    BOOL ok = ZPMapaExecutar(mapa, "UPDATE faixas SET esquecida_em = ? WHERE id = ? AND origem = 'associacao'", @[ZPAgoraISO(), @(faixa.longLongValue)]);
+    sqlite3_close(mapa);
+    return ok ? 0 : 1;
+}
+
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         NSMutableArray<NSString *> *args = [NSMutableArray array];
@@ -853,6 +1365,7 @@ int main(int argc, const char *argv[]) {
         double inicioDoExcerto = 0.0;
         NSUInteger quantas = 50, porArtista = 3, porAlbum = 2;
         double minutos = 0.0;
+        NSString *artista = nil, *titulo = nil, *semente = nil;
         for (NSUInteger i = 0; i < args.count; ) {
             NSString *a = args[i];
             if ([a isEqualToString:@"--modelo"] && i + 1 < args.count) {
@@ -861,6 +1374,11 @@ int main(int argc, const char *argv[]) {
             } else if ([a isEqualToString:@"--cpu"]) {
                 soCPU = YES;
                 [args removeObjectAtIndex:i];
+            } else if ([@[@"--artista", @"--titulo", @"--semente"] containsObject:a] && i + 1 < args.count) {
+                if ([a isEqualToString:@"--artista"]) artista = args[i + 1];
+                else if ([a isEqualToString:@"--titulo"]) titulo = args[i + 1];
+                else semente = args[i + 1];
+                [args removeObjectsInRange:NSMakeRange(i, 2)];
             } else if ([a isEqualToString:@"--minutos"] && i + 1 < args.count) {
                 minutos = args[i + 1].doubleValue;
                 [args removeObjectsInRange:NSMakeRange(i, 2)];
@@ -891,11 +1409,21 @@ int main(int argc, const char *argv[]) {
         gSoCPU = soCPU;
         if (args.count == 2 && [args[0] isEqualToString:@"actualizar"]) return ZPModoActualizar(args[1]);
         if (args.count == 2 && [args[0] isEqualToString:@"refinar"]) return ZPModoRefinar(args[1], minutos);
+        if (args.count == 3 && [args[0] isEqualToString:@"associar"] && artista.length) {
+            return ZPModoAssociar(args[1], args[2], artista, titulo ?: @"", semente, quantas == 50 ? 24 : quantas);
+        }
+        if ((args.count == 2 || args.count == 3) && [args[0] isEqualToString:@"descobertas"]) {
+            return ZPModoDescobertas(args[1], args.count == 3 ? args[2] : nil, semente, quantas);
+        }
+        if (args.count == 3 && [args[0] isEqualToString:@"esquecer"]) return ZPModoEsquecer(args[1], args[2]);
         if (args.count == 3 && [args[0] isEqualToString:@"estacao"]) return ZPModoEstacao(args[1], args[2], quantas, porArtista, porAlbum);
         if (args.count == 4 && [args[0] isEqualToString:@"importar"]) return ZPModoImportar(args[1], args[2], args[3]);
         if (args.count != 2) {
             fprintf(stderr, "uso: vectorizar actualizar BASE\n"
                             "     vectorizar refinar BASE [--minutos N]\n"
+                            "     vectorizar associar BASE MAPA --artista A [--titulo T] [--semente (caminho | uuid | musica:PID)] [-n 24]\n"
+                            "     vectorizar descobertas MAPA [BASE [--semente S]] [-n 50]\n"
+                            "     vectorizar esquecer MAPA ID\n"
                             "     vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--mapa MAPA]\n"
                             "     vectorizar importar BASE lista.tsv saída\n"
                             "     vectorizar [--modelo M.mlmodelc] [--cpu] [--loja] lista.tsv saída\n"

@@ -63,6 +63,7 @@ SOFTWARE.
 #import "ZPAirPlayStreamer.h"
 #import "ZPLigacoesDoMusicaWindowController.h"
 #import "ZPAgoraATocar.h"   // O «A tocar» do sistema e os comandos dos AirPods e do teclado
+#import "ZPDescobertas.h"   // A janela das descobertas do mapa do catálogo
 #import "ZPLeitorEspacial.h"   // O leitor com áudio espacial, para a saída em Bluetooth
 
 #define NUM_BUFFERS 3  // Three is typically a good number for real-time audio playback
@@ -395,6 +396,9 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSTask *assinaturasTask;
 @property (nonatomic, strong) NSTask *refinarTask;                // o «vectorizar refinar» em curso
 @property (nonatomic, strong) NSTimer *relogioDeRefinar;
+@property (nonatomic, strong) NSTask *associarTask;               // o «vectorizar associar» em curso
+@property (nonatomic, strong) ZPDescobertas *descobertas;         // a janela das descobertas, feita quando se pede
+@property (nonatomic, copy) NSString *sementeDasDescobertas, *nomeDaSementeDasDescobertas;   // a faixa que toca, para ela
 @property (nonatomic, strong) NSMenu *menuDaReproducao;
 
 @property (nonatomic, strong) NSArray<NSURL *> *audioFiles;
@@ -452,6 +456,9 @@ static WavpackStreamReader memoryReader = {
 @property (strong, nonatomic) NSDate *musicaDaListaPedidaEm;
 @property (assign, nonatomic) NSUInteger saltosSeguidos;     // linhas saltadas de seguida
 @property (assign, nonatomic) BOOL aAndarParaTras;           // o ⏮️ salta para trás
+// A estação acabada de pedir a partir do que o Música toca: quando ficar
+// pronta, a lista assume essa faixa como a sua faixa em curso.
+@property (copy, nonatomic) NSString *pidAAssumirDoMusica;
 // O «A tocar» do sistema (ver «Centro A tocar»): a assinatura do que lá está,
 // para só se reescrever quando muda, e a última posição conhecida, porque em
 // pausa os motores de AudioQueue não dão relógio.
@@ -2210,7 +2217,7 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
 
 - (void)recordAudio {
     // A gravar não se refinam assinaturas: nada disputa o disco nem o processador.
-    if (!self.isRecording) [self.refinarTask terminate];
+    if (!self.isRecording) { [self.refinarTask terminate]; [self.associarTask terminate]; }
     if (self.isRecording) {
         // Stop recording
         [self deixarDeVigiarOMusica];
@@ -4957,6 +4964,11 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
     double duracao = [m[@"duracao"] doubleValue];
     NSString *nome = ZPNomeDaEstacao([self replaceSingleQuoteAndSmartQuotes:artista], [self replaceSingleQuoteAndSmartQuotes:titulo], titulo);
     NSArray *args = @[nfc(artista), nfc(album), nfc(titulo), @(duracao), [m[@"pid"] length] ? m[@"pid"] : @""];
+    NSString *pid = [m[@"pid"] uppercaseString];
+    // Uma faixa da biblioteca do Música («URL track» é do catálogo, sem lá estar)
+    // pode ser ela própria a semente, se o mapa já a tiver assinada.
+    BOOL daBiblioteca = pid.length > 0 && ![m[@"classe"] isEqualToString:@"URL track"];
+    self.pidAAssumirDoMusica = pid.length ? pid : nil;
     self.estacaoAPreparar = YES;
     dispatch_async(self.filaDaFonoteca, ^{
         NSString *uuid = nil;
@@ -4973,17 +4985,52 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
                 [self correrEstacaoCom:uuid nome:nome manterSemente:YES apagar:nil];
                 return;
             }
-            self.estacaoAPreparar = YES;
-            [ZPCatalogoDaApple excertoDe:artista album:album titulo:titulo duracao:duracao concluido:^(NSURL *excerto) {
-                self.estacaoAPreparar = NO;
-                if (!excerto) {
-                    [self avisarDaEstacao:NSLocalizedString(@"station_failed", @"Não foi possível criar a estação.")
-                                 pormenor:NSLocalizedString(@"station_no_preview", @"A fonoteca não tem esta faixa, e a loja da Apple não deu um excerto dela.")];
-                    return;
-                }
-                [self correrEstacaoCom:excerto.path nome:nome manterSemente:NO apagar:excerto];
-            }];
+            dispatch_block_t peloExcerto = ^{
+                self.estacaoAPreparar = YES;
+                [ZPCatalogoDaApple excertoDe:artista album:album titulo:titulo duracao:duracao concluido:^(NSURL *excerto) {
+                    self.estacaoAPreparar = NO;
+                    if (!excerto) {
+                        self.pidAAssumirDoMusica = nil;
+                        [self avisarDaEstacao:NSLocalizedString(@"station_failed", @"Não foi possível criar a estação.")
+                                     pormenor:NSLocalizedString(@"station_no_preview", @"A fonoteca não tem esta faixa, e a loja da Apple não deu um excerto dela.")];
+                        return;
+                    }
+                    [self correrEstacaoCom:excerto.path nome:nome manterSemente:NO apagar:excerto];
+                }];
+            };
+            NSString *mapa = [[self loadSongsDirectoryPath] stringByAppendingPathComponent:@".mapa-do-catalogo.sqlite"];
+            if (daBiblioteca && [[NSFileManager defaultManager] fileExistsAtPath:mapa]) {
+                // A semente fica à cabeça da lista, como linha «musica:».
+                [self correrEstacaoCom:[@"musica:" stringByAppendingString:pid] nome:nome manterSemente:YES apagar:nil
+                           seNaoHouver:peloExcerto];
+            } else {
+                peloExcerto();
+            }
         });
+    });
+}
+
+// A estação nasceu do que o Música está a tocar. Sem isto ficava à espera de
+// um ▶ que, com o Música na janela, é dele: a estação nunca arrancava. Assim, a
+// faixa do Música passa a ser a faixa em curso da lista — a semente, se ficou
+// na lista, ou «antes da primeira», se não ficou — e quando ela acabar a lista
+// segue sozinha, como depois de qualquer linha «musica:». O ⏭ também já é da
+// lista.
+- (void)assumirOMusicaComSemente:(NSURL *)semente {
+    NSString *pid = self.pidAAssumirDoMusica;
+    self.pidAAssumirDoMusica = nil;
+    if (!pid.length || [self isPlaybackEngaged]) return;
+    NSDictionary *m = ZPMusicNowPlaying();
+    if (![[m[@"pid"] uppercaseString] isEqualToString:pid] || [m[@"estado"] isEqualToString:@"stopped"]) return;
+    NSUInteger onde = semente ? [[self currentPlaybackList] indexOfObject:semente] : NSNotFound;
+    self.currentTrackIndex = onde == NSNotFound ? -1 : (NSInteger)onde;
+    self.currentTrackURL = onde == NSNotFound ? nil : semente;
+    self.pidDoMusicaDaLista = pid;
+    self.musicaDaListaTocou = YES;
+    self.musicaDaListaPedidaEm = [NSDate date];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
+        [self prefetchNextTrack];
     });
 }
 
@@ -4991,6 +5038,13 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
 // ou o UUID de uma música da fonoteca; `apagar`, um ficheiro temporário que só
 // serviu para isto.
 - (void)correrEstacaoCom:(NSString *)semente nome:(NSString *)nome manterSemente:(BOOL)manter apagar:(NSURL *)apagar {
+    [self correrEstacaoCom:semente nome:nome manterSemente:manter apagar:apagar seNaoHouver:nil];
+}
+
+// `seNaoHouver` corre, em vez do aviso, quando o vectorizar não tem assinatura
+// para a semente (saída 3): serve para tentar por outra via.
+- (void)correrEstacaoCom:(NSString *)semente nome:(NSString *)nome manterSemente:(BOOL)manter apagar:(NSURL *)apagar
+             seNaoHouver:(dispatch_block_t)seNaoHouver {
     void (^limpar)(void) = ^{ if (apagar) [[NSFileManager defaultManager] removeItemAtURL:apagar error:NULL]; };
     NSURL *vectorizar = ZPVectorizar();
     NSString *base = [[self loadSongsDirectoryPath] stringByAppendingPathComponent:@".fonoteca.sqlite"];
@@ -5040,7 +5094,9 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
             __strong typeof(fraco) forte = fraco;
             if (!forte) return;
             forte.estacaoAPreparar = NO;
+            if (estado == 3 && seNaoHouver) { seNaoHouver(); return; }
             if (estado != 0 || faixas.count < 2) {
+                forte.pidAAssumirDoMusica = nil;
                 NSLog(@"[Estação] vectorizar saiu com %d: %@", estado, queixa);
                 [forte avisarDaEstacao:NSLocalizedString(@"station_failed", @"Não foi possível criar a estação.") pormenor:queixa];
                 return;
@@ -5050,6 +5106,7 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
             forte.estacaoNome = nome;
             forte.estacaoFicheiro = nil;
             [forte actualizarMarcaDaEstacao];
+            [forte assumirOMusicaComSemente:(manter ? faixas.firstObject : nil)];
             #ifdef DEBUG
             NSLog(@"[Estação] «%@»: %lu faixas.", nome, (unsigned long)faixas.count);
             #endif
@@ -5120,6 +5177,73 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(120 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [fraco refinarAssinaturas];
     });
+}
+
+// A consulta externa, a cada faixa que toca: o vectorizar pergunta à
+// ListenBrainz pelos artistas vizinhos do que está a tocar, vai buscar à loja
+// da Apple as canções deles que ainda não há, assina os excertos e guarda tudo
+// no mapa do catálogo, com o lugar que cada uma teria entre as vizinhas da
+// semente. Uma passagem de cada vez (quem chega com outra a correr fica sem
+// vez), em prioridade de fundo, e nunca durante uma gravação. Para fora vão só
+// o nome do artista e, na procura da loja, os nomes dos vizinhos.
+- (void)associarA:(NSString *)artista titulo:(NSString *)titulo semente:(NSString *)semente {
+    // A janela das descobertas ordena-se pela faixa que toca, haja ou não consulta.
+    self.sementeDasDescobertas = semente;
+    self.nomeDaSementeDasDescobertas = artista.length && titulo.length ? [NSString stringWithFormat:@"%@ — %@", artista, titulo] : (titulo ?: artista);
+    [self.descobertas faixaEmCurso:semente nome:self.nomeDaSementeDasDescobertas];
+    if (self.associarTask || self.isRecording || NSProcessInfo.processInfo.lowPowerModeEnabled) return;
+    if (artista.length == 0) return;
+    NSURL *vectorizar = ZPVectorizar();
+    NSString *pasta = [self loadSongsDirectoryPath];
+    NSString *base = [pasta stringByAppendingPathComponent:@".fonoteca.sqlite"];
+    NSString *mapa = [pasta stringByAppendingPathComponent:@".mapa-do-catalogo.sqlite"];
+    if (!vectorizar || ![[NSFileManager defaultManager] fileExistsAtPath:base]) return;
+    // «3. Título» → «Título»: o número da faixa é só da janela.
+    NSString *limpo = [titulo ?: @"" stringByReplacingOccurrencesOfString:@"^\\d+\\.\\s+" withString:@""
+                                                              options:NSRegularExpressionSearch range:NSMakeRange(0, titulo.length)];
+    NSString *registo = [[[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject
+                          URLByAppendingPathComponent:@"tocaTintas/associar.log"] path];
+    NSFileHandle *log = ZPRegistoParaAcrescentar(registo);
+    NSString *cabecalho = [NSString stringWithFormat:@"\n=== %@ %@ — %@\n",
+                           [NSISO8601DateFormatter stringFromDate:[NSDate date] timeZone:[NSTimeZone localTimeZone]
+                                                    formatOptions:NSISO8601DateFormatWithInternetDateTime], artista, limpo];
+    [log writeData:[cabecalho dataUsingEncoding:NSUTF8StringEncoding]];
+    NSMutableArray<NSString *> *args = [@[@"associar", base, mapa, @"--artista", artista, @"--titulo", limpo] mutableCopy];
+    if (semente.length) [args addObjectsFromArray:@[@"--semente", semente]];
+    NSTask *task = [[NSTask alloc] init];
+    task.executableURL = vectorizar;
+    task.arguments = args;
+    task.standardInput = [NSFileHandle fileHandleWithNullDevice];
+    task.standardOutput = log ?: [NSFileHandle fileHandleWithNullDevice];
+    task.standardError = log ?: [NSFileHandle fileHandleWithNullDevice];
+    __weak typeof(self) fraco = self;
+    task.terminationHandler = ^(NSTask *acabou) {
+        [log closeFile];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (fraco.associarTask == acabou) fraco.associarTask = nil;
+            [fraco.descobertas refazerSeAVista];   // o que a consulta trouxe
+        });
+    };
+    NSError *erro = nil;
+    if (![task launchAndReturnError:&erro]) {
+        NSLog(@"[Estação] Não consegui correr o vectorizar associar: %@", erro.localizedDescription);
+        [log closeFile];
+        return;
+    }
+    self.associarTask = task;
+}
+
+- (IBAction)mostrarDescobertas:(id)sender {
+    if (!self.descobertas) {
+        NSURL *vectorizar = ZPVectorizar();
+        NSString *pasta = [self loadSongsDirectoryPath];
+        if (!vectorizar || pasta.length == 0) { NSBeep(); return; }
+        self.descobertas = [[ZPDescobertas alloc] initWithVectorizar:vectorizar
+                                                                base:[pasta stringByAppendingPathComponent:@".fonoteca.sqlite"]
+                                                                mapa:[pasta stringByAppendingPathComponent:@".mapa-do-catalogo.sqlite"]];
+        [self.descobertas faixaEmCurso:self.sementeDasDescobertas nome:self.nomeDaSementeDasDescobertas];
+    }
+    [self.descobertas mostrar];
 }
 
 - (void)refinarAssinaturas {
@@ -5365,6 +5489,10 @@ typedef NS_ENUM(NSInteger, ZPTecla) {
                                                    action:@selector(criarEstacao:) keyEquivalent:@""];
     criar.target = self;
     [menu addItem:criar];
+    NSMenuItem *descobertas = [[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"discoveries_menu", @"Descobertas…")
+                                                         action:@selector(mostrarDescobertas:) keyEquivalent:@""];
+    descobertas.target = self;
+    [menu addItem:descobertas];
 
     NSMenuItem *topo = [[NSMenuItem alloc] initWithTitle:menu.title action:NULL keyEquivalent:@""];
     topo.submenu = menu;
@@ -11895,6 +12023,12 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
 }
 
 - (void)triggerNowPlayingNotificationWithTitle:(NSString *)title artist:(NSString *)artist album:(NSString *)album {
+    // Cada faixa que toca dá candidatas ao mapa do catálogo (só as de ficheiro:
+    // de um CD que a fonoteca não tem não há assinatura para servir de semente).
+    NSURL *emCurso = self.shuffledToOriginalMap[self.currentTrackURL] ?: self.currentTrackURL;
+    if (emCurso.isFileURL && !(self.cdVolumeURL && [emCurso.path hasPrefix:self.cdVolumeURL.path])) {
+        [self associarA:artist titulo:title semente:emCurso.path];
+    }
     // Clear any previous Now Playing notifications
     [[UNUserNotificationCenter currentNotificationCenter] removePendingNotificationRequestsWithIdentifiers:@[@"NowPlaying"]];
 
@@ -11970,6 +12104,7 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
     [self saveTrackPlayCounts];
     [self.airPlayManager stopDiscovery];
     [self.refinarTask terminate];
+    [self.associarTask terminate];
 }
 
 #pragma mark - O Música na janela
@@ -12098,6 +12233,8 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
     BOOL faixaNova = !self.aMostrarOMusica || ![chave isEqualToString:self.musicaFaixaMostrada];
     if (faixaNova) {
         self.musicaFaixaMostrada = chave;
+        [self associarA:m[@"artista"] titulo:m[@"titulo"]
+                semente:[m[@"pid"] length] ? [@"musica:" stringByAppendingString:[m[@"pid"] uppercaseString]] : nil];
         // A tipografia só no que se mostra, como nas faixas dos ficheiros; o m
         // fica como o Música o deu, que é o que o catálogo e as chaves esperam.
         [self.artistLabel setStringValue:[self replaceSingleQuoteAndSmartQuotes:m[@"artista"]]];
