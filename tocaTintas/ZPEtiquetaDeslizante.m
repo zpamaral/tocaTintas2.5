@@ -244,6 +244,12 @@ static const CGFloat kEsbatimento = 16.0;           // pt de esbatimento em cada
     [self reavaliar:YES];
 }
 
+- (void)setSimboloInicial:(NSString *)simbolo {
+    if (simbolo == _simboloInicial || [simbolo isEqualToString:_simboloInicial]) return;
+    _simboloInicial = [simbolo copy];
+    [self reavaliar:YES];
+}
+
 - (void)setFont:(NSFont *)font {
     [super setFont:font];
     [self reavaliar:NO];
@@ -420,15 +426,45 @@ static const CGFloat kEsbatimento = 16.0;           // pt de esbatimento em cada
 - (NSAttributedString *)textoParaDesenhar {
     NSMutableParagraphStyle *paragrafo = [[NSMutableParagraphStyle alloc] init];
     paragrafo.lineBreakMode = NSLineBreakByClipping;
-    return [[NSAttributedString alloc] initWithString:self.stringValue ?: @""
-                                           attributes:@{ NSFontAttributeName: self.font ?: [NSFont systemFontOfSize:0],
-                                                         NSForegroundColorAttributeName: self.textColor ?: NSColor.labelColor,
-                                                         NSParagraphStyleAttributeName: paragrafo }];
+    NSFont *fonte = self.font ?: [NSFont systemFontOfSize:0];
+    NSColor *cor = self.textColor ?: NSColor.labelColor;
+    NSDictionary *atributos = @{ NSFontAttributeName: fonte, NSForegroundColorAttributeName: cor,
+                                 NSParagraphStyleAttributeName: paragrafo };
+    NSAttributedString *texto = [[NSAttributedString alloc] initWithString:self.stringValue ?: @"" attributes:atributos];
+    NSImage *simbolo = self.simboloInicial.length && texto.length
+        ? [NSImage imageWithSystemSymbolName:self.simboloInicial accessibilityDescription:nil] : nil;
+    if (!simbolo) return texto;
+
+    // O símbolo vai como anexo, com o tamanho da letra e pintado com a cor dela.
+    NSImageSymbolConfiguration *feitio = [[NSImageSymbolConfiguration configurationWithPointSize:fonte.pointSize
+                                                                                         weight:NSFontWeightRegular
+                                                                                          scale:NSImageSymbolScaleMedium]
+        configurationByApplyingConfiguration:[NSImageSymbolConfiguration configurationWithPaletteColors:@[cor]]];
+    NSTextAttachment *anexo = [[NSTextAttachment alloc] init];
+    anexo.image = [simbolo imageWithSymbolConfiguration:feitio] ?: simbolo;
+    NSMutableAttributedString *tudo = [[NSAttributedString attributedStringWithAttachment:anexo] mutableCopy];
+    [tudo appendAttributedString:[[NSAttributedString alloc] initWithString:@" "]];
+    [tudo addAttributes:atributos range:NSMakeRange(0, tudo.length)];
+    [tudo appendAttributedString:texto];
+    return tudo;
 }
 
 // Em passagem o texto está na fita; a etiqueta só desenha o fundo, se o tiver.
 - (void)drawRect:(NSRect)sujo {
-    if (!self.emPassagem) {
+    if (!self.emPassagem && self.simboloInicial.length && self.stringValue.length) {
+        // A célula só sabe do texto: com símbolo, desenha-se aqui o mesmo que
+        // vai para a fita, e no mesmo sítio.
+        if (self.drawsBackground && self.backgroundColor) {
+            [self.backgroundColor setFill];
+            NSRectFill(sujo);
+        }
+        NSRect area = [self areaDoTexto];
+        [NSGraphicsContext saveGraphicsState];
+        NSRectClip(area);
+        [[self textoParaDesenhar] drawWithRect:NSMakeRect(NSMinX(area), NSMinY(area), self.larguraDoTexto + 1, NSHeight(area))
+                                       options:NSStringDrawingUsesLineFragmentOrigin context:nil];
+        [NSGraphicsContext restoreGraphicsState];
+    } else if (!self.emPassagem) {
         [super drawRect:sujo];
     } else if (self.drawsBackground && self.backgroundColor) {
         [self.backgroundColor setFill];

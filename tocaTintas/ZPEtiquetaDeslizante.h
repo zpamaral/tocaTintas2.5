@@ -55,6 +55,10 @@ NS_ASSUME_NONNULL_BEGIN
 /// etiqueta fica cortada e a vez passa à seguinte. Sem bloco, passa sempre.
 @property (nonatomic, copy, nullable) NSTimeInterval (^tempoRestante)(void);
 
+/// O nome de um SF Symbol a desenhar antes do texto, na cor e no tamanho dele
+/// (o da estação, por exemplo). Não entra no stringValue nem na dica.
+@property (nonatomic, copy, nullable) NSString *simboloInicial;
+
 @end
 
 NS_ASSUME_NONNULL_END

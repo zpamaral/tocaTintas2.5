@@ -4740,29 +4740,24 @@ static NSURL *ZPVectorizar(void) {
     return self.isPlaylistModeActive && self.estacaoCorrente != nil && self.audioFiles == self.estacaoCorrente;
 }
 
-// Em modo estação o título leva um «ᛘ» (U+16D8, uma antena) à frente, como o
-// «♫» das faixas do Música. É só da etiqueta: quem lê o título de lá para outro
-// fim (aviso, «A tocar», AppleScript, nome da estação) usa o -tituloSemMarca.
-static NSString * const ZPMarcaDaEstacao = @"ᛘ ";
+// Em modo estação o título leva à frente o sinal de estação do Música (o
+// ponto com ondas), como o «♫» das faixas do Música. É a etiqueta que o
+// desenha: o texto do título fica limpo para o aviso, o «A tocar», o
+// AppleScript e o nome da estação.
+- (void)actualizarMarcaDaEstacao {
+    if (![self.titleLabel isKindOfClass:[ZPEtiquetaDeslizante class]]) return;
+    BOOL deve = !self.aMostrarOMusica && [self haEstacaoCorrente];
+    ((ZPEtiquetaDeslizante *)self.titleLabel).simboloInicial = deve ? @"dot.radiowaves.right" : nil;
+}
 
+// Para pôr à volta do título de cada faixa nova: acerta a marca e devolve-o.
 - (NSString *)comMarcaDaEstacao:(NSString *)titulo {
-    BOOL tem = [titulo hasPrefix:ZPMarcaDaEstacao];
-    BOOL deve = titulo.length > 0 && !self.aMostrarOMusica && [self haEstacaoCorrente];
-    if (deve == tem) return titulo;
-    return deve ? [ZPMarcaDaEstacao stringByAppendingString:titulo] : [titulo substringFromIndex:ZPMarcaDaEstacao.length];
+    [self actualizarMarcaDaEstacao];
+    return titulo;
 }
 
 - (NSString *)tituloSemMarca {
-    NSString *titulo = self.titleLabel.stringValue ?: @"";
-    return [titulo hasPrefix:ZPMarcaDaEstacao] ? [titulo substringFromIndex:ZPMarcaDaEstacao.length] : titulo;
-}
-
-// Para a faixa que já estava a tocar quando se entra ou sai da estação.
-- (void)actualizarMarcaDaEstacao {
-    if (self.aMostrarOMusica) return;
-    NSString *titulo = self.titleLabel.stringValue ?: @"";
-    NSString *novo = [self comMarcaDaEstacao:titulo];
-    if (![novo isEqualToString:titulo]) self.titleLabel.stringValue = novo;
+    return self.titleLabel.stringValue ?: @"";
 }
 
 - (void)avisarDaEstacao:(NSString *)mensagem pormenor:(NSString *)pormenor {
@@ -11993,6 +11988,7 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
     NSString *mostrar = [self replaceSingleQuoteAndSmartQuotes:titulo];
     if ([self.titleLabel.stringValue isEqualToString:mostrar]) return NO;
     [self.titleLabel setStringValue:mostrar];
+    [self actualizarMarcaDaEstacao];   // com o Música na janela não há marca
     return YES;
 }
 

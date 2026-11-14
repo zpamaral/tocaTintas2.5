@@ -21,14 +21,14 @@
 //    vectorizar actualizar BASE
 //        Calcula as assinaturas que faltam: músicas novas, ou cujo ficheiro
 //        preferido mudou de áudio.
-//    vectorizar estacao BASE (caminho | uuid) [-n 50] [--por-artista 3] [--por-album 2]
+//    vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--mapa MAPA]
 //        Escreve os caminhos da estação, um por linha, com a semente à cabeça e
 //        os vizinhos por ordem de semelhança. Se a semente ainda não tiver
 //        assinatura, calcula-a (e guarda-a, se a música for da fonoteca).
 //        Sai com 3 se a semente não servir e com 4 se a base não tiver assinaturas.
 //    vectorizar importar BASE lista.tsv saída
 //        Traz para a base os vectores de saída.f32/saída.ids (ver abaixo).
-//    vectorizar [--modelo clap_audio.mlmodelc] [--cpu] lista.tsv saída
+//    vectorizar [--modelo clap_audio.mlmodelc] [--cpu] [--loja] lista.tsv saída
 //        lista.tsv: id <tab> duração <tab> caminho. Escreve saída.f32 (512
 //        float32 por faixa) e saída.ids (um id por linha, pela mesma ordem).
 //        Retoma de onde ficou.
@@ -579,9 +579,29 @@ static BOOL ZPPareceUUID(NSString *s) {
     return s.length == 36 && [[NSUUID alloc] initWithUUIDString:s] != nil;
 }
 
+// O mapa do catálogo (--mapa): um SQLite à parte da fonoteca, com as faixas da
+// biblioteca do Música que não têm ficheiro local, assinadas pelo excerto de
+// 30 s da loja. Entram na estação como «musica:<persistent ID>», que é o que o
+// Música sabe tocar. A semente também pode ser uma delas.
+static NSString *gMapa = nil;
+static const char * const kModeloDoExcerto = "larger_clap_general/excerto-3x10s";
+
+static sqlite3 *ZPAbrirMapa(void) {
+    sqlite3 *mapa = NULL;
+    if (!gMapa.length) return NULL;
+    if (sqlite3_open_v2(gMapa.fileSystemRepresentation, &mapa, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK) {
+        fprintf(stderr, "Não consegui abrir o mapa «%s»; sigo sem ele.\n", gMapa.UTF8String);
+        sqlite3_close(mapa);
+        return NULL;
+    }
+    sqlite3_busy_timeout(mapa, 5000);
+    return mapa;
+}
+
 static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, NSUInteger porArtista, NSUInteger porAlbum) {
     sqlite3 *db = ZPAbrirBase(base);
     if (!db) return 1;
+    BOOL sementeDoMusica = [semente hasPrefix:@"musica:"];
 
     // Quem é a semente: uma música da fonoteca (pelo UUID ou pelo caminho de um
     // dos seus ficheiros) ou um ficheiro qualquer, que a base não conhece.
@@ -598,6 +618,8 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
         }
         sqlite3_finalize(s);
         if (!musica) { fprintf(stderr, "A fonoteca não tem ficheiro para a música %s.\n", semente.UTF8String); sqlite3_close(db); return 3; }
+    } else if (sementeDoMusica) {
+        caminhoDaSemente = semente;
     } else {
         caminhoDaSemente = semente.stringByStandardizingPath;
         if (sqlite3_prepare_v2(db, "SELECT f.musica, f.md5_audio, COALESCE(m.duracao, 0) FROM ficheiros f"
@@ -621,6 +643,21 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
             }
         }
         sqlite3_finalize(s);
+    }
+    if (sementeDoMusica) {
+        sqlite3 *mapa = ZPAbrirMapa();
+        if (mapa && sqlite3_prepare_v2(mapa, "SELECT a.vector FROM assinaturas a JOIN faixas f ON f.id = a.faixa"
+                                             " WHERE f.pid = ? AND a.modelo = ?", -1, &s, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(s, 1, [semente substringFromIndex:7].UTF8String, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_text(s, 2, kModeloDoExcerto, -1, SQLITE_STATIC);
+            if (sqlite3_step(s) == SQLITE_ROW && sqlite3_column_bytes(s, 0) == kBytesDaAssinatura) {
+                ZPAssinaturaParaVector(sqlite3_column_blob(s, 0), alvo);
+                temAlvo = YES;
+            }
+            sqlite3_finalize(s);
+        }
+        sqlite3_close(mapa);
+        if (!temAlvo) { fprintf(stderr, "O mapa não tem assinatura para «%s».\n", semente.UTF8String); sqlite3_close(db); return 3; }
     }
     if (!temAlvo) {
         gSementeSolta = (musica == nil);
@@ -652,6 +689,23 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     }
     sqlite3_finalize(s);
     sqlite3_close(db);
+
+    // As do mapa, na mesma lista: o «caminho» delas é «musica:<pid>».
+    sqlite3 *mapa = ZPAbrirMapa();
+    if (mapa && sqlite3_prepare_v2(mapa, "SELECT f.pid, a.vector, f.artista, f.album, f.titulo FROM assinaturas a"
+                                         " JOIN faixas f ON f.id = a.faixa WHERE f.pid IS NOT NULL AND a.modelo = ?", -1, &s, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(s, 1, kModeloDoExcerto, -1, SQLITE_STATIC);
+        while (sqlite3_step(s) == SQLITE_ROW) {
+            if (sqlite3_column_bytes(s, 1) != kBytesDaAssinatura) continue;
+            float um[kDimensao];
+            ZPAssinaturaParaVector(sqlite3_column_blob(s, 1), um);
+            [vectores appendBytes:um length:sizeof(um)];
+            NSString *pid = [@"musica:" stringByAppendingString:ZPTexto(s, 0)];
+            [faixas addObject:@[pid, ZPTexto(s, 2), ZPTexto(s, 3), ZPTexto(s, 4), pid]];
+        }
+        sqlite3_finalize(s);
+    }
+    sqlite3_close(mapa);
     NSUInteger n = faixas.count;
     if (n < 2) { fprintf(stderr, "A base não tem assinaturas: falta correr «vectorizar actualizar».\n"); return 4; }
 
@@ -667,7 +721,7 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     NSMutableSet<NSString *> *titulos = [NSMutableSet set];
     NSCountedSet<NSString *> *artistas = [NSCountedSet set], *albuns = [NSCountedSet set];
     for (NSArray<NSString *> *f in faixas) {
-        if (musica && [f[0] isEqualToString:musica]) {
+        if ((musica && [f[0] isEqualToString:musica]) || [f[4] isEqualToString:caminhoDaSemente]) {
             NSString *chave = ZPChaveDoTitulo(f[3]);
             if (chave.length) [titulos addObject:chave];
             [artistas addObject:ZPChaveDoArtista(f[1], f[2])];
@@ -722,6 +776,14 @@ int main(int argc, const char *argv[]) {
             } else if ([a isEqualToString:@"--cpu"]) {
                 soCPU = YES;
                 [args removeObjectAtIndex:i];
+            } else if ([a isEqualToString:@"--mapa"] && i + 1 < args.count) {
+                gMapa = args[i + 1];
+                [args removeObjectsInRange:NSMakeRange(i, 2)];
+            } else if ([a isEqualToString:@"--loja"]) {
+                // A lista é de excertos de 30 s de uma loja: três janelas a
+                // cobrir cada um, como na semente solta de uma estação.
+                gSementeSolta = YES;
+                [args removeObjectAtIndex:i];
             } else if ([@[@"-n", @"--por-artista", @"--por-album"] containsObject:a] && i + 1 < args.count) {
                 NSUInteger v = (NSUInteger)MAX(args[i + 1].integerValue, 1);
                 if ([a isEqualToString:@"-n"]) quantas = v; else if ([a isEqualToString:@"--por-artista"]) porArtista = v; else porAlbum = v;
@@ -744,9 +806,9 @@ int main(int argc, const char *argv[]) {
         if (args.count == 4 && [args[0] isEqualToString:@"importar"]) return ZPModoImportar(args[1], args[2], args[3]);
         if (args.count != 2) {
             fprintf(stderr, "uso: vectorizar actualizar BASE\n"
-                            "     vectorizar estacao BASE (caminho | uuid) [-n 50] [--por-artista 3] [--por-album 2]\n"
+                            "     vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--mapa MAPA]\n"
                             "     vectorizar importar BASE lista.tsv saída\n"
-                            "     vectorizar [--modelo M.mlmodelc] [--cpu] lista.tsv saída\n"
+                            "     vectorizar [--modelo M.mlmodelc] [--cpu] [--loja] lista.tsv saída\n"
                             "     vectorizar --excerto segundos ficheiro pcm.f32\n"
                             "     vectorizar --mel pcm.f32 mel.f32\n"
                             "     vectorizar [--modelo M.mlmodelc] [--cpu] --vector-do-mel mel.f32 vector.f32\n");
