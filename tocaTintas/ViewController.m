@@ -397,6 +397,7 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSTask *refinarTask;                // o «vectorizar refinar» em curso
 @property (nonatomic, strong) NSTimer *relogioDeRefinar;
 @property (nonatomic, strong) NSTask *associarTask;               // o «vectorizar associar» em curso
+@property (nonatomic, strong) NSTimer *fimDaLinhaDoMusica;         // a paragem marcada para o fim da linha do Música
 @property (nonatomic, strong) ZPDescobertas *descobertas;         // a janela das descobertas, feita quando se pede
 @property (nonatomic, copy) NSString *sementeDasDescobertas, *nomeDaSementeDasDescobertas;   // a faixa que toca, para ela
 @property (nonatomic, strong) NSMenu *menuDaReproducao;
@@ -4635,6 +4636,8 @@ static NSString *ZPLinhaDoURL(NSURL *url) {
 // Larga a faixa que o Música estava a tocar a mando da lista. Primeiro
 // esquece-se, depois pára-se: a paragem não pode passar por fim de faixa.
 - (void)largarOMusicaDaLista {
+    [self.fimDaLinhaDoMusica invalidate];
+    self.fimDaLinhaDoMusica = nil;
     if (!self.pidDoMusicaDaLista) return;
     self.pidDoMusicaDaLista = nil;
     ZPMusicCommand(@"stop");
@@ -4706,8 +4709,12 @@ static NSString *ZPLinhaDoURL(NSURL *url) {
     BOOL acabou = NO;
     if (aMinha && [estado isEqualToString:@"playing"]) {
         self.musicaDaListaTocou = YES;
+        [self marcarOFimDaLinhaDoMusica:pid faltam:[m[@"duracao"] doubleValue] - [m[@"posicao"] doubleValue]];
         return NO;
-    } else if (aMinha) {
+    }
+    [self.fimDaLinhaDoMusica invalidate];
+    self.fimDaLinhaDoMusica = nil;
+    if (aMinha) {
         // Em pausa. Depois do «once» pode ficar em pausa no princípio; a meio é
         // pausa de quem ouve.
         if (!(pertoDoFim && [m[@"posicao"] doubleValue] < 2.0)) return NO;
@@ -4728,10 +4735,36 @@ static NSString *ZPLinhaDoURL(NSURL *url) {
     }
     self.pidDoMusicaDaLista = nil;
     if (!acabou) return NO;            // parada ou trocada à mão: a lista larga o Música
+    // Só se chega aqui se a paragem marcada falhou; fica escrito o que o Música fazia.
+    NSLog(@"[Lista mista] Fim da linha visto pelo Música: estado %@, faixa «%@», posição %.2f.", estado, m[@"titulo"] ?: @"", [m[@"posicao"] doubleValue]);
     if (!parado) ZPMusicCommand(@"stop");
     self.musicaATocar = NO;
     if (self.isRepeatModeActive) [self playAudio]; else [self playNextTrack];
     return YES;
+}
+
+// O Música, no fim de um «once», chega a soltar um sopro da faixa seguinte da
+// biblioteca antes de a notícia cá chegar. Por isso não se espera por ele: a
+// dois segundos do fim pergunta-se-lhe a posição certa, e um décimo de segundo
+// antes do fim manda-se parar e segue-se a lista. Cada notícia (e a pergunta
+// de cinco em cinco segundos) volta a marcar, e a pausa desmarca.
+- (void)marcarOFimDaLinhaDoMusica:(NSString *)pid faltam:(double)faltam {
+    [self.fimDaLinhaDoMusica invalidate];
+    self.fimDaLinhaDoMusica = nil;
+    if (faltam <= 0.0 || faltam > 36000.0) return;
+    BOOL acertar = faltam > 3.0;
+    __weak typeof(self) fraco = self;
+    self.fimDaLinhaDoMusica = [NSTimer scheduledTimerWithTimeInterval:acertar ? faltam - 2.0 : MAX(faltam - 0.1, 0.0) repeats:NO block:^(NSTimer *t) {
+        __strong typeof(fraco) forte = fraco;
+        if (!forte || ![forte.pidDoMusicaDaLista isEqualToString:pid]) return;
+        forte.fimDaLinhaDoMusica = nil;
+        if (acertar) { [forte actualizarOMusicaNaJanela]; return; }
+        forte.pidDoMusicaDaLista = nil;
+        ZPMusicCommand(@"stop");
+        forte.musicaATocar = NO;
+        if (forte.isRepeatModeActive) [forte playAudio]; else [forte playNextTrack];
+    }];
+    self.fimDaLinhaDoMusica.tolerance = 0.0;
 }
 
 // M3U Support
