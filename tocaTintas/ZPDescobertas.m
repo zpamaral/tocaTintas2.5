@@ -204,7 +204,8 @@ typedef NS_ENUM(NSUInteger, ZPCampo) {
     NSUInteger campo = (NSUInteger)coluna.identifier.integerValue;
     NSString *valor = campos[campo];
     if (campo == ZPCampoLugar) {
-        valor = [NSString stringWithFormat:NSLocalizedString(@"discoveries_rank_format", @"%ld.º"), (long)valor.integerValue];
+        // Lugar 0: trazida por uma faixa sem assinatura, ainda por medir.
+        valor = valor.integerValue > 0 ? [NSString stringWithFormat:NSLocalizedString(@"discoveries_rank_format", @"%ld.º"), (long)valor.integerValue] : @"—";
         celula.textField.alignment = NSTextAlignmentRight;
     } else {
         celula.textField.alignment = NSTextAlignmentNatural;

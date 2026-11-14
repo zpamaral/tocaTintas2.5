@@ -1141,6 +1141,41 @@ static int ZPModoAssociar(NSString *base, NSString *caminhoDoMapa, NSString *art
     ZPMel *melador = NULL;
     ZPTempos tempos = {0};
     NSUInteger novas = 0, aprovadas = 0, vistas = 0;
+
+    // Uma semente sem assinatura (faixa do Música que o mapa ainda não tem, ou
+    // ficheiro por registar): o alvo tira-se do excerto dela na loja, para as
+    // candidatas não ficarem sem juízo. Não se guarda; é só para medir.
+    if (!temAlvo && n > 0 && titulo.length) {
+        [NSThread sleepForTimeInterval:3.1];
+        NSDictionary *r = ZPPedirJSON(@"https://itunes.apple.com/search",
+                                      @{ @"term": [NSString stringWithFormat:@"%@ %@", artista, titulo], @"country": @"pt",
+                                         @"media": @"music", @"entity": @"song", @"limit": @"15" });
+        NSString *kt = ZPChaveDoTitulo(titulo), *ka = ZPChaveDoArtista(artista, @"");
+        for (NSDictionary *x in ([r isKindOfClass:[NSDictionary class]] && [r[@"results"] isKindOfClass:[NSArray class]] ? r[@"results"] : @[])) {
+            if (![x isKindOfClass:[NSDictionary class]] || ![x[@"trackName"] isKindOfClass:[NSString class]]
+                || ![x[@"artistName"] isKindOfClass:[NSString class]] || ![x[@"previewUrl"] isKindOfClass:[NSString class]]) continue;
+            NSString *kx = ZPChaveDoArtista(x[@"artistName"], @"");
+            if (kt.length == 0 || ![ZPChaveDoTitulo(x[@"trackName"]) isEqualToString:kt]
+                || !([kx containsString:ka] || [ka containsString:kx])) continue;
+            NSData *som = ZPPedir(x[@"previewUrl"], nil);
+            if (som.length < 10000) break;
+            NSString *temporario = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                                    [NSString stringWithFormat:@"vectorizar-excerto-%@.m4a", NSUUID.UUID.UUIDString]];
+            [som writeToFile:temporario atomically:NO];
+            modelo = ZPModeloQuandoPreciso(); melador = ZPMelCriar();
+            gSementeSolta = YES;
+            temAlvo = modelo && ZPVectorDaFaixa(modelo, melador, temporario, 0.0, alvo, &tempos);
+            [[NSFileManager defaultManager] removeItemAtPath:temporario error:NULL];
+            break;
+        }
+        if (temAlvo) {
+            semelhancas = malloc(n * sizeof(float));
+            vDSP_mmul(vectores.bytes, 1, alvo, 1, semelhancas, 1, n, 1, kDimensao);
+            printf("semente sem assinatura: mede-se pelo excerto da loja\n");
+        } else {
+            printf("semente sem assinatura nem excerto: as candidatas ficam sem lugar\n");
+        }
+    }
     for (NSArray<NSString *> *vizinho in vizinhos) {
         // 4. As canções do vizinho que a loja põe à frente, num só pedido (um de
         //    três em três segundos). As «mais ouvidas» da ListenBrainz passaram
@@ -1321,10 +1356,10 @@ static int ZPModoDescobertas(NSString *caminhoDoMapa, NSString *base, NSString *
         free(daFonoteca);
         [linhas sortUsingComparator:^NSComparisonResult(NSArray *x, NSArray *y) { return [y[0] compare:x[0]]; }];
         for (NSUInteger i = 0; i < MIN(quantas, linhas.count); ++i) printf("%s\n", [linhas[i][1] UTF8String]);
-    } else if (sqlite3_prepare_v2(mapa, "SELECT f.id, MIN(j.lugar), MAX(j.semelhanca), f.artista, f.titulo, f.album, f.endereco, f.semente, f.associacao"
-                                        "  FROM juizos j JOIN faixas f ON f.id = j.faixa"
+    } else if (sqlite3_prepare_v2(mapa, "SELECT f.id, IFNULL(MIN(j.lugar), 0), IFNULL(MAX(j.semelhanca), 0), f.artista, f.titulo, f.album, f.endereco, f.semente, f.associacao"
+                                        "  FROM faixas f LEFT JOIN juizos j ON j.faixa = f.id"   // as sem juízo (lugar 0) vão no fim
                                         " WHERE f.origem = 'associacao' AND f.esquecida_em IS NULL"
-                                        " GROUP BY f.id ORDER BY 2 LIMIT ?", -1, &s, NULL) == SQLITE_OK) {
+                                        " GROUP BY f.id ORDER BY MIN(j.lugar) IS NULL, 2, f.id LIMIT ?", -1, &s, NULL) == SQLITE_OK) {
         sqlite3_bind_int(s, 1, (int)quantas);
         while (sqlite3_step(s) == SQLITE_ROW) {
             printf("%lld\t%d\t%.3f\t%s\t%s\t%s\t%s\t%s\t%s\n", sqlite3_column_int64(s, 0), sqlite3_column_int(s, 1), sqlite3_column_double(s, 2),
