@@ -677,6 +677,9 @@ static sqlite3 *ZPAbrirMapa(void) {
     return mapa;
 }
 
+static float gAncora = 0.08f;   // --ancora: quanto sobe, na semelhança, uma faixa do artista mais vizinho da semente (0 = só o som)
+static NSUInteger gOndas = 5;   // --ondas: em quantas voltas à semente se reparte a estação (1 = por ordem de semelhança)
+
 static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, NSUInteger porArtista, NSUInteger porAlbum) {
     sqlite3 *db = ZPAbrirBase(base);
     if (!db) return 1;
@@ -791,15 +794,46 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
         }
         sqlite3_finalize(s);
     }
-    sqlite3_close(mapa);
     NSUInteger n = faixas.count;
-    if (n < 2) { fprintf(stderr, "A base não tem assinaturas: falta correr «vectorizar actualizar».\n"); return 4; }
+    if (n < 2) { sqlite3_close(mapa); fprintf(stderr, "A base não tem assinaturas: falta correr «vectorizar actualizar».\n"); return 4; }
+
+    // A âncora: os artistas que a ListenBrainz dá como vizinhos do artista da
+    // semente (quem ouve um ouve os outros), guardados no mapa pela consulta
+    // externa. A assinatura só conhece o som; a vizinhança de ouvintes traz a
+    // época e o país. Cada vizinho fica com um peso entre 0 e 1.
+    NSMutableDictionary<NSString *, NSNumber *> *vizinhos = [NSMutableDictionary dictionary];
+    if (mapa && gAncora > 0) {
+        NSString *artistaDaSemente = nil;
+        for (NSArray<NSString *> *f in faixas) {
+            if ((musica && [f[0] isEqualToString:musica]) || [f[4] isEqualToString:caminhoDaSemente] || [f[0] isEqualToString:caminhoDaSemente]) {
+                artistaDaSemente = ZPChaveDoArtista(f[1], f[2]);
+                break;
+            }
+        }
+        if (artistaDaSemente.length && sqlite3_prepare_v2(mapa, "SELECT v.nome, v.peso FROM vizinhos v JOIN artistas a ON a.mbid = v.artista"
+                                                                " WHERE a.chave = ? AND v.peso > 0 ORDER BY v.peso DESC", -1, &s, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(s, 1, artistaDaSemente.UTF8String, -1, SQLITE_TRANSIENT);
+            double maximo = 0;
+            while (sqlite3_step(s) == SQLITE_ROW) {
+                double peso = sqlite3_column_double(s, 1);
+                if (maximo == 0) maximo = peso;
+                NSString *chave = ZPChaveDoArtista(ZPTexto(s, 0), @"");
+                if (chave.length && !vizinhos[chave]) vizinhos[chave] = @(sqrt(peso / maximo));
+            }
+            sqlite3_finalize(s);
+        }
+    }
+    sqlite3_close(mapa);
 
     // Semelhança (co-seno: os vectores têm norma 1) e ordem decrescente.
     float *semelhanca = malloc(n * sizeof(float));
     vDSP_Length *ordem = malloc(n * sizeof(vDSP_Length));
     vDSP_mmul(vectores.bytes, 1, alvo, 1, semelhanca, 1, n, 1, kDimensao);
-    for (NSUInteger i = 0; i < n; ++i) ordem[i] = i;
+    for (NSUInteger i = 0; i < n; ++i) {
+        ordem[i] = i;
+        // Uma faixa de um artista vizinho sobe na ordem, tanto mais quanto mais vizinho.
+        if (vizinhos.count) semelhanca[i] += gAncora * [vizinhos[ZPChaveDoArtista(faixas[i][1], faixas[i][2])] floatValue];
+    }
     vDSP_vsorti(semelhanca, ordem, NULL, n, -1);
 
     // A semente vai à cabeça e conta para as regras. Se for da fonoteca, sabe-se
@@ -817,6 +851,7 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
         }
     }
     printf("%s\n", caminhoDaSemente.UTF8String);
+    NSMutableArray<NSString *> *porOrdem = [NSMutableArray array];   // as escolhidas, da mais parecida à menos
     NSUInteger escolhidas = 1;
     for (NSUInteger k = 0; k < n && escolhidas < quantas; ++k) {
         NSArray<NSString *> *f = faixas[ordem[k]];
@@ -831,8 +866,17 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
         if (chave.length) [titulos addObject:chave];
         [artistas addObject:artista];
         [albuns addObject:album];
-        printf("%s\n", f[4].UTF8String);
+        [porOrdem addObject:f[4]];
         ++escolhidas;
+    }
+    // Tocadas por ordem de semelhança, as faixas iam-se afastando da semente e
+    // nunca mais voltavam: a estação derivava. Por isso saem em ondas: cada
+    // onda começa perto da semente e afasta-se, e a seguinte volta ao pé dela.
+    // Com cinco ondas, a primeira leva a 1.ª, a 6.ª, a 11.ª… mais parecidas, a
+    // segunda a 2.ª, a 7.ª, a 12.ª…
+    NSUInteger ondas = MAX(MIN(gOndas, porOrdem.count), (NSUInteger)1);
+    for (NSUInteger onda = 0; onda < ondas; ++onda) {
+        for (NSUInteger k = onda; k < porOrdem.count; k += ondas) printf("%s\n", porOrdem[k].UTF8String);
     }
     free(semelhanca);
     free(ordem);
@@ -1425,9 +1469,13 @@ int main(int argc, const char *argv[]) {
                 // cobrir cada um, como na semente solta de uma estação.
                 gSementeSolta = YES;
                 [args removeObjectAtIndex:i];
-            } else if ([@[@"-n", @"--por-artista", @"--por-album"] containsObject:a] && i + 1 < args.count) {
+            } else if ([a isEqualToString:@"--ancora"] && i + 1 < args.count) {
+                gAncora = MAX(args[i + 1].floatValue, 0.0f);
+                [args removeObjectsInRange:NSMakeRange(i, 2)];
+            } else if ([@[@"-n", @"--por-artista", @"--por-album", @"--ondas"] containsObject:a] && i + 1 < args.count) {
                 NSUInteger v = (NSUInteger)MAX(args[i + 1].integerValue, 1);
-                if ([a isEqualToString:@"-n"]) quantas = v; else if ([a isEqualToString:@"--por-artista"]) porArtista = v; else porAlbum = v;
+                if ([a isEqualToString:@"-n"]) quantas = v; else if ([a isEqualToString:@"--por-artista"]) porArtista = v;
+                else if ([a isEqualToString:@"--ondas"]) gOndas = v; else porAlbum = v;
                 [args removeObjectsInRange:NSMakeRange(i, 2)];
             } else if ([a isEqualToString:@"--excerto"] && i + 1 < args.count) {
                 modo = a;

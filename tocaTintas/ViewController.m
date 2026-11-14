@@ -12558,6 +12558,9 @@ static NSString * const kZPAudicaoDoCatalogoKey = @"ZPAudicaoDoCatalogo";
     self.aMostrarOMusica = NO;
     self.musicaFaixaMostrada = nil;
     self.musicaFalhas = 0;
+    // Numa estação mista o título da faixa de ficheiro é escrito ainda com o
+    // Música na janela, e a marca da estação não entrava: põe-se agora.
+    [self actualizarMarcaDaEstacao];
     // A janela volta ao tocaTintas, e o ⏸️ com ela: o verde de uma pausa do
     // Música não pode ficar.
     [self updatePauseButtonAppearance:self.isPlaybackPaused];
