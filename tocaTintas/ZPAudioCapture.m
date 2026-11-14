@@ -242,6 +242,17 @@ BOOL ZPMusicCommand(NSString *comando) {
     return ZPDizerAoMusica(comando, 2) != nil;
 }
 
+// «with once»: no fim da faixa o Música pára, em vez de seguir pela biblioteca.
+// O prazo é maior do que o dos outros comandos porque o «whose» percorre a
+// biblioteca. O pid vai para dentro de um script: só passa se for hexadecimal.
+BOOL ZPMusicPlayOnce(NSString *pid) {
+    NSCharacterSet *fora = [NSCharacterSet characterSetWithCharactersInString:@"0123456789ABCDEFabcdef"].invertedSet;
+    if (pid.length == 0 || pid.length > 32 || [pid rangeOfCharacterFromSet:fora].location != NSNotFound) return NO;
+    NSString *comando = [NSString stringWithFormat:
+        @"play (first track of library playlist 1 whose persistent ID is \"%@\") with once", pid.uppercaseString];
+    return ZPDizerAoMusica(comando, 6) != nil;
+}
+
 // Pedido a cada faixa nova e de cinco em cinco segundos: compila-se uma vez e
 // guarda-se. Tudo no thread principal (o NSAppleScript não é para mais nenhum).
 //

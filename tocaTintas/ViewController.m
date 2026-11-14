@@ -393,6 +393,8 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSURL *estacaoFicheiro;   // onde já foi guardada; nil enquanto não o for
 @property (nonatomic, assign) BOOL estacaoAPreparar;    // à espera da base, do catálogo ou do vectorizar
 @property (nonatomic, strong) NSTask *assinaturasTask;
+@property (nonatomic, strong) NSTask *refinarTask;                // o «vectorizar refinar» em curso
+@property (nonatomic, strong) NSTimer *relogioDeRefinar;
 @property (nonatomic, strong) NSMenu *menuDaReproducao;
 
 @property (nonatomic, strong) NSArray<NSURL *> *audioFiles;
@@ -444,6 +446,12 @@ static WavpackStreamReader memoryReader = {
 @property (strong, nonatomic) id observadorDoMusicaNaJanela;
 @property (strong, nonatomic) NSTimer *relogioDoMusica;
 @property (assign, nonatomic) BOOL aMostrarOMusica;
+// Listas mistas: a linha «musica:» que o Música está a tocar a mando da lista.
+@property (copy, nonatomic) NSString *pidDoMusicaDaLista;
+@property (assign, nonatomic) BOOL musicaDaListaTocou;       // já se viu a tocar
+@property (strong, nonatomic) NSDate *musicaDaListaPedidaEm;
+@property (assign, nonatomic) NSUInteger saltosSeguidos;     // linhas saltadas de seguida
+@property (assign, nonatomic) BOOL aAndarParaTras;           // o ⏮️ salta para trás
 // O «A tocar» do sistema (ver «Centro A tocar»): a assinatura do que lá está,
 // para só se reescrever quando muda, e a última posição conhecida, porque em
 // pausa os motores de AudioQueue não dão relógio.
@@ -1640,6 +1648,7 @@ CoreAudioPlaybackState playbackState;
     [self prepararCDDeAudio];
     // O menu Reprodução, com as teclas do tocador e a estação.
     [self prepararMenuDaReproducao];
+    [self comecarARefinarAssinaturas];
     
     // Initialize ZPAudioCapture instance
     self.audioCapture = [[ZPAudioCapture alloc] init];
@@ -2200,6 +2209,8 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
 }
 
 - (void)recordAudio {
+    // A gravar não se refinam assinaturas: nada disputa o disco nem o processador.
+    if (!self.isRecording) [self.refinarTask terminate];
     if (self.isRecording) {
         // Stop recording
         [self deixarDeVigiarOMusica];
@@ -4239,6 +4250,10 @@ static const NSTimeInterval kPlayCountThreshold = 5.0;
 // restantes casos: se a faixa acompanhada não mudou, isto é uma retoma e o estado
 // existente é preservado — nem se volta a contar, nem se reinicia o prazo.
 - (void)beginPlayCountTrackingForTrack:(NSURL *)trackURL forceNewPlayback:(BOOL)forceNewPlayback {
+    // Uma linha «musica:» não é ficheiro: quem a conta é o Música, e a audição
+    // chega à fonoteca pelo caminho das faixas da biblioteca dele.
+    if (ZPPidDaLinha(trackURL)) return;
+    self.saltosSeguidos = 0;   // toca um ficheiro: acabou a série de saltos
     NSURL *originalTrackURL = self.shuffledToOriginalMap[trackURL] ?: trackURL;
     NSString *trackPath = originalTrackURL.path;
     if (trackPath.length == 0) {
@@ -4574,6 +4589,144 @@ static NSDictionary *ZPExtraDaFaixaParaFonoteca(NSDictionary *disco, NSInteger n
     return uuid;
 }
 
+#pragma mark - Listas mistas
+
+// Numa lista (uma M3U8 ou uma estação) pode haver linhas que não são
+// ficheiros: «musica:<persistent ID>», uma faixa da biblioteca do Música.
+// Dentro do tocaTintas é um URL como os outros, para caber nas mesmas filas:
+// musica://<pid>/♫ Artista — Título.musica. A extensão inventada leva-o, em
+// todos os sítios que escolhem o leitor pela extensão, ao
+// -handleStandardAudioPlayback:, que o entrega ao Música; e o último componente
+// dá o nome para a caixa das músicas.
+static NSURL *ZPURLDaLinha(NSString *linha) {
+    if (![linha.lowercaseString hasPrefix:@"musica:"]) return [NSURL fileURLWithPath:linha];
+    NSArray<NSString *> *partes = [linha componentsSeparatedByString:@"\t"];
+    NSString *pid = [partes[0] substringFromIndex:7].uppercaseString;
+    NSString *nome = partes.count > 1 && partes[1].length ? partes[1] : pid;
+    nome = [nome stringByReplacingOccurrencesOfString:@"/" withString:@"∕"];
+    NSURLComponents *c = [[NSURLComponents alloc] init];
+    c.scheme = @"musica";
+    c.host = pid;
+    c.path = [NSString stringWithFormat:@"/♫ %@.musica", nome];
+    return c.URL ?: [NSURL fileURLWithPath:linha];
+}
+
+// O persistent ID, ou nil se o URL for um ficheiro.
+static NSString *ZPPidDaLinha(NSURL *url) {
+    return [url.scheme isEqualToString:@"musica"] ? url.host.uppercaseString : nil;
+}
+
+// O que vai para a M3U8: o caminho, ou o #EXTINF com o nome e a linha «musica:».
+static NSString *ZPLinhaDoURL(NSURL *url) {
+    NSString *pid = ZPPidDaLinha(url);
+    if (!pid) return url.path;
+    NSString *nome = url.lastPathComponent.stringByDeletingPathExtension;
+    if ([nome hasPrefix:@"♫ "]) nome = [nome substringFromIndex:2];
+    return [NSString stringWithFormat:@"#EXTINF:-1,%@\nmusica:%@", nome, pid];
+}
+
+// Larga a faixa que o Música estava a tocar a mando da lista. Primeiro
+// esquece-se, depois pára-se: a paragem não pode passar por fim de faixa.
+- (void)largarOMusicaDaLista {
+    if (!self.pidDoMusicaDaLista) return;
+    self.pidDoMusicaDaLista = nil;
+    ZPMusicCommand(@"stop");
+}
+
+// A linha não se pode tocar (o Música fechado, a faixa fora da biblioteca):
+// passa-se à seguinte, ou à anterior se se vinha para trás, sem aviso. Se
+// nenhuma da lista se puder tocar, pára-se ao fim de uma volta.
+- (void)saltarLinhaDoMusica {
+    NSUInteger total = [self currentPlaybackList].count;
+    if (++self.saltosSeguidos >= MAX(total, (NSUInteger)1)) {
+        self.saltosSeguidos = 0;
+        NSLog(@"[Lista mista] Nenhuma linha da lista se pode tocar.");
+        return;
+    }
+    BOOL paraTras = self.aAndarParaTras;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (paraTras) [self backwardTrack]; else [self playNextTrack];
+    });
+}
+
+// Toca no Música a linha «musica:». O tocaTintas fica parado, e por isso a
+// janela passa a mostrar o Música, pelo caminho de sempre.
+- (void)tocarLinhaDoMusica:(NSURL *)url {
+    [self.progressUpdateTimer invalidate];
+    self.progressUpdateTimer = nil;
+    [self discardPrefetchedTrack];
+    NSString *pid = ZPPidDaLinha(url);
+    BOOL aCorrer = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.apple.Music"].count > 0;
+    if (!aCorrer || !ZPMusicPlayOnce(pid)) {
+        #ifdef DEBUG
+        NSLog(@"[Lista mista] Salto «%@»: %@.", url.lastPathComponent, aCorrer ? @"o Música não a tocou" : @"o Música não está a correr");
+        #endif
+        [self saltarLinhaDoMusica];
+        return;
+    }
+    self.saltosSeguidos = 0;
+    self.pidDoMusicaDaLista = pid;
+    self.musicaDaListaTocou = NO;
+    self.musicaDaListaPedidaEm = [NSDate date];
+    [self.progressBar setDoubleValue:0.0];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // Quem chamou pode ter armado o temporizador da barra depois disto.
+        if (self.pidDoMusicaDaLista) {
+            [self.progressUpdateTimer invalidate];
+            self.progressUpdateTimer = nil;
+            [self actualizarOMusicaNaJanela];
+            [self prefetchNextTrack];
+        }
+    });
+    // Se o Música aceitou o pedido e não tocou, não há notícia dele que acorde
+    // a lista: pergunta-se-lhe uma vez, passado o prazo de arranque.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(11 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if ([self.pidDoMusicaDaLista isEqualToString:pid] && !self.musicaDaListaTocou) [self actualizarOMusicaNaJanela];
+    });
+}
+
+// Chamado a cada notícia do Música. Devolve YES se a faixa da lista acabou e
+// se passou à seguinte. «m» é o que o Música acaba de dizer; a posição
+// estimada vem da notícia anterior e do relógio.
+- (BOOL)acompanharALinhaDoMusica:(NSDictionary *)m {
+    NSString *pid = self.pidDoMusicaDaLista;
+    if (!pid || !m) return NO;
+    NSString *estado = m[@"estado"];
+    BOOL parado = [estado isEqualToString:@"stopped"] || !m[@"titulo"];
+    BOOL aMinha = !parado && [[m[@"pid"] uppercaseString] isEqualToString:pid];
+    double estimada = self.musicaPosicao + (self.musicaATocar && self.musicaQuando ? -self.musicaQuando.timeIntervalSinceNow : 0.0);
+    BOOL pertoDoFim = self.musicaDaListaTocou && self.musicaDuracao > 0.0 && estimada >= self.musicaDuracao - 4.0;
+    BOOL acabou = NO;
+    if (aMinha && [estado isEqualToString:@"playing"]) {
+        self.musicaDaListaTocou = YES;
+        return NO;
+    } else if (aMinha) {
+        // Em pausa. Depois do «once» pode ficar em pausa no princípio; a meio é
+        // pausa de quem ouve.
+        if (!(pertoDoFim && [m[@"posicao"] doubleValue] < 2.0)) return NO;
+        acabou = YES;
+    } else if (parado) {
+        if (!self.musicaDaListaTocou) {
+            // Ainda a arrancar; se ao fim de dez segundos não tocou, salta-se.
+            if (-self.musicaDaListaPedidaEm.timeIntervalSinceNow < 10.0) return NO;
+            self.pidDoMusicaDaLista = nil;
+            [self saltarLinhaDoMusica];
+            return YES;
+        }
+        acabou = pertoDoFim;
+    } else {
+        // O Música passou a outra faixa. No fim da nossa, é ele a seguir pela
+        // biblioteca: pára-se. A meio, foi quem ouve que escolheu outra coisa.
+        acabou = pertoDoFim;
+    }
+    self.pidDoMusicaDaLista = nil;
+    if (!acabou) return NO;            // parada ou trocada à mão: a lista larga o Música
+    if (!parado) ZPMusicCommand(@"stop");
+    self.musicaATocar = NO;
+    if (self.isRepeatModeActive) [self playAudio]; else [self playNextTrack];
+    return YES;
+}
+
 // M3U Support
 - (IBAction)openM3UFile:(id)sender {
     // Create an open panel for selecting the M3U file
@@ -4609,8 +4762,7 @@ static NSDictionary *ZPExtraDaFaixaParaFonoteca(NSDictionary *disco, NSInteger n
     // Convert the string paths to NSURLs
     NSMutableArray<NSURL *> *trackURLs = [NSMutableArray array];
     for (NSString *trackPath in playlistTracks) {
-        NSURL *trackURL = [NSURL fileURLWithPath:trackPath];
-        [trackURLs addObject:trackURL];
+        [trackURLs addObject:ZPURLDaLinha(trackPath)];
     }
 
     // Register the playlist URL with NSDocumentController
@@ -4851,7 +5003,11 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
     }
     NSTask *task = [[NSTask alloc] init];
     task.executableURL = vectorizar;
-    task.arguments = @[@"estacao", base, semente];
+    // Com o mapa do catálogo ao lado da fonoteca, a estação também vai buscar
+    // faixas à biblioteca do Música.
+    NSString *mapa = [[self loadSongsDirectoryPath] stringByAppendingPathComponent:@".mapa-do-catalogo.sqlite"];
+    task.arguments = [[NSFileManager defaultManager] fileExistsAtPath:mapa] ? @[@"estacao", base, semente, @"--mapa", mapa]
+                                                                            : @[@"estacao", base, semente];
     task.standardInput = [NSFileHandle fileHandleWithNullDevice];
     NSPipe *saida = [NSPipe pipe], *erros = [NSPipe pipe];
     task.standardOutput = saida;
@@ -4877,7 +5033,7 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
                             stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
         NSMutableArray<NSURL *> *faixas = [NSMutableArray array];
         for (NSString *linha in [texto componentsSeparatedByString:@"\n"]) {
-            if (linha.length) [faixas addObject:[NSURL fileURLWithPath:linha]];
+            if (linha.length) [faixas addObject:ZPURLDaLinha(linha)];
         }
         if (!manter && faixas.count) [faixas removeObjectAtIndex:0];
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -4940,13 +5096,64 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
 
 - (void)escreverEstacaoEm:(NSURL *)ficheiro {
     NSMutableArray<NSString *> *caminhos = [NSMutableArray arrayWithCapacity:self.estacaoCorrente.count];
-    for (NSURL *faixa in self.estacaoCorrente) [caminhos addObject:faixa.path];
+    for (NSURL *faixa in self.estacaoCorrente) [caminhos addObject:ZPLinhaDoURL(faixa)];
     if ([M3UPlaylist saveToFile:ficheiro.path withPlaylist:caminhos]) {
         self.estacaoFicheiro = ficheiro;
         [[NSDocumentController sharedDocumentController] noteNewRecentDocumentURL:ficheiro];
     } else {
         [self avisarDaEstacao:NSLocalizedString(@"station_save_failed", @"Não foi possível guardar a estação.") pormenor:ficheiro.path];
     }
+}
+
+// As assinaturas são um processo: o «actualizar» faz o esboço de cada música
+// nova (três janelas), e o «refinar» vai-as passando a finas (quinze), aos
+// poucos e em fundo. O vectorizar pede ele próprio a prioridade mínima de
+// processador e de disco, e cede a quem toca; aqui só se escolhe quando: de
+// meia em meia hora corre 25 minutos, a não ser que se esteja a gravar, que o
+// Mac esteja em modo de pouca energia, ou que outro vectorizar esteja a correr.
+- (void)comecarARefinarAssinaturas {
+    if (self.relogioDeRefinar) return;
+    __weak typeof(self) fraco = self;
+    self.relogioDeRefinar = [NSTimer scheduledTimerWithTimeInterval:30 * 60 repeats:YES block:^(NSTimer *t) {
+        [fraco refinarAssinaturas];
+    }];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(120 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [fraco refinarAssinaturas];
+    });
+}
+
+- (void)refinarAssinaturas {
+    if (self.refinarTask || self.assinaturasTask || self.isRecording || NSProcessInfo.processInfo.lowPowerModeEnabled) return;
+    NSURL *vectorizar = ZPVectorizar();
+    NSString *base = [[self loadSongsDirectoryPath] stringByAppendingPathComponent:@".fonoteca.sqlite"];
+    if (!vectorizar || ![[NSFileManager defaultManager] fileExistsAtPath:base]) return;
+    NSString *registo = [[[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject
+                          URLByAppendingPathComponent:@"tocaTintas/registar.log"] path];
+    NSFileHandle *log = ZPRegistoParaAcrescentar(registo);
+    NSString *cabecalho = [NSString stringWithFormat:@"\n=== %@ refinar assinaturas\n",
+                           [NSISO8601DateFormatter stringFromDate:[NSDate date] timeZone:[NSTimeZone localTimeZone]
+                                                    formatOptions:NSISO8601DateFormatWithInternetDateTime]];
+    [log writeData:[cabecalho dataUsingEncoding:NSUTF8StringEncoding]];
+    NSTask *task = [[NSTask alloc] init];
+    task.executableURL = vectorizar;
+    task.arguments = @[@"refinar", base, @"--minutos", @"25"];
+    task.standardInput = [NSFileHandle fileHandleWithNullDevice];
+    task.standardOutput = log ?: [NSFileHandle fileHandleWithNullDevice];
+    task.standardError = log ?: [NSFileHandle fileHandleWithNullDevice];
+    __weak typeof(self) fraco = self;
+    task.terminationHandler = ^(NSTask *acabou) {
+        [log closeFile];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (fraco.refinarTask == acabou) fraco.refinarTask = nil;
+        });
+    };
+    NSError *erro = nil;
+    if (![task launchAndReturnError:&erro]) {
+        NSLog(@"[Estação] Não consegui correr o vectorizar refinar: %@", erro.localizedDescription);
+        [log closeFile];
+        return;
+    }
+    self.refinarTask = task;
 }
 
 // Depois de um registo na fonoteca: as músicas novas ganham assinatura. Corre
@@ -7467,6 +7674,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 - (void)playNextTrack {
     //self.replayGainValue = 0.0f;
     self.isCalledFromPlayNextTrack = YES;
+    [self largarOMusicaDaLista];
     // Dispose of any existing audio queue before starting a new track
     if (playbackState.audioQueue) {
         AudioQueueDispose(playbackState.audioQueue, true);  // Dispose the previous queue
@@ -7725,6 +7933,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
 - (void)playAudio {
     // Arrancar uma faixa nunca deixa o tocador em pausa: a selecção verde sai,
     // venha o pedido do botão ▶️, da lista de músicas ou do fim da faixa anterior.
+    [self largarOMusicaDaLista];   // o Música estava a tocar uma linha da lista: cala-se
     dispatch_block_t clearPauseSelection = ^{
         self.isPlaybackPaused = NO;
         [self updatePauseButtonAppearance:NO];
@@ -8926,6 +9135,7 @@ static NSScrollView *ZPScrollViewComTabela(NSView *vista) {
 
         // Construct the display string in the desired format
         NSString *displayName = [NSString stringWithFormat:@"%@ (%@)", cleanedSongName, extension];
+        if (ZPPidDaLinha(fileURL)) displayName = [NSString stringWithFormat:@"%@ (Música)", songName];
         NSDictionary *faixaDoCD = self.cdFaixas[fileURL.path];
         if (faixaDoCD) {
             // «Audio Track (aiff)» em todas as faixas não dizia nada.
@@ -10485,6 +10695,10 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
 
 // Standard audio formats (MP3, WAV, etc.) playback and metadata handling
 - (void)handleStandardAudioPlayback:(NSURL *)trackURL {
+    if (ZPPidDaLinha(trackURL)) {
+        [self tocarLinhaDoMusica:trackURL];
+        return;
+    }
     NSError *error = nil;
 
     // O ganho ANTES de tocar, e não depois. O tap multiplica as amostras à
@@ -11088,8 +11302,11 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
     // Reset the progress bar to zero
     [self.progressBar setDoubleValue:0];
 
-    // Play the new track
+    // Play the new track. Uma linha «musica:» que não se possa tocar salta-se
+    // para trás, e não para a frente.
+    self.aAndarParaTras = YES;
     [self playAudio];
+    self.aAndarParaTras = NO;
 }
 
 - (void)forwardTrack {
@@ -11123,6 +11340,7 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
 // porque este também é o primeiro passo de -playAudio, e aí a ranhura é
 // justamente o que a faixa que vai arrancar está prestes a consumir.
 - (void)stopButtonPressed {
+    [self largarOMusicaDaLista];
     [self stopAudio];
     [self discardPrefetchedTrack];
     // Parado o tocaTintas, a janela fica livre para o Música, se ele tocar.
@@ -11751,6 +11969,7 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
     [self stopBs2bHeadphoneAutoStart];
     [self saveTrackPlayCounts];
     [self.airPlayManager stopDiscovery];
+    [self.refinarTask terminate];
 }
 
 #pragma mark - O Música na janela
@@ -11779,6 +11998,14 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
 // É acção só dos botões: os comandos AppleScript do tocaTintas chamam os
 // métodos de baixo directamente e continuam a ser dele.
 - (void)botaoDeTransporte:(NSButton *)botao {
+    if (self.pidDoMusicaDaLista && botao != self.playButton && botao != self.pauseButton) {
+        // O Música toca uma linha da lista: o ⏹️, o ⏭️ e o ⏮️ são da lista, e
+        // não dele (o «seguinte» do Música ia pela biblioteca fora).
+        if (botao == self.stopButton)          [self stopButtonPressed];
+        else if (botao == self.forwardButton)  [self forwardTrack];
+        else if (botao == self.backwardButton) [self backwardTrack];
+        return;
+    }
     if (self.aMostrarOMusica) {
         NSString *comando = botao == self.playButton     ? @"play"
                           : botao == self.pauseButton    ? @"playpause"
@@ -11845,6 +12072,7 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
     if (self.isRecording && m[@"titulo"]) {
         [self.audioCapture registarPosicaoDoMusica:m demora:NSProcessInfo.processInfo.systemUptime - antes];
     }
+    if ([self acompanharALinhaDoMusica:m]) return;   // a linha da lista acabou: segue a lista
     // Sem resposta não é parado: fica o que está à vista, a barra segue pelo
     // relógio local, e volta-se a perguntar daqui a cinco segundos. Só à
     // terceira falha seguida se desiste — até ao próximo aviso do Música.
@@ -12809,7 +13037,7 @@ static ZPReplayGainLido ZPLerReplayGain(NSURL *url, NSData *dados) {
     // curso do disco aos poucos; ler de uma vez os trinta e tal MB da seguinte
     // punha a cabeça óptica a servir as duas, e a que toca ficava sem dados —
     // ouviam-se os primeiros segundos e depois silêncio, com a barra a andar.
-    if (!trackURL || (self.cdVolumeURL && [trackURL.path hasPrefix:self.cdVolumeURL.path])) {
+    if (!trackURL || ZPPidDaLinha(trackURL) || (self.cdVolumeURL && [trackURL.path hasPrefix:self.cdVolumeURL.path])) {
         [self discardPrefetchedTrack];
         return;
     }

@@ -72,13 +72,28 @@ SOFTWARE.
     NSMutableArray<NSString *> *audioFilePaths = [NSMutableArray array];
 
     // Loop through the lines and add file paths (ignoring comments and empty lines)
+    NSString *titulo = nil;   // o do último #EXTINF
     for (__strong NSString *line in lines) {  // Add __strong here
         line = [line stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
 
         if ([line hasPrefix:@"#"] || line.length == 0) {
-            // Ignore comments and empty lines
+            // Ignore comments and empty lines — menos o título do #EXTINF, que
+            // serve de nome às linhas «musica:».
+            if ([line hasPrefix:@"#EXTINF:"]) {
+                NSRange virgula = [line rangeOfString:@","];
+                titulo = virgula.location != NSNotFound ? [line substringFromIndex:NSMaxRange(virgula)] : nil;
+            }
             continue;
         }
+
+        // Uma faixa da biblioteca do Música: «musica:<persistent ID>». Não é
+        // um caminho; segue tal e qual, com o nome depois de uma tabulação.
+        if ([line.lowercaseString hasPrefix:@"musica:"]) {
+            [audioFilePaths addObject:titulo.length ? [NSString stringWithFormat:@"%@\t%@", line, titulo] : line];
+            titulo = nil;
+            continue;
+        }
+        titulo = nil;
 
         if ([line.lowercaseString hasPrefix:@"file://"]) {
             NSString *caminho = [NSURL URLWithString:line].path;

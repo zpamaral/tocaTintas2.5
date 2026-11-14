@@ -46,6 +46,11 @@ double ZPMusicCurrentTrackSampleRate(void);
 /// incluindo não responder em dois segundos.
 BOOL ZPMusicCommand(NSString *comando);
 
+/// Manda o Música tocar, uma vez só e parar no fim, a faixa da biblioteca com
+/// este persistent ID. Devolve NO se o Música não estiver aberto, se a faixa
+/// já lá não estiver, ou se não responder em seis segundos. Nunca abre o Música.
+BOOL ZPMusicPlayOnce(NSString *pid);
+
 /// O que o Música está a tocar: @"estado" («playing», «paused», «stopped») e,
 /// fora de «stopped», @"posicao" e @"duracao" (segundos), @"titulo",
 /// @"artista", @"album", @"faixa" e @"disco" (números), @"ouvida" (o «played

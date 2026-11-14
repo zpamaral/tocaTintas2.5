@@ -19,6 +19,7 @@
 //
 //  Uso:
 //    vectorizar actualizar BASE
+//    vectorizar refinar BASE [--minutos N]
 //        Calcula as assinaturas que faltam: músicas novas, ou cujo ficheiro
 //        preferido mudou de áudio.
 //    vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--mapa MAPA]
@@ -52,11 +53,18 @@
 #import <Accelerate/Accelerate.h>
 #import <mach/mach_time.h>
 #include <sqlite3.h>
+#include <sys/resource.h>
 #include "mel_slaney.h"
 
 // O nome com que as assinaturas ficam na base: o modelo e a maneira de tirar
 // os excertos. Mudando um ou outra, muda o nome, e as antigas não se misturam.
 static const char * const kModelo = "larger_clap_general/3x10s";
+// A assinatura é um processo: primeiro o esboço, com três janelas, que serve
+// logo; depois, sem pressa, a fina, com quinze (modo «refinar»). Medido em 346
+// faixas: com 3 janelas só 6,4 das 10 vizinhas são as que 31 janelas dariam;
+// com 7 são 8,1 e com 15 são 9,1. Acima de 15 já não compensa a leitura.
+static const char * const kModeloFino = "larger_clap_general/15x10s";
+static int gJanelas = 3;
 
 enum {
     kFrequencia = 48000,
@@ -241,7 +249,7 @@ static BOOL ZPVectorDaFaixa(MLModel *modelo, ZPMel *melador, NSString *caminho, 
     }
     if (s != noErr) { ExtAudioFileDispose(ficheiro); return NO; }
 
-    double inicios[3] = { 0.0, 0.0, 0.0 };
+    double inicios[15] = { 0.0 };
     int quantos = 1;
     if (gSementeSolta && duracao >= 20.0 && duracao <= 31.0) {
         // O excerto de 30 s de uma loja: três janelas que o cobrem todo. Com uma
@@ -250,9 +258,13 @@ static BOOL ZPVectorDaFaixa(MLModel *modelo, ZPMel *melador, NSString *caminho, 
         inicios[1] = (duracao - 10.0) / 2.0;
         inicios[2] = duracao - 10.0;
     } else if (duracao > 30.0) {
-        quantos = 3;
-        const double pontos[3] = { 0.25, 0.5, 0.75 };
-        for (int i = 0; i < 3; ++i) inicios[i] = MAX(duracao * pontos[i] - 5.0, 0.0);
+        // Um plano que parte os intervalos ao meio: os quartos (25, 50, 75 %),
+        // depois os oitavos ímpares, depois os dezasseis-avos ímpares. As três
+        // primeiras janelas são as do esboço; as outras só as lê o «refinar».
+        quantos = 0;
+        for (int den = 4; den <= 16 && quantos < gJanelas; den *= 2)
+            for (int num = 1; num < den && quantos < gJanelas; num += (den == 4 ? 1 : 2))
+                inicios[quantos++] = MIN(MAX(duracao * num / den - 5.0, 0.0), duracao - 10.0);
     }
 
     float soma[kDimensao] = {0}, um[kDimensao];
@@ -417,14 +429,19 @@ static void ZPAssinaturaParaVector(const void *blob, float *vector) {
     for (int i = 0; i < kDimensao; ++i) vector[i] = (float)meio[i];
 }
 
+static BOOL ZPGuardarAssinaturaCom(sqlite3 *db, NSString *musica, NSString *md5, const float *vector, const char *modelo);
 static BOOL ZPGuardarAssinatura(sqlite3 *db, NSString *musica, NSString *md5, const float *vector) {
+    return ZPGuardarAssinaturaCom(db, musica, md5, vector, kModelo);
+}
+
+static BOOL ZPGuardarAssinaturaCom(sqlite3 *db, NSString *musica, NSString *md5, const float *vector, const char *modelo) {
     _Float16 meio[kDimensao];
     for (int i = 0; i < kDimensao; ++i) meio[i] = (_Float16)vector[i];
     sqlite3_stmt *s = NULL;
     if (sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO assinaturas (musica, modelo, md5_audio, vector) VALUES (?, ?, ?, ?)",
                            -1, &s, NULL) != SQLITE_OK) return NO;
     sqlite3_bind_text(s, 1, musica.UTF8String, -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(s, 2, kModelo, -1, SQLITE_STATIC);
+    sqlite3_bind_text(s, 2, modelo, -1, SQLITE_STATIC);
     sqlite3_bind_text(s, 3, md5.UTF8String, -1, SQLITE_TRANSIENT);
     sqlite3_bind_blob(s, 4, meio, kBytesDaAssinatura, SQLITE_TRANSIENT);
     BOOL ok = sqlite3_step(s) == SQLITE_DONE;
@@ -483,6 +500,15 @@ static int ZPModoActualizar(NSString *base) {
                 continue;
             }
             if (ZPGuardarAssinatura(db, faixa[0], faixa[3], vector)) ++novas; else ++falhas;
+            // O ficheiro mudou: a assinatura fina que houvesse era do antigo.
+            sqlite3_stmt *velha = NULL;
+            if (sqlite3_prepare_v2(db, "DELETE FROM assinaturas WHERE musica = ? AND modelo = ? AND md5_audio <> ?", -1, &velha, NULL) == SQLITE_OK) {
+                sqlite3_bind_text(velha, 1, [faixa[0] UTF8String], -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text(velha, 2, kModeloFino, -1, SQLITE_STATIC);
+                sqlite3_bind_text(velha, 3, [faixa[3] UTF8String], -1, SQLITE_TRANSIENT);
+                sqlite3_step(velha);
+            }
+            sqlite3_finalize(velha);
             if (novas % 500 == 0) {
                 printf("%lu/%lu  %.0f s  (ler %.0f s, mel %.0f s, modelo %.0f s)\n", (unsigned long)n,
                        (unsigned long)porFazer.count, ZPAgora() - t0, tempos.ler, tempos.mel, tempos.modelo);
@@ -494,6 +520,56 @@ static int ZPModoActualizar(NSString *base) {
            (unsigned long)novas, ZPAgora() - t0, tempos.ler, tempos.mel, tempos.modelo, (unsigned long)falhas);
     sqlite3_close(db);
     return falhas ? 1 : 0;
+}
+
+#pragma mark Refinar
+
+// Passa esboços a assinaturas finas, durante «minutos» no máximo (0: até ao
+// fim). É trabalho de fundo: o processo pede ao sistema a prioridade mínima de
+// processador e de disco, e cede a quem estiver a tocar. Primeiro as músicas
+// mais ouvidas. Cada assinatura é guardada mal fica pronta, por isso pode ser
+// interrompido em qualquer altura.
+static int ZPModoRefinar(NSString *base, double minutos) {
+    setpriority(PRIO_DARWIN_PROCESS, 0, PRIO_DARWIN_BG);
+    sqlite3 *db = ZPAbrirBase(base);
+    if (!db) return 1;
+    NSMutableArray<NSArray *> *porFazer = [NSMutableArray array];
+    sqlite3_stmt *s = NULL;
+    const char *sql =
+        "SELECT m.id, COALESCE(m.duracao, 0), f.caminho, f.md5_audio"
+        "  FROM musicas m JOIN ficheiros f ON f.id = " kFicheiroPreferido
+        "  LEFT JOIN assinaturas a ON a.musica = m.id AND a.modelo = ?"
+        " WHERE a.musica IS NULL OR a.md5_audio <> f.md5_audio"
+        " ORDER BY (SELECT COUNT(*) FROM audicoes o WHERE o.musica = m.id) DESC, f.caminho";
+    if (sqlite3_prepare_v2(db, sql, -1, &s, NULL) != SQLITE_OK) {
+        fprintf(stderr, "%s\n", sqlite3_errmsg(db)); sqlite3_close(db); return 1;
+    }
+    sqlite3_bind_text(s, 1, kModeloFino, -1, SQLITE_STATIC);
+    while (sqlite3_step(s) == SQLITE_ROW) {
+        [porFazer addObject:@[ZPTexto(s, 0), @(sqlite3_column_double(s, 1)), ZPTexto(s, 2), ZPTexto(s, 3)]];
+    }
+    sqlite3_finalize(s);
+    if (porFazer.count == 0) { printf("nada por refinar\n"); sqlite3_close(db); return 0; }
+
+    MLModel *modelo = ZPModeloQuandoPreciso();
+    if (!modelo) { sqlite3_close(db); return 1; }
+    ZPMel *melador = ZPMelCriar();
+    ZPTempos tempos = {0};
+    gJanelas = 15;
+    double t0 = ZPAgora();
+    NSUInteger novas = 0, falhas = 0;
+    for (NSArray *faixa in porFazer) {
+        if (minutos > 0.0 && ZPAgora() - t0 > minutos * 60.0) break;
+        @autoreleasepool {
+            float vector[kDimensao];
+            if (!ZPVectorDaFaixa(modelo, melador, faixa[2], [faixa[1] doubleValue], vector, &tempos)) { ++falhas; continue; }
+            if (ZPGuardarAssinaturaCom(db, faixa[0], faixa[3], vector, kModeloFino)) ++novas; else ++falhas;
+        }
+    }
+    printf("refinadas: %lu de %lu em %.0f s (ler %.0f s, mel %.0f s, modelo %.0f s); %lu falhas\n", (unsigned long)novas,
+           (unsigned long)porFazer.count, ZPAgora() - t0, tempos.ler, tempos.mel, tempos.modelo, (unsigned long)falhas);
+    sqlite3_close(db);
+    return 0;
 }
 
 #pragma mark Importar
@@ -634,9 +710,11 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     float alvo[kDimensao];
     BOOL temAlvo = NO;
     if (musica) {
-        if (sqlite3_prepare_v2(db, "SELECT vector FROM assinaturas WHERE musica = ? AND modelo = ?", -1, &s, NULL) == SQLITE_OK) {
+        if (sqlite3_prepare_v2(db, "SELECT vector FROM assinaturas WHERE musica = ?1 AND modelo IN (?2, ?3)"
+                                   " ORDER BY modelo = ?3 DESC LIMIT 1", -1, &s, NULL) == SQLITE_OK) {
             sqlite3_bind_text(s, 1, musica.UTF8String, -1, SQLITE_TRANSIENT);
             sqlite3_bind_text(s, 2, kModelo, -1, SQLITE_STATIC);
+            sqlite3_bind_text(s, 3, kModeloFino, -1, SQLITE_STATIC);
             if (sqlite3_step(s) == SQLITE_ROW && sqlite3_column_bytes(s, 0) == kBytesDaAssinatura) {
                 ZPAssinaturaParaVector(sqlite3_column_blob(s, 0), alvo);
                 temAlvo = YES;
@@ -677,9 +755,12 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     NSMutableArray<NSArray<NSString *> *> *faixas = [NSMutableArray array];   // id, artista, álbum, título, caminho
     const char *sql = "SELECT a.musica, a.vector, m.artista, m.album, m.titulo, f.caminho"
                       "  FROM assinaturas a JOIN musicas m ON m.id = a.musica JOIN ficheiros f ON f.id = " kFicheiroPreferido
-                      " WHERE a.modelo = ?";
+                      // De cada música a assinatura fina, se já a tiver; senão o esboço.
+                      " WHERE a.modelo = ?2 OR (a.modelo = ?1 AND NOT EXISTS"
+                      "       (SELECT 1 FROM assinaturas b WHERE b.musica = a.musica AND b.modelo = ?2))";
     if (sqlite3_prepare_v2(db, sql, -1, &s, NULL) != SQLITE_OK) { fprintf(stderr, "%s\n", sqlite3_errmsg(db)); sqlite3_close(db); return 1; }
     sqlite3_bind_text(s, 1, kModelo, -1, SQLITE_STATIC);
+    sqlite3_bind_text(s, 2, kModeloFino, -1, SQLITE_STATIC);
     while (sqlite3_step(s) == SQLITE_ROW) {
         if (sqlite3_column_bytes(s, 1) != kBytesDaAssinatura) continue;
         float um[kDimensao];
@@ -700,8 +781,10 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
             float um[kDimensao];
             ZPAssinaturaParaVector(sqlite3_column_blob(s, 1), um);
             [vectores appendBytes:um length:sizeof(um)];
+            // «musica:<pid>», e depois de uma tabulação o nome a mostrar.
             NSString *pid = [@"musica:" stringByAppendingString:ZPTexto(s, 0)];
-            [faixas addObject:@[pid, ZPTexto(s, 2), ZPTexto(s, 3), ZPTexto(s, 4), pid]];
+            NSString *linha = [NSString stringWithFormat:@"%@\t%@ — %@", pid, ZPTexto(s, 2), ZPTexto(s, 4)];
+            [faixas addObject:@[pid, ZPTexto(s, 2), ZPTexto(s, 3), ZPTexto(s, 4), linha]];
         }
         sqlite3_finalize(s);
     }
@@ -721,7 +804,8 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     NSMutableSet<NSString *> *titulos = [NSMutableSet set];
     NSCountedSet<NSString *> *artistas = [NSCountedSet set], *albuns = [NSCountedSet set];
     for (NSArray<NSString *> *f in faixas) {
-        if ((musica && [f[0] isEqualToString:musica]) || [f[4] isEqualToString:caminhoDaSemente]) {
+        if ((musica && [f[0] isEqualToString:musica]) || [f[4] isEqualToString:caminhoDaSemente] || [f[0] isEqualToString:caminhoDaSemente]) {
+            if (sementeDoMusica) caminhoDaSemente = f[4];   // com o nome, para quem lê a lista
             NSString *chave = ZPChaveDoTitulo(f[3]);
             if (chave.length) [titulos addObject:chave];
             [artistas addObject:ZPChaveDoArtista(f[1], f[2])];
@@ -734,7 +818,7 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     for (NSUInteger k = 0; k < n && escolhidas < quantas; ++k) {
         NSArray<NSString *> *f = faixas[ordem[k]];
         if (musica && [f[0] isEqualToString:musica]) continue;
-        if ([f[4] isEqualToString:caminhoDaSemente]) continue;
+        if ([f[4] isEqualToString:caminhoDaSemente] || [f[0] isEqualToString:semente]) continue;
         NSString *chave = ZPChaveDoTitulo(f[3]);
         if (chave.length && [titulos containsObject:chave]) continue;          // outra versão da mesma canção
         NSString *artista = ZPChaveDoArtista(f[1], f[2]);
@@ -768,6 +852,7 @@ int main(int argc, const char *argv[]) {
         NSString *modo = @"lista";
         double inicioDoExcerto = 0.0;
         NSUInteger quantas = 50, porArtista = 3, porAlbum = 2;
+        double minutos = 0.0;
         for (NSUInteger i = 0; i < args.count; ) {
             NSString *a = args[i];
             if ([a isEqualToString:@"--modelo"] && i + 1 < args.count) {
@@ -776,6 +861,9 @@ int main(int argc, const char *argv[]) {
             } else if ([a isEqualToString:@"--cpu"]) {
                 soCPU = YES;
                 [args removeObjectAtIndex:i];
+            } else if ([a isEqualToString:@"--minutos"] && i + 1 < args.count) {
+                minutos = args[i + 1].doubleValue;
+                [args removeObjectsInRange:NSMakeRange(i, 2)];
             } else if ([a isEqualToString:@"--mapa"] && i + 1 < args.count) {
                 gMapa = args[i + 1];
                 [args removeObjectsInRange:NSMakeRange(i, 2)];
@@ -802,10 +890,12 @@ int main(int argc, const char *argv[]) {
         gModeloCaminho = modeloCaminho;
         gSoCPU = soCPU;
         if (args.count == 2 && [args[0] isEqualToString:@"actualizar"]) return ZPModoActualizar(args[1]);
+        if (args.count == 2 && [args[0] isEqualToString:@"refinar"]) return ZPModoRefinar(args[1], minutos);
         if (args.count == 3 && [args[0] isEqualToString:@"estacao"]) return ZPModoEstacao(args[1], args[2], quantas, porArtista, porAlbum);
         if (args.count == 4 && [args[0] isEqualToString:@"importar"]) return ZPModoImportar(args[1], args[2], args[3]);
         if (args.count != 2) {
             fprintf(stderr, "uso: vectorizar actualizar BASE\n"
+                            "     vectorizar refinar BASE [--minutos N]\n"
                             "     vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--mapa MAPA]\n"
                             "     vectorizar importar BASE lista.tsv saída\n"
                             "     vectorizar [--modelo M.mlmodelc] [--cpu] [--loja] lista.tsv saída\n"
