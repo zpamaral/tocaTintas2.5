@@ -31,6 +31,7 @@
 //        assinatura, calcula-a (e guarda-a, se a música for da fonoteca).
 //        Sai com 3 se a semente não servir e com 4 se a base não tiver assinaturas.
 //    vectorizar mapear BASE MAPA
+//    vectorizar falhou MAPA PID
 //    vectorizar importar BASE lista.tsv saída
 //        Traz para a base os vectores de saída.f32/saída.ids (ver abaixo).
 //    vectorizar [--modelo clap_audio.mlmodelc] [--cpu] [--loja] lista.tsv saída
@@ -678,6 +679,8 @@ static sqlite3 *ZPAbrirMapa(void) {
     return mapa;
 }
 
+static BOOL ZPMapaTemColuna(sqlite3 *db, const char *tabela, const char *coluna);   // definido em «Associar»
+
 static float gAncora = 0.08f;   // --ancora: quanto sobe, na semelhança, uma faixa do artista mais vizinho da semente (0 = só o som)
 static NSMutableArray<NSString *> *gRumos;   // --rumo: faixas que quem ouve puxou para cima; a estação aproxima-se delas
 static NSMutableArray<NSString *> *gLonges;  // --longe: faixas que desmarcou; a estação afasta-se delas
@@ -783,9 +786,17 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     sqlite3_close(db);
 
     // As do mapa, na mesma lista: o «caminho» delas é «musica:<pid>».
+    // Ficam de fora as que o Música não consegue tocar: as que ele próprio dá
+    // como já não disponíveis, e as que falharam ao arrancar em dois dias
+    // diferentes (ver o modo «falhou»). Um mapa antigo não tem essas colunas.
     sqlite3 *mapa = ZPAbrirMapa();
-    if (mapa && sqlite3_prepare_v2(mapa, "SELECT f.pid, a.vector, f.artista, f.album, f.titulo FROM assinaturas a"
-                                         " JOIN faixas f ON f.id = a.faixa WHERE f.pid IS NOT NULL AND a.modelo = ?", -1, &s, NULL) == SQLITE_OK) {
+    const char *doMapa = mapa && ZPMapaTemColuna(mapa, "faixas", "falhas")
+        ? "SELECT f.pid, a.vector, f.artista, f.album, f.titulo FROM assinaturas a"
+          " JOIN faixas f ON f.id = a.faixa WHERE f.pid IS NOT NULL AND a.modelo = ?"
+          " AND f.indisponivel_em IS NULL AND COALESCE(f.falhas, 0) < 2"
+        : "SELECT f.pid, a.vector, f.artista, f.album, f.titulo FROM assinaturas a"
+          " JOIN faixas f ON f.id = a.faixa WHERE f.pid IS NOT NULL AND a.modelo = ?";
+    if (mapa && sqlite3_prepare_v2(mapa, doMapa, -1, &s, NULL) == SQLITE_OK) {
         sqlite3_bind_text(s, 1, kModeloDoExcerto, -1, SQLITE_STATIC);
         while (sqlite3_step(s) == SQLITE_ROW) {
             if (sqlite3_column_bytes(s, 1) != kBytesDaAssinatura) continue;
@@ -1057,6 +1068,14 @@ static sqlite3 *ZPAbrirMapaParaEscrever(NSString *caminho) {
     }
     // Coluna que veio depois: quando o utilizador mandou esquecer a descoberta.
     if (!ZPMapaTemColuna(mapa, "faixas", "esquecida_em")) sqlite3_exec(mapa, "ALTER TABLE faixas ADD COLUMN esquecida_em TEXT", NULL, NULL, NULL);
+    // O que o Música não toca: o estado «no longer available» dele (indisponivel_em,
+    // posto e tirado pelo mapear), e as falhas ao arrancar que o tocaTintas viu
+    // (falhas, uma por dia no máximo; falhou_em é a última).
+    if (!ZPMapaTemColuna(mapa, "faixas", "falhas")) {
+        sqlite3_exec(mapa, "ALTER TABLE faixas ADD COLUMN indisponivel_em TEXT;"
+                           "ALTER TABLE faixas ADD COLUMN falhas INTEGER DEFAULT 0;"
+                           "ALTER TABLE faixas ADD COLUMN falhou_em TEXT", NULL, NULL, NULL);
+    }
     return mapa;
 }
 
@@ -1557,11 +1576,56 @@ static NSArray *ZPProcurarNaLoja(NSString *termo, NSUInteger limite) {
     return nil;
 }
 
+// As faixas que o Música diz já não estarem disponíveis («no longer
+// available»: saíram do catálogo): continuam na biblioteca, mas não tocam.
+// Pergunta-se-lhe pelo osascript, que responde num só pedido; se ele não
+// estiver aberto ou não responder, fica tudo como estava.
+static void ZPMarcarIndisponiveis(sqlite3 *mapa) {
+    NSTask *t = [[NSTask alloc] init];
+    t.executableURL = [NSURL fileURLWithPath:@"/usr/bin/osascript"];
+    NSString *pergunta = @"function run() { var m = Application('Music'); if (!m.running()) return '';"
+                          " var t = m.libraryPlaylists[0].tracks; var p = t.persistentID(), c = t.cloudStatus(), o = ['ok'];"
+                          " for (var i = 0; i < p.length; i++) if (c[i] == 'no longer available') o.push(p[i]); return o.join('\\n'); }";
+    t.arguments = @[@"-l", @"JavaScript", @"-e", pergunta];
+    NSPipe *saida = [NSPipe pipe];
+    t.standardOutput = saida;
+    t.standardError = [NSFileHandle fileHandleWithNullDevice];
+    t.standardInput = [NSFileHandle fileHandleWithNullDevice];
+    if (![t launchAndReturnError:NULL]) return;
+    NSData *d = [saida.fileHandleForReading readDataToEndOfFile];
+    [t waitUntilExit];
+    NSArray<NSString *> *linhas = [[[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]
+                                    stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] componentsSeparatedByString:@"\n"];
+    if (t.terminationStatus != 0 || ![linhas.firstObject isEqualToString:@"ok"]) return;
+    sqlite3_exec(mapa, "BEGIN; CREATE TEMP TABLE IF NOT EXISTS fora (pid TEXT PRIMARY KEY); DELETE FROM fora", NULL, NULL, NULL);
+    for (NSUInteger i = 1; i < linhas.count; ++i) ZPMapaExecutar(mapa, "INSERT OR IGNORE INTO fora VALUES (?)", @[linhas[i].uppercaseString]);
+    ZPMapaExecutar(mapa, "UPDATE faixas SET indisponivel_em = ? WHERE indisponivel_em IS NULL AND pid IN (SELECT pid FROM fora)", @[ZPAgoraISO()]);
+    int postas = sqlite3_changes(mapa);
+    sqlite3_exec(mapa, "UPDATE faixas SET indisponivel_em = NULL WHERE indisponivel_em IS NOT NULL AND pid NOT IN (SELECT pid FROM fora)", NULL, NULL, NULL);
+    int tiradas = sqlite3_changes(mapa);
+    sqlite3_exec(mapa, "COMMIT", NULL, NULL, NULL);
+    if (postas || tiradas) printf("mapear: %d faixas passaram a indisponíveis no Música, %d voltaram\n", postas, tiradas);
+}
+
+// O tocaTintas pediu a faixa ao Música e ele não a tocou. Conta uma falha por
+// dia, no máximo: uma tarde sem rede não chega para tirar faixas da estação.
+static int ZPModoFalhou(NSString *caminhoDoMapa, NSString *pid) {
+    sqlite3 *mapa = ZPAbrirMapaParaEscrever(caminhoDoMapa);
+    if (!mapa) return 1;
+    NSString *agora = ZPAgoraISO();
+    ZPMapaExecutar(mapa, "UPDATE faixas SET falhas = COALESCE(falhas, 0) + 1, falhou_em = ?1"
+                         " WHERE pid = ?2 AND (falhou_em IS NULL OR substr(falhou_em, 1, 10) <> substr(?1, 1, 10))", @[agora, pid.uppercaseString]);
+    printf("falhou %s: %s\n", pid.UTF8String, sqlite3_changes(mapa) ? "anotada" : "já anotada hoje, ou fora do mapa");
+    sqlite3_close(mapa);
+    return 0;
+}
+
 static int ZPModoMapear(NSString *base, NSString *caminhoDoMapa) {
     sqlite3 *db = ZPAbrirBase(base);
     if (!db) return 1;
     sqlite3 *mapa = ZPAbrirMapaParaEscrever(caminhoDoMapa);
     if (!mapa) { sqlite3_close(db); return 1; }
+    ZPMarcarIndisponiveis(mapa);
     ZPReconciliarMapa(db, mapa);   // as descobertas que entretanto foram para a biblioteca já têm assinatura
     ZPMapaExecutar(mapa, "DELETE FROM tentativas WHERE pid IN (SELECT pid FROM faixas WHERE pid IS NOT NULL)", @[]);
 
@@ -1739,6 +1803,7 @@ int main(int argc, const char *argv[]) {
             return ZPModoDescobertas(args[1], args.count == 3 ? args[2] : nil, semente, quantas);
         }
         if (args.count == 3 && [args[0] isEqualToString:@"mapear"]) return ZPModoMapear(args[1], args[2]);
+        if (args.count == 3 && [args[0] isEqualToString:@"falhou"]) return ZPModoFalhou(args[1], args[2]);
         if (args.count == 3 && [args[0] isEqualToString:@"esquecer"]) return ZPModoEsquecer(args[1], args[2]);
         if (args.count == 3 && [args[0] isEqualToString:@"estacao"]) return ZPModoEstacao(args[1], args[2], quantas, porArtista, porAlbum);
         if (args.count == 4 && [args[0] isEqualToString:@"importar"]) return ZPModoImportar(args[1], args[2], args[3]);
@@ -1749,6 +1814,7 @@ int main(int argc, const char *argv[]) {
                             "     vectorizar descobertas MAPA [BASE [--semente S]] [-n 50]\n"
                             "     vectorizar esquecer MAPA ID\n"
                             "     vectorizar mapear BASE MAPA\n"
+                            "     vectorizar falhou MAPA PID\n"
                             "     vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--mapa MAPA]\n"
                             "     vectorizar importar BASE lista.tsv saída\n"
                             "     vectorizar [--modelo M.mlmodelc] [--cpu] [--loja] lista.tsv saída\n"

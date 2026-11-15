@@ -401,6 +401,7 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSArray<NSString *> *> *estacaoInfo;   // chave → artista, título, álbum
 @property (nonatomic, assign) BOOL estacaoAPreparar;    // à espera da base, do catálogo ou do vectorizar
 @property (nonatomic, strong) NSTask *assinaturasTask;
+@property (nonatomic, strong) NSURL *sementeDoMusicaACabeca;   // a linha «musica:» da semente, quando a estação nasce do excerto dela
 @property (nonatomic) NSInteger caixaDesde;        // a primeira faixa da lista que a caixa das músicas mostra (0 fora de uma estação)
 @property (nonatomic, strong) NSTask *mapearTask;   // o «vectorizar mapear» a correr
 @property (nonatomic, strong) NSTask *refinarTask;                // o «vectorizar refinar» em curso
@@ -463,6 +464,7 @@ static WavpackStreamReader memoryReader = {
 @property (copy, nonatomic) NSString *pidDoMusicaDaLista;
 @property (assign, nonatomic) BOOL musicaDaListaTocou;       // já se viu a tocar
 @property (strong, nonatomic) NSDate *musicaDaListaPedidaEm;
+@property (assign, nonatomic) double musicaDaListaPosicaoVista;   // até onde o Música disse que a linha chegou
 @property (assign, nonatomic) NSUInteger saltosSeguidos;     // linhas saltadas de seguida
 @property (assign, nonatomic) BOOL aAndarParaTras;           // o ⏮️ salta para trás
 // A estação acabada de pedir a partir do que o Música toca: quando ficar
@@ -4670,6 +4672,23 @@ static NSString *ZPLinhaDoURL(NSURL *url) {
     });
 }
 
+// O Música não tocou a linha que se lhe pediu: fica anotado no mapa do catálogo
+// («vectorizar falhou», uma falha por dia no máximo), e à segunda a faixa
+// deixa de entrar nas estações.
+- (void)anotarQueOMusicaNaoTocou:(NSString *)pid {
+    NSLog(@"[Lista mista] O Música não tocou a faixa %@: salta-se.", pid);
+    NSURL *vectorizar = ZPVectorizar();
+    NSString *mapa = [[self loadSongsDirectoryPath] stringByAppendingPathComponent:@".mapa-do-catalogo.sqlite"];
+    if (!vectorizar || pid.length == 0 || ![[NSFileManager defaultManager] fileExistsAtPath:mapa]) return;
+    NSTask *task = [[NSTask alloc] init];
+    task.executableURL = vectorizar;
+    task.arguments = @[@"falhou", mapa, pid];
+    task.standardInput = [NSFileHandle fileHandleWithNullDevice];
+    task.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    task.standardError = [NSFileHandle fileHandleWithNullDevice];
+    [task launchAndReturnError:NULL];
+}
+
 // Toca no Música a linha «musica:». O tocaTintas fica parado, e por isso a
 // janela passa a mostrar o Música, pelo caminho de sempre.
 - (void)tocarLinhaDoMusica:(NSURL *)url {
@@ -4688,6 +4707,7 @@ static NSString *ZPLinhaDoURL(NSURL *url) {
     self.saltosSeguidos = 0;
     self.pidDoMusicaDaLista = pid;
     self.musicaDaListaTocou = NO;
+    self.musicaDaListaPosicaoVista = 0.0;
     self.musicaDaListaPedidaEm = [NSDate date];
     [self.progressBar setDoubleValue:0.0];
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -4720,6 +4740,7 @@ static NSString *ZPLinhaDoURL(NSURL *url) {
     BOOL acabou = NO;
     if (aMinha && [estado isEqualToString:@"playing"]) {
         self.musicaDaListaTocou = YES;
+        self.musicaDaListaPosicaoVista = MAX(self.musicaDaListaPosicaoVista, [m[@"posicao"] doubleValue]);
         [self marcarOFimDaLinhaDoMusica:pid faltam:[m[@"duracao"] doubleValue] - [m[@"posicao"] doubleValue]];
         return NO;
     }
@@ -4735,6 +4756,19 @@ static NSString *ZPLinhaDoURL(NSURL *url) {
             // Ainda a arrancar; se ao fim de dez segundos não tocou, salta-se.
             if (-self.musicaDaListaPedidaEm.timeIntervalSinceNow < 10.0) return NO;
             self.pidDoMusicaDaLista = nil;
+            [self anotarQueOMusicaNaoTocou:pid];
+            [self saltarLinhaDoMusica];
+            return YES;
+        }
+        // Disse «a tocar» e parou sem sair do princípio: é o que o Música faz
+        // com uma faixa da biblioteca que já não consegue ir buscar (visto a
+        // 2026-11-15, com as de estado «unknown»). Não é uma paragem de quem
+        // ouve: salta-se, como se não tivesse arrancado. Só nos primeiros vinte
+        // segundos; depois disso, parado no princípio já é outra coisa.
+        if (!pertoDoFim && self.musicaDaListaPosicaoVista < 1.0 && -self.musicaDaListaPedidaEm.timeIntervalSinceNow < 20.0) {
+            self.pidDoMusicaDaLista = nil;
+            self.musicaATocar = NO;
+            [self anotarQueOMusicaNaoTocou:pid];
             [self saltarLinhaDoMusica];
             return YES;
         }
@@ -5060,6 +5094,11 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
                                      pormenor:NSLocalizedString(@"station_no_preview", @"A fonoteca não tem esta faixa, e a loja da Apple não deu um excerto dela.")];
                         return;
                     }
+                    // A assinatura vem do excerto, mas uma faixa da biblioteca do Música
+                    // sabe-se tocar: fica à cabeça da lista, e o ⏮ volta a ela. Uma do
+                    // catálogo que lá não esteja não tem como se pedir outra vez.
+                    self.sementeDoMusicaACabeca = daBiblioteca
+                        ? ZPURLDaLinha([NSString stringWithFormat:@"musica:%@\t%@ — %@", pid, artista, titulo]) : nil;
                     [self correrEstacaoCom:excerto.path nome:nome manterSemente:NO apagar:excerto];
                 }];
             };
@@ -5092,6 +5131,7 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
     self.currentTrackURL = onde == NSNotFound ? nil : semente;
     self.pidDoMusicaDaLista = pid;
     self.musicaDaListaTocou = YES;
+    self.musicaDaListaPosicaoVista = [m[@"posicao"] doubleValue] + 1.0;   // já estava a tocar: não é um arranque
     self.musicaDaListaPedidaEm = [NSDate date];
     dispatch_async(dispatch_get_main_queue(), ^{
         [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
@@ -5111,6 +5151,8 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
 - (void)correrEstacaoCom:(NSString *)semente nome:(NSString *)nome manterSemente:(BOOL)manter apagar:(NSURL *)apagar
              seNaoHouver:(dispatch_block_t)seNaoHouver {
     void (^limpar)(void) = ^{ if (apagar) [[NSFileManager defaultManager] removeItemAtURL:apagar error:NULL]; };
+    NSURL *aCabeca = self.sementeDoMusicaACabeca;
+    self.sementeDoMusicaACabeca = nil;
     NSURL *vectorizar = ZPVectorizar();
     NSString *base = [[self loadSongsDirectoryPath] stringByAppendingPathComponent:@".fonoteca.sqlite"];
     if (!vectorizar || ![[NSFileManager defaultManager] fileExistsAtPath:base]) {
@@ -5164,6 +5206,14 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
             if (linha.length) [faixas addObject:ZPURLDaLinha(linha)];
         }
         if (!manter && faixas.count) [faixas removeObjectAtIndex:0];
+        if (!manter && aCabeca && faixas.count) {
+            // Se o mapa a tiver, viria também como vizinha de si própria.
+            NSString *pidDaCabeca = ZPPidDaLinha(aCabeca);
+            [faixas filterUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSURL *u, NSDictionary *b) {
+                return ![ZPPidDaLinha(u) isEqualToString:pidDaCabeca];
+            }]];
+            [faixas insertObject:aCabeca atIndex:0];
+        }
         NSMutableDictionary *pormenores = ZPLerInfoDaEstacao(info);
         dispatch_async(dispatch_get_main_queue(), ^{
             __strong typeof(fraco) forte = fraco;
@@ -5188,7 +5238,7 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
             forte.estacaoEsgotada = NO;
             forte.estacaoInfo = pormenores;
             [forte actualizarMarcaDaEstacao];
-            [forte assumirOMusicaComSemente:(manter ? faixas.firstObject : nil)];
+            [forte assumirOMusicaComSemente:((manter || aCabeca) ? faixas.firstObject : nil)];
             [forte.descobertas refazerSeAVista];
             #ifdef DEBUG
             NSLog(@"[Estação] «%@»: %lu faixas.", nome, (unsigned long)faixas.count);
