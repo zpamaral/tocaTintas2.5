@@ -401,6 +401,7 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSArray<NSString *> *> *estacaoInfo;   // chave → artista, título, álbum
 @property (nonatomic, assign) BOOL estacaoAPreparar;    // à espera da base, do catálogo ou do vectorizar
 @property (nonatomic, strong) NSTask *assinaturasTask;
+@property (nonatomic) NSInteger caixaDesde;        // a primeira faixa da lista que a caixa das músicas mostra (0 fora de uma estação)
 @property (nonatomic, strong) NSTask *mapearTask;   // o «vectorizar mapear» a correr
 @property (nonatomic, strong) NSTask *refinarTask;                // o «vectorizar refinar» em curso
 @property (nonatomic, strong) NSTimer *relogioDeRefinar;
@@ -4105,7 +4106,8 @@ static const NSUInteger ZPTentativasDaFrequencia = 20;   // × 0,5 s
 - (void)validatePlaylistFiles {
     NSMutableArray<NSURL *> *validFiles = [NSMutableArray array];
     for (NSURL *fileURL in self.audioFiles) {
-        if ([[NSFileManager defaultManager] fileExistsAtPath:fileURL.path]) {
+        // Uma linha do Música não é um ficheiro: fica sempre.
+        if (ZPPidDaLinha(fileURL) || [[NSFileManager defaultManager] fileExistsAtPath:fileURL.path]) {
             [validFiles addObject:fileURL];
         } else {
             #ifdef DEBUG
@@ -4122,7 +4124,9 @@ static const NSUInteger ZPTentativasDaFrequencia = 20;   // × 0,5 s
         [self exitPlaylistMode];
     } else if (validFiles.count < self.audioFiles.count) {
         // Some files have been removed
+        BOOL eraEstacao = [self haEstacaoCorrente];
         self.audioFiles = [validFiles copy];
+        if (eraEstacao) self.estacaoCorrente = self.audioFiles;   // a estação continua a sê-lo sem os ficheiros que desapareceram
         // Adjust currentTrackIndex if necessary
         if (self.currentTrackIndex >= (NSInteger)self.audioFiles.count) {
             self.currentTrackIndex = (NSInteger)self.audioFiles.count - 1;
@@ -8236,17 +8240,8 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
             dispatch_async(dispatch_get_main_queue(), forceUIUpdateBlock);
 
             // Update the combo box to reflect the current track being played
-            NSInteger index = [self.audioFiles indexOfObject:self.currentTrackURL];
-            NSUInteger comboBoxIndex;
-
-            if (index != NSNotFound) {
-                comboBoxIndex = index + 1; // Offset by 1 for placeholder
-            } else {
-                comboBoxIndex = 0; // Placeholder index
-            }
-
             dispatch_block_t updateComboBox = ^{
-                [self.songComboBox selectItemAtIndex:comboBoxIndex];
+                [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
             };
             dispatch_async(dispatch_get_main_queue(), updateComboBox);
 
@@ -8342,17 +8337,8 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
             dispatch_async(dispatch_get_main_queue(), forceUIUpdateBlock);
 
             // Update the combo box to reflect the current track being played
-            NSInteger index = [self.audioFiles indexOfObject:self.currentTrackURL];
-            NSUInteger comboBoxIndex;
-
-            if (index != NSNotFound) {
-                comboBoxIndex = index + 1; // Offset by 1 for placeholder
-            } else {
-                comboBoxIndex = 0; // Placeholder index
-            }
-
             dispatch_block_t updateComboBox = ^{
-                [self.songComboBox selectItemAtIndex:comboBoxIndex];
+                [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
             };
             dispatch_async(dispatch_get_main_queue(), updateComboBox);
 
@@ -8464,17 +8450,8 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
     [self refreshPlayCountLabel];
 
     // Update the combo box to reflect the current track being played
-    NSInteger index = [self.audioFiles indexOfObject:self.currentTrackURL];
-    NSUInteger comboBoxIndex;
-
-    if (index != NSNotFound) {
-        comboBoxIndex = index + 1; // Offset by 1 for placeholder
-    } else {
-        comboBoxIndex = 0; // Placeholder index
-    }
-
     dispatch_block_t updateComboBox = ^{
-        [self.songComboBox selectItemAtIndex:comboBoxIndex];
+        [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
     };
     dispatch_async(dispatch_get_main_queue(), updateComboBox);
 
@@ -9487,11 +9464,13 @@ static NSScrollView *ZPScrollViewComTabela(NSView *vista) {
 - (void)comboBoxSelectionChanged:(NSComboBox *)comboBox {
     NSInteger selectedIndex = comboBox.indexOfSelectedItem;
 
-    if (selectedIndex > 0 && selectedIndex <= self.audioFiles.count) {
+    // Numa estação a caixa só mostra da faixa em curso para a frente.
+    NSInteger naLista = selectedIndex - 1 + self.caixaDesde;
+    if (selectedIndex > 0 && naLista < (NSInteger)self.audioFiles.count) {
         [self stopAudio];
 
         // Get the selected track URL from the original audioFiles array
-        NSURL *selectedTrackURL = self.audioFiles[selectedIndex - 1];
+        NSURL *selectedTrackURL = self.audioFiles[naLista];
         self.currentTrackURL = selectedTrackURL;
 
         if (self.isShuffleModeActive) {
@@ -9506,14 +9485,14 @@ static NSScrollView *ZPScrollViewComTabela(NSView *vista) {
                 return;
             }
         } else {
-            self.currentTrackIndex = selectedIndex - 1;
+            self.currentTrackIndex = naLista;
         }
 
         // Play audio for the selected track
         [self playAudio];
 
         // Ensure combobox reflects the correct item
-        [self.songComboBox selectItemAtIndex:selectedIndex];
+        [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
     } else if (selectedIndex == 0) {
         #ifdef DEBUG
         NSLog(@"User selected the placeholder 'choose a song'. No track selected.");
@@ -9530,6 +9509,24 @@ static NSScrollView *ZPScrollViewComTabela(NSView *vista) {
 // The combo box rows follow self.audioFiles order; in shuffle mode
 // currentTrackIndex points into shuffledTracks, so the selected row
 // must be derived from the current track URL, not from the index.
+// Numa estação (sem o aleatório) a caixa das músicas mostra o mesmo que a
+// janela «A seguir»: a faixa em curso e as que estão alinhadas para tocar. O
+// que já tocou sai, o que se desmarca na janela também, e o que a estação vai
+// buscar para se prolongar entra no fim. Fora de uma estação mostra a lista
+// toda, como sempre.
+- (NSInteger)primeiraFaixaDaCaixa {
+    return ([self haEstacaoCorrente] && !self.isShuffleModeActive && self.currentTrackIndex > 0) ? self.currentTrackIndex : 0;
+}
+
+// A linha da caixa para a faixa que está nesta posição da lista (NSNotFound: o
+// marcador). Se a caixa ficou para trás — a estação avançou, começou ou
+// acabou —, refaz-se primeiro.
+- (NSInteger)linhaDaCaixaParaAPosicao:(NSUInteger)posicao {
+    if ([self primeiraFaixaDaCaixa] != self.caixaDesde && self.songComboBox) [self createComboBox];
+    if (posicao == NSNotFound || (NSInteger)posicao < self.caixaDesde) return 0;
+    return (NSInteger)posicao - self.caixaDesde + 1;
+}
+
 - (NSInteger)comboBoxIndexForCurrentTrack {
     NSURL *trackURL = self.currentTrackURL;
     if (!trackURL && self.currentTrackIndex >= 0) {
@@ -9544,8 +9541,7 @@ static NSScrollView *ZPScrollViewComTabela(NSView *vista) {
     if (!trackURL) {
         return 0; // Placeholder
     }
-    NSUInteger index = [self.audioFiles indexOfObject:trackURL];
-    return (index != NSNotFound) ? (NSInteger)(index + 1) : 0;
+    return [self linhaDaCaixaParaAPosicao:[self.audioFiles indexOfObject:trackURL]];
 }
 
 - (void)createComboBox {
@@ -9566,7 +9562,11 @@ static NSScrollView *ZPScrollViewComTabela(NSView *vista) {
                                                                            options:0
                                                                              error:nil];
 
-    for (NSURL *fileURL in self.audioFiles) {
+    // Antes de mais nada: quem pergunta pela linha a meio disto já a vê certa.
+    self.caixaDesde = MIN([self primeiraFaixaDaCaixa], (NSInteger)self.audioFiles.count - 1);
+    NSArray<NSURL *> *aVista = [self.audioFiles subarrayWithRange:NSMakeRange((NSUInteger)self.caixaDesde,
+                                                                               self.audioFiles.count - (NSUInteger)self.caixaDesde)];
+    for (NSURL *fileURL in aVista) {
         NSString *fileName = fileURL.lastPathComponent;
         [fullFileNames addObject:fileName]; // Store full name for matching
 
@@ -10043,8 +10043,7 @@ static const NSTimeInterval kCavaEsperaAteApagar = 0.2;
     if (self.currentTrackIndex < 0 || self.currentTrackIndex >= (NSInteger)lista.count) {
         return 0; // Marcador
     }
-    NSUInteger index = [self.audioFiles indexOfObject:lista[self.currentTrackIndex]];
-    return (index != NSNotFound) ? (NSInteger)(index + 1) : 0;
+    return [self linhaDaCaixaParaAPosicao:[self.audioFiles indexOfObject:lista[self.currentTrackIndex]]];
 }
 
 // Ligar ou desligar o aleatório só muda a ordem por que se hão-de escolher as
