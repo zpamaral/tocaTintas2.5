@@ -40,6 +40,54 @@ SOFTWARE.
 #import <string.h>
 #import <stdatomic.h>
 
+#pragma mark - Diário do raop_play
+
+// O raop_play diz porque desiste no stderr («Error: …») e sai com 1. Uma app
+// lançada pelo Finder não tem stderr que se leia, e os NSLog aparecem como
+// <private> no `log show` do macOS 27; o que ficava era um «Broken pipe» ao
+// escrever no tubo, sem razão nenhuma. Daí este ficheiro: o stderr do
+// raop_play, uma linha por arranque e outra por saída, com o estado.
+// Passa dos 2 MB, roda para raop_play.log.1.
+static NSString *ZPCaminhoDoDiarioDoRaopPlay(void) {
+    NSString *pasta = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/tocaTintas"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:pasta withIntermediateDirectories:YES
+                                               attributes:nil error:NULL];
+    return [pasta stringByAppendingPathComponent:@"raop_play.log"];
+}
+
+/// Acrescenta uma linha com data ao diário (de qualquer fila).
+static void ZPEscreverNoDiarioDoRaopPlay(NSString *linha) {
+    static NSDateFormatter *formato;
+    static dispatch_once_t uma;
+    dispatch_once(&uma, ^{
+        formato = [[NSDateFormatter alloc] init];
+        formato.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+        formato.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss.SSSZZZZZ";
+    });
+    NSString *texto;
+    @synchronized (formato) {
+        texto = [NSString stringWithFormat:@"%@ [tocaTintas] %@\n", [formato stringFromDate:[NSDate date]], linha];
+    }
+    int fd = open(ZPCaminhoDoDiarioDoRaopPlay().fileSystemRepresentation, O_WRONLY | O_APPEND | O_CREAT, 0644);
+    if (fd < 0) return;
+    const char *c = texto.UTF8String;
+    write(fd, c, strlen(c));
+    close(fd);
+}
+
+/// O ficheiro aberto em modo acrescentar, para o stderr do raop_play.
+static NSFileHandle *ZPDiarioDoRaopPlayParaStderr(void) {
+    NSString *caminho = ZPCaminhoDoDiarioDoRaopPlay();
+    NSDictionary *atributos = [[NSFileManager defaultManager] attributesOfItemAtPath:caminho error:NULL];
+    if (atributos.fileSize > 2 * 1024 * 1024) {
+        NSString *antigo = [caminho stringByAppendingString:@".1"];
+        rename(caminho.fileSystemRepresentation, antigo.fileSystemRepresentation);
+    }
+    int fd = open(caminho.fileSystemRepresentation, O_WRONLY | O_APPEND | O_CREAT, 0644);
+    if (fd < 0) return nil;
+    return [[NSFileHandle alloc] initWithFileDescriptor:fd closeOnDealloc:YES];
+}
+
 @interface ZPAirPlayStreamer ()
 
 // Existing properties
@@ -1330,10 +1378,26 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
     double emTransito = (uteis > enviadas) ? (double)(uteis - enviadas) : 0.0;
     double atraso = (emTransito + (double)self.latency) / kRaopSampleRate;
 
+    // Engasgos sem morte: o raop_play escreve uma linha por segundo, portanto
+    // um intervalo bem maior é ele (ou a leitura) parado. Os blocos andados no
+    // intervalo distinguem os dois: ~125 por segundo é ele a enviar e só a
+    // leitura atrasada; menos é ele mesmo parado. Vai para o diário.
+    const double agora = [NSDate timeIntervalSinceReferenceDate];
+    const double anterior = atomic_load(&_relogioInstante);
+    const uint64_t blocosAntes = atomic_load(&_relogioBlocos);
+    if (anterior > 0.0 && agora - anterior > 1.8) {
+        ZPEscreverNoDiarioDoRaopPlay([NSString stringWithFormat:
+            @"Relógio: %.2f s sem linhas; %lld blocos nesse intervalo (%.2f s de áudio); "
+             "em trânsito %.3f s.",
+            agora - anterior, (long long)blocos - (long long)blocosAntes,
+            ((double)blocos - (double)blocosAntes) * kRaopFramesPerChunk / kRaopSampleRate,
+            emTransito / kRaopSampleRate]);
+    }
+
     atomic_store(&_relogioBlocos, blocos);
     atomic_store(&_relogioHeadTs, headTs);
     atomic_store(&_relogioAtraso, atraso);
-    atomic_store(&_relogioInstante, [NSDate timeIntervalSinceReferenceDate]);
+    atomic_store(&_relogioInstante, agora);
 
     uint64_t linhas = atomic_fetch_add(&_relogioLinhas, 1) + 1;
     if (linhas == 1) {
@@ -1515,6 +1579,10 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
         NSLog(@"[Streaming] RAOP task terminated. Reason: %ld, Status: %d",
               task.terminationReason, task.terminationStatus);
         #endif
+        ZPEscreverNoDiarioDoRaopPlay([NSString stringWithFormat:@"raop_play (pid %d) saiu: %@ %d.",
+            task.processIdentifier,
+            task.terminationReason == NSTaskTerminationReasonExit ? @"código" : @"sinal",
+            task.terminationStatus]);
         __strong typeof(weakSelf) strongSelf = weakSelf;
         if (!strongSelf) return;
 
@@ -1574,9 +1642,15 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
     NSLog(@"[Streaming] Starting RAOP task…");
     #endif
 
+    // O stderr do raop_play vai para o diário (ver «Diário do raop_play»).
+    NSFileHandle *diario = ZPDiarioDoRaopPlayParaStderr();
+    if (diario) self.raopTask.standardError = diario;
+
     // Launch the RAOP task
     @try {
         [self.raopTask launch];
+        ZPEscreverNoDiarioDoRaopPlay([NSString stringWithFormat:@"raop_play (pid %d) lançado para %@:%@ [%@], latência %ld tramas.",
+            self.raopTask.processIdentifier, self.ipAddress, self.port, self.identificador, (long)self.latency]);
     } @catch (NSException *exception) {
         #ifdef DEBUG
         NSLog(@"[Streaming] Failed to start RAOP task: %@", exception.reason);
