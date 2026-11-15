@@ -63,7 +63,7 @@ SOFTWARE.
 #import "ZPAirPlayStreamer.h"
 #import "ZPLigacoesDoMusicaWindowController.h"
 #import "ZPAgoraATocar.h"   // O «A tocar» do sistema e os comandos dos AirPods e do teclado
-#import "ZPDescobertas.h"   // A janela das descobertas do mapa do catálogo
+#import "ZPDescobertas.h"   // A janela «A seguir»: a fila da estação
 #import "ZPLeitorEspacial.h"   // O leitor com áudio espacial, para a saída em Bluetooth
 
 #define NUM_BUFFERS 3  // Three is typically a good number for real-time audio playback
@@ -270,7 +270,7 @@ static WavpackStreamReader memoryReader = {
     get_length,
     can_seek
 };
-@interface ViewController () <AVAudioPlayerDelegate, UNUserNotificationCenterDelegate, NSMenuItemValidation, NSMenuDelegate>
+@interface ViewController () <AVAudioPlayerDelegate, UNUserNotificationCenterDelegate, NSMenuItemValidation, NSMenuDelegate, ZPFonteDaEstacao>
 
 @property (nonatomic, strong) NSTextField *playCountLabel;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *trackPlayCounts;   // chave da música → reproduções
@@ -392,14 +392,20 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSArray<NSURL *> *estacaoCorrente;
 @property (nonatomic, copy) NSString *estacaoNome;
 @property (nonatomic, strong) NSURL *estacaoFicheiro;   // onde já foi guardada; nil enquanto não o for
+@property (nonatomic, copy) NSString *estacaoSemente;      // a semente dada ao vectorizar; nil se foi um excerto que já se apagou
+@property (nonatomic, strong) NSArray<NSURL *> *estacaoFila;              // o que falta tocar, com as desmarcadas (janela «A seguir»)
+@property (nonatomic, strong) NSMutableSet<NSString *> *estacaoDesmarcadas;   // as chaves das que não são para tocar
+@property (nonatomic, strong) NSMutableOrderedSet<NSString *> *estacaoPromovidas;   // as que foram arrastadas para cima (o rumo)
+@property (nonatomic, strong) NSMutableOrderedSet<NSString *> *estacaoRejeitadas;   // as desmarcadas, desta vez e das anteriores com a mesma semente
+@property (nonatomic, assign) BOOL estacaoEsgotada;      // o vectorizar já não tem mais nada para a prolongar
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSArray<NSString *> *> *estacaoInfo;   // chave → artista, título, álbum
 @property (nonatomic, assign) BOOL estacaoAPreparar;    // à espera da base, do catálogo ou do vectorizar
 @property (nonatomic, strong) NSTask *assinaturasTask;
 @property (nonatomic, strong) NSTask *refinarTask;                // o «vectorizar refinar» em curso
 @property (nonatomic, strong) NSTimer *relogioDeRefinar;
 @property (nonatomic, strong) NSTask *associarTask;               // o «vectorizar associar» em curso
 @property (nonatomic, strong) NSTimer *fimDaLinhaDoMusica;         // a paragem marcada para o fim da linha do Música
-@property (nonatomic, strong) ZPDescobertas *descobertas;         // a janela das descobertas, feita quando se pede
-@property (nonatomic, copy) NSString *sementeDasDescobertas, *nomeDaSementeDasDescobertas;   // a faixa que toca, para ela
+@property (nonatomic, strong) ZPDescobertas *descobertas;         // a janela «A seguir», feita quando se pede
 @property (nonatomic, strong) NSMenu *menuDaReproducao;
 
 @property (nonatomic, strong) NSArray<NSURL *> *audioFiles;
@@ -4740,7 +4746,25 @@ static NSString *ZPLinhaDoURL(NSURL *url) {
     if (!parado) ZPMusicCommand(@"stop");
     self.musicaATocar = NO;
     if (self.isRepeatModeActive) [self playAudio]; else [self playNextTrack];
+    [self arrumarOMusicaDepoisDaLinha];
     return YES;
+}
+
+// No fim de uma linha, o Música às vezes já passou para uma faixa da
+// reprodução automática dele, e o «stop» deixa-o em pausa no princípio dessa:
+// a capa fica no minileitor (visto a 2026-11-15: Oasis aos 0,045 s, com o
+// tocaTintas a tocar outra coisa). Um segundo «stop» larga-a. Só se a faixa
+// seguinte da lista não for do Música, e só se ele estiver mesmo no princípio
+// de uma faixa — a meio é coisa de quem ouve.
+- (void)arrumarOMusicaDepoisDaLinha {
+    for (NSNumber *espera in @[@1.0, @3.5]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(espera.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (self.pidDoMusicaDaLista || self.isRecording) return;
+            NSDictionary *m = ZPMusicNowPlaying();
+            if (!m[@"titulo"] || [m[@"estado"] isEqualToString:@"stopped"]) return;
+            if ([m[@"posicao"] doubleValue] < 3.0) ZPMusicCommand(@"stop");
+        });
+    }
 }
 
 // O Música, no fim de um «once», chega a soltar um sopro da faixa seguinte da
@@ -4763,6 +4787,7 @@ static NSString *ZPLinhaDoURL(NSURL *url) {
         ZPMusicCommand(@"stop");
         forte.musicaATocar = NO;
         if (forte.isRepeatModeActive) [forte playAudio]; else [forte playNextTrack];
+        [forte arrumarOMusicaDepoisDaLinha];
     }];
     self.fimDaLinhaDoMusica.tolerance = 0.0;
 }
@@ -4901,6 +4926,8 @@ static NSString *ZPLinhaDoURL(NSURL *url) {
 #pragma mark - Estação
 
 static NSFileHandle *ZPRegistoParaAcrescentar(NSString *caminho);   // definido em «Registo na fonoteca»
+static NSMutableDictionary<NSString *, NSArray<NSString *> *> *ZPLerInfoDaEstacao(NSString *caminho);   // definido em «A seguir»
+static NSDictionary<NSString *, NSDictionary<NSString *, NSArray<NSString *> *> *> *ZPGestosDasEstacoes(void);   // idem
 
 // Uma estação é uma lista feita na hora: a faixa em curso e as que mais se lhe
 // assemelham, pelas assinaturas que a base da fonoteca guarda (tabela
@@ -5093,8 +5120,17 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
     // Com o mapa do catálogo ao lado da fonoteca, a estação também vai buscar
     // faixas à biblioteca do Música.
     NSString *mapa = [[self loadSongsDirectoryPath] stringByAppendingPathComponent:@".mapa-do-catalogo.sqlite"];
-    task.arguments = [[NSFileManager defaultManager] fileExistsAtPath:mapa] ? @[@"estacao", base, semente, @"--mapa", mapa]
-                                                                            : @[@"estacao", base, semente];
+    // O --info dá, à parte, o artista, o título e o álbum de cada faixa, para a
+    // janela «A seguir».
+    NSString *info = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                      [NSString stringWithFormat:@"tocaTintas-estacao-%@.tsv", NSUUID.UUID.UUIDString]];
+    NSMutableArray<NSString *> *argumentos = [@[@"estacao", base, semente, @"--info", info] mutableCopy];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:mapa]) [argumentos addObjectsFromArray:@[@"--mapa", mapa]];
+    // O que se fez na janela «A seguir» das outras vezes com esta semente.
+    NSDictionary<NSString *, NSArray<NSString *> *> *lembrado = apagar ? nil : ZPGestosDasEstacoes()[semente];
+    for (NSString *chave in lembrado[@"promovidas"]) [argumentos addObjectsFromArray:@[@"--rumo", chave]];
+    for (NSString *chave in lembrado[@"rejeitadas"]) [argumentos addObjectsFromArray:@[@"--longe", chave]];
+    task.arguments = argumentos;
     task.standardInput = [NSFileHandle fileHandleWithNullDevice];
     NSPipe *saida = [NSPipe pipe], *erros = [NSPipe pipe];
     task.standardOutput = saida;
@@ -5123,6 +5159,7 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
             if (linha.length) [faixas addObject:ZPURLDaLinha(linha)];
         }
         if (!manter && faixas.count) [faixas removeObjectAtIndex:0];
+        NSMutableDictionary *pormenores = ZPLerInfoDaEstacao(info);
         dispatch_async(dispatch_get_main_queue(), ^{
             __strong typeof(fraco) forte = fraco;
             if (!forte) return;
@@ -5138,13 +5175,233 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
             forte.estacaoCorrente = forte.audioFiles;
             forte.estacaoNome = nome;
             forte.estacaoFicheiro = nil;
+            forte.estacaoSemente = apagar ? nil : semente;
+            forte.estacaoFila = nil;
+            forte.estacaoDesmarcadas = [NSMutableSet set];
+            forte.estacaoPromovidas = [NSMutableOrderedSet orderedSetWithArray:lembrado[@"promovidas"] ?: @[]];
+            forte.estacaoRejeitadas = [NSMutableOrderedSet orderedSetWithArray:lembrado[@"rejeitadas"] ?: @[]];
+            forte.estacaoEsgotada = NO;
+            forte.estacaoInfo = pormenores;
             [forte actualizarMarcaDaEstacao];
             [forte assumirOMusicaComSemente:(manter ? faixas.firstObject : nil)];
+            [forte.descobertas refazerSeAVista];
             #ifdef DEBUG
             NSLog(@"[Estação] «%@»: %lu faixas.", nome, (unsigned long)faixas.count);
             #endif
         });
     });
+}
+
+#pragma mark A seguir
+
+// Os gestos de cada semente, de umas vezes para as outras: um ficheiro à parte
+// na pasta de dados da aplicação (não vai para a fonoteca).
+//   { semente: { "promovidas": [chave…], "rejeitadas": [chave…] } }
+static NSURL *ZPFicheiroDosGestos(void) {
+    return [[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject
+            URLByAppendingPathComponent:@"tocaTintas/estacoes.json"];
+}
+
+static NSDictionary<NSString *, NSDictionary<NSString *, NSArray<NSString *> *> *> *ZPGestosDasEstacoes(void) {
+    NSData *dados = [NSData dataWithContentsOfURL:ZPFicheiroDosGestos()];
+    id lido = dados ? [NSJSONSerialization JSONObjectWithData:dados options:0 error:NULL] : nil;
+    return [lido isKindOfClass:[NSDictionary class]] ? lido : @{};
+}
+
+- (void)lembrarGestosDaEstacao {
+    NSString *semente = self.estacaoSemente;
+    if (!semente.length) return;   // nasceu de um excerto: não há semente a que os prender
+    NSMutableDictionary *todos = [ZPGestosDasEstacoes() mutableCopy];
+    if (self.estacaoPromovidas.count || self.estacaoRejeitadas.count) {
+        // As últimas 60 de cada: mais do que isso já não é rumo, é ruído.
+        NSArray *(^ultimas)(NSOrderedSet *) = ^NSArray *(NSOrderedSet *c) {
+            NSArray *a = c.array;
+            return a.count > 60 ? [a subarrayWithRange:NSMakeRange(a.count - 60, 60)] : a;
+        };
+        todos[semente] = @{ @"promovidas": ultimas(self.estacaoPromovidas), @"rejeitadas": ultimas(self.estacaoRejeitadas) };
+    } else {
+        [todos removeObjectForKey:semente];
+    }
+    NSData *dados = [NSJSONSerialization dataWithJSONObject:todos options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys error:NULL];
+    NSURL *ficheiro = ZPFicheiroDosGestos();
+    [[NSFileManager defaultManager] createDirectoryAtURL:ficheiro.URLByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:NULL];
+    [dados writeToURL:ficheiro atomically:YES];
+}
+
+// A estação não acaba nas primeiras 50: quando faltam poucas por tocar, pede-se
+// mais ao vectorizar, com a mesma semente e o rumo que os gestos lhe deram, sem
+// as que a estação já tem nem as rejeitadas. As novas entram no fim da fila; o
+// que está arrumado não muda de sítio. Chamado a cada faixa nova.
+- (void)prolongarAEstacaoSeFaltarPouco {
+    if (![self haEstacaoCorrente] || self.isShuffleModeActive || self.estacaoAPreparar || self.estacaoEsgotada) return;
+    NSString *semente = self.estacaoSemente;
+    NSArray<NSURL *> *lista = self.audioFiles;
+    if (!semente.length || (NSInteger)lista.count - 1 - self.currentTrackIndex > 5) return;
+    NSURL *vectorizar = ZPVectorizar();
+    NSString *pasta = [self loadSongsDirectoryPath];
+    NSString *base = [pasta stringByAppendingPathComponent:@".fonoteca.sqlite"];
+    NSString *mapa = [pasta stringByAppendingPathComponent:@".mapa-do-catalogo.sqlite"];
+    if (!vectorizar || ![[NSFileManager defaultManager] fileExistsAtPath:base]) return;
+    NSString *temporario = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                            [NSString stringWithFormat:@"tocaTintas-estacao-%@", NSUUID.UUID.UUIDString]];
+    NSString *sem = [temporario stringByAppendingString:@".sem"], *info = [temporario stringByAppendingString:@".tsv"];
+    NSMutableOrderedSet<NSString *> *jaLa = [NSMutableOrderedSet orderedSet];
+    for (NSURL *u in lista) [jaLa addObject:ZPChaveDaLinha(u)];
+    for (NSURL *u in self.estacaoFila) [jaLa addObject:ZPChaveDaLinha(u)];
+    [[jaLa.array componentsJoinedByString:@"\n"] writeToFile:sem atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    NSMutableArray<NSString *> *argumentos = [@[@"estacao", base, semente, @"-n", @"26", @"--sem", sem, @"--info", info] mutableCopy];
+    for (NSString *chave in self.estacaoPromovidas) [argumentos addObjectsFromArray:@[@"--rumo", chave]];
+    for (NSString *chave in self.estacaoRejeitadas) [argumentos addObjectsFromArray:@[@"--longe", chave]];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:mapa]) [argumentos addObjectsFromArray:@[@"--mapa", mapa]];
+    NSTask *task = [[NSTask alloc] init];
+    task.executableURL = vectorizar;
+    task.arguments = argumentos;
+    task.standardInput = [NSFileHandle fileHandleWithNullDevice];
+    task.standardError = [NSFileHandle fileHandleWithNullDevice];
+    NSPipe *saida = [NSPipe pipe];
+    task.standardOutput = saida;
+    if (![task launchAndReturnError:NULL]) { [[NSFileManager defaultManager] removeItemAtPath:sem error:NULL]; return; }
+    self.estacaoAPreparar = YES;
+    __weak typeof(self) fraco = self;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        NSData *dados = [saida.fileHandleForReading readDataToEndOfFile];
+        [task waitUntilExit];
+        [[NSFileManager defaultManager] removeItemAtPath:sem error:NULL];
+        NSString *texto = [[NSString alloc] initWithData:dados encoding:NSUTF8StringEncoding] ?: @"";
+        NSMutableArray<NSURL *> *vindas = [NSMutableArray array];
+        for (NSString *linha in [texto componentsSeparatedByString:@"\n"]) if (linha.length) [vindas addObject:ZPURLDaLinha(linha)];
+        if (vindas.count) [vindas removeObjectAtIndex:0];   // a semente, que vem sempre à cabeça
+        NSMutableDictionary *pormenores = ZPLerInfoDaEstacao(info);
+        int estado = task.terminationStatus;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(fraco) forte = fraco;
+            if (!forte) return;
+            forte.estacaoAPreparar = NO;
+            // Entretanto a estação pode ter sido trocada por outra lista.
+            if (![forte haEstacaoCorrente] || ![forte.estacaoSemente isEqualToString:semente]) return;
+            NSMutableArray<NSURL *> *nova = [forte.audioFiles mutableCopy];
+            NSMutableSet<NSString *> *chaves = [NSMutableSet set];
+            for (NSURL *u in nova) [chaves addObject:ZPChaveDaLinha(u)];
+            for (NSURL *u in forte.estacaoFila) [chaves addObject:ZPChaveDaLinha(u)];
+            NSUInteger antes = nova.count;
+            for (NSURL *u in vindas) {
+                NSString *k = ZPChaveDaLinha(u);
+                if (![chaves containsObject:k]) { [chaves addObject:k]; [nova addObject:u]; }
+            }
+            if (estado != 0 || nova.count == antes) { forte.estacaoEsgotada = YES; return; }
+            [forte.estacaoInfo addEntriesFromDictionary:pormenores];
+            [forte trocarAFilaDaEstacaoPor:nova];
+        });
+    });
+}
+
+// A chave de uma faixa da estação, como o vectorizar a escreve: o caminho do
+// ficheiro ou «musica:<persistent ID>».
+static NSString *ZPChaveDaLinha(NSURL *url) {
+    NSString *pid = ZPPidDaLinha(url);
+    return pid ? [@"musica:" stringByAppendingString:pid] : url.path.precomposedStringWithCanonicalMapping;
+}
+
+// O ficheiro do --info: chave, artista, título, álbum, semelhança. Lê-se e apaga-se.
+static NSMutableDictionary<NSString *, NSArray<NSString *> *> *ZPLerInfoDaEstacao(NSString *caminho) {
+    NSMutableDictionary *info = [NSMutableDictionary dictionary];
+    NSString *texto = [NSString stringWithContentsOfFile:caminho encoding:NSUTF8StringEncoding error:NULL] ?: @"";
+    [[NSFileManager defaultManager] removeItemAtPath:caminho error:NULL];
+    for (NSString *linha in [texto componentsSeparatedByString:@"\n"]) {
+        NSArray<NSString *> *c = [linha componentsSeparatedByString:@"\t"];
+        if (c.count >= 4) info[c[0].precomposedStringWithCanonicalMapping] = @[c[1], c[2], c[3]];
+    }
+    return info;
+}
+
+// A fila inteira: o que a estação tem para tocar depois da faixa em curso, com
+// as desmarcadas nos sítios onde estavam. As marcadas são as que a lista ainda
+// tem por tocar; as desmarcadas só existem aqui.
+- (NSArray<NSURL *> *)filaInteiraDaEstacao {
+    NSArray<NSURL *> *lista = self.audioFiles;
+    NSMutableArray<NSURL *> *porTocar = [NSMutableArray array];
+    for (NSInteger i = MAX(self.currentTrackIndex + 1, 0); i < (NSInteger)lista.count; ++i) [porTocar addObject:lista[i]];
+    NSMutableArray<NSURL *> *fila = [NSMutableArray array];
+    NSMutableSet<NSURL *> *postas = [NSMutableSet set];
+    NSSet<NSURL *> *aindaPorTocar = [NSSet setWithArray:porTocar];
+    for (NSURL *u in self.estacaoFila) {
+        BOOL desmarcada = [self.estacaoDesmarcadas containsObject:ZPChaveDaLinha(u)];
+        if ((desmarcada || [aindaPorTocar containsObject:u]) && ![postas containsObject:u]) { [fila addObject:u]; [postas addObject:u]; }
+    }
+    for (NSURL *u in porTocar) if (![postas containsObject:u]) { [fila addObject:u]; [postas addObject:u]; }
+    self.estacaoFila = fila;
+    return fila;
+}
+
+// Para a janela «A seguir». Com o aleatório ligado a ordem é a do baralho, e a
+// fila não se mostra.
+- (NSArray<NSArray<NSString *> *> *)proximasDaEstacao {
+    if (![self haEstacaoCorrente] || self.isShuffleModeActive) return nil;
+    NSMutableArray<NSArray<NSString *> *> *proximas = [NSMutableArray array];
+    for (NSURL *url in [self filaInteiraDaEstacao]) {
+        NSString *chave = ZPChaveDaLinha(url);
+        NSArray<NSString *> *p = self.estacaoInfo[chave];
+        if (!p) {
+            // Sem pormenores: o nome que a caixa das músicas mostra.
+            NSString *nome = url.lastPathComponent.stringByDeletingPathExtension;
+            if ([nome hasPrefix:@"♫ "]) nome = [nome substringFromIndex:2];
+            p = @[@"", nome, @""];
+        }
+        [proximas addObject:@[chave, [self replaceSingleQuoteAndSmartQuotes:p[0]], [self replaceSingleQuoteAndSmartQuotes:p[1]],
+                              [self replaceSingleQuoteAndSmartQuotes:p[2]], [self.estacaoDesmarcadas containsObject:chave] ? @"0" : @"1"]];
+    }
+    return proximas;
+}
+
+// Troca a lista da estação por outra que começa pelas mesmas faixas até à que
+// está a tocar: a reprodução não dá por nada, só muda o que vem depois.
+- (void)trocarAFilaDaEstacaoPor:(NSArray<NSURL *> *)nova {
+    NSInteger indice = self.currentTrackIndex;
+    NSURL *emCurso = self.currentTrackURL;
+    [self adoptarLista:nova];
+    // Com o Música a tocar uma linha da lista, o -adoptarLista: não vê faixa em
+    // curso e punha a lista no princípio.
+    self.currentTrackIndex = indice;
+    self.currentTrackURL = emCurso;
+    self.estacaoCorrente = self.audioFiles;
+    [self actualizarMarcaDaEstacao];
+    [self.descobertas refazerSeAVista];
+}
+
+// A janela «A seguir» mexeu na fila: as chaves pela ordem nova, e as que
+// ficaram desmarcadas. A lista que toca passa a ser o que já tocou, mais as
+// marcadas por essa ordem; as desmarcadas ficam guardadas, para a janela as
+// continuar a mostrar no sítio delas.
+- (void)filaDaEstacaoPassaASer:(NSArray<NSString *> *)chaves desmarcadas:(NSSet<NSString *> *)desmarcadas
+                         subiu:(NSString *)subiu desceu:(NSString *)desceu {
+    if (![self haEstacaoCorrente] || self.isShuffleModeActive) { NSBeep(); return; }
+    // Os gestos dão o rumo: desmarcar afasta, voltar a marcar desfaz; arrastar
+    // para cima aproxima, arrastar para baixo desfaz. Pesam nas faixas com que
+    // a estação se prolonga e ficam lembrados com a semente.
+    if (!self.estacaoPromovidas) self.estacaoPromovidas = [NSMutableOrderedSet orderedSet];
+    if (!self.estacaoRejeitadas) self.estacaoRejeitadas = [NSMutableOrderedSet orderedSet];
+    for (NSString *chave in self.estacaoDesmarcadas) if (![desmarcadas containsObject:chave]) [self.estacaoRejeitadas removeObject:chave];
+    for (NSString *chave in desmarcadas) { [self.estacaoRejeitadas addObject:chave]; [self.estacaoPromovidas removeObject:chave]; }
+    if (subiu && ![desmarcadas containsObject:subiu]) [self.estacaoPromovidas addObject:subiu];
+    if (desceu) [self.estacaoPromovidas removeObject:desceu];
+    [self lembrarGestosDaEstacao];
+    NSMutableDictionary<NSString *, NSURL *> *porChave = [NSMutableDictionary dictionary];
+    for (NSURL *u in [self filaInteiraDaEstacao]) porChave[ZPChaveDaLinha(u)] = u;
+    NSMutableArray<NSURL *> *fila = [NSMutableArray array];
+    for (NSString *chave in chaves) {
+        NSURL *u = porChave[chave];
+        if (u) { [fila addObject:u]; [porChave removeObjectForKey:chave]; }
+    }
+    // O que a janela ainda não conhecia (a fila andou entretanto) fica no fim.
+    for (NSURL *u in [self filaInteiraDaEstacao]) if (porChave[ZPChaveDaLinha(u)]) [fila addObject:u];
+    self.estacaoFila = fila;
+    self.estacaoDesmarcadas = [desmarcadas mutableCopy];
+    NSInteger actual = self.currentTrackIndex;
+    NSArray<NSURL *> *lista = self.audioFiles;
+    NSMutableArray<NSURL *> *nova = actual >= 0 ? [[lista subarrayWithRange:NSMakeRange(0, MIN((NSUInteger)actual + 1, lista.count))] mutableCopy]
+                                                : [NSMutableArray array];
+    for (NSURL *u in fila) if (![desmarcadas containsObject:ZPChaveDaLinha(u)]) [nova addObject:u];
+    [self trocarAFilaDaEstacaoPor:nova];
 }
 
 // Guardar e Guardar como…, como num documento: o primeiro Guardar pergunta o
@@ -5220,10 +5477,9 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
 // vez), em prioridade de fundo, e nunca durante uma gravação. Para fora vão só
 // o nome do artista e, na procura da loja, os nomes dos vizinhos.
 - (void)associarA:(NSString *)artista titulo:(NSString *)titulo semente:(NSString *)semente {
-    // A janela das descobertas ordena-se pela faixa que toca, haja ou não consulta.
-    self.sementeDasDescobertas = semente;
-    self.nomeDaSementeDasDescobertas = artista.length && titulo.length ? [NSString stringWithFormat:@"%@ — %@", artista, titulo] : (titulo ?: artista);
-    [self.descobertas faixaEmCurso:semente nome:self.nomeDaSementeDasDescobertas];
+    // Mudou a faixa: a fila da janela «A seguir» andou, e a estação pode precisar de mais faixas.
+    [self.descobertas refazerSeAVista];
+    [self prolongarAEstacaoSeFaltarPouco];
     if (self.associarTask || self.isRecording || NSProcessInfo.processInfo.lowPowerModeEnabled) return;
     if (artista.length == 0) return;
     NSURL *vectorizar = ZPVectorizar();
@@ -5254,7 +5510,6 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
         [log closeFile];
         dispatch_async(dispatch_get_main_queue(), ^{
             if (fraco.associarTask == acabou) fraco.associarTask = nil;
-            [fraco.descobertas refazerSeAVista];   // o que a consulta trouxe
         });
     };
     NSError *erro = nil;
@@ -5267,15 +5522,7 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
 }
 
 - (IBAction)mostrarDescobertas:(id)sender {
-    if (!self.descobertas) {
-        NSURL *vectorizar = ZPVectorizar();
-        NSString *pasta = [self loadSongsDirectoryPath];
-        if (!vectorizar || pasta.length == 0) { NSBeep(); return; }
-        self.descobertas = [[ZPDescobertas alloc] initWithVectorizar:vectorizar
-                                                                base:[pasta stringByAppendingPathComponent:@".fonoteca.sqlite"]
-                                                                mapa:[pasta stringByAppendingPathComponent:@".mapa-do-catalogo.sqlite"]];
-        [self.descobertas faixaEmCurso:self.sementeDasDescobertas nome:self.nomeDaSementeDasDescobertas];
-    }
+    if (!self.descobertas) self.descobertas = [[ZPDescobertas alloc] initComFonte:self];
     [self.descobertas mostrar];
 }
 
@@ -5522,7 +5769,7 @@ typedef NS_ENUM(NSInteger, ZPTecla) {
                                                    action:@selector(criarEstacao:) keyEquivalent:@""];
     criar.target = self;
     [menu addItem:criar];
-    NSMenuItem *descobertas = [[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"discoveries_menu", @"Descobertas…")
+    NSMenuItem *descobertas = [[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"up_next_menu", @"A seguir…")
                                                          action:@selector(mostrarDescobertas:) keyEquivalent:@""];
     descobertas.target = self;
     [menu addItem:descobertas];

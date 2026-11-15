@@ -678,6 +678,10 @@ static sqlite3 *ZPAbrirMapa(void) {
 }
 
 static float gAncora = 0.08f;   // --ancora: quanto sobe, na semelhança, uma faixa do artista mais vizinho da semente (0 = só o som)
+static NSMutableArray<NSString *> *gRumos;   // --rumo: faixas que quem ouve puxou para cima; a estação aproxima-se delas
+static NSMutableArray<NSString *> *gLonges;  // --longe: faixas que desmarcou; a estação afasta-se delas
+static NSString *gSem;                       // --sem: ficheiro com as faixas que já tocaram, uma por linha, para não voltarem
+static NSString *gInfo;                      // --info: onde escrever, para cada linha da estação, artista, título, álbum e semelhança
 static NSUInteger gOndas = 5;   // --ondas: em quantas voltas à semente se reparte a estação (1 = por ordem de semelhança)
 
 static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, NSUInteger porArtista, NSUInteger porAlbum) {
@@ -825,6 +829,49 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     }
     sqlite3_close(mapa);
 
+    // O rumo: o que quem ouve fez na janela «A seguir». As faixas que puxou
+    // para cima (--rumo) aproximam o alvo de si, as que desmarcou (--longe)
+    // afastam-no, estas com metade do peso: afastar do som de uma faixa leva
+    // consigo outras que soam parecido e de que se pode gostar. Conta a média
+    // de cada grupo, para a semente mandar sempre mais do que os gestos. As
+    // desmarcadas não voltam a sair, tal como as do --sem (as que a estação já
+    // tem); as promovidas saem se não estiverem no --sem, e saem cedo.
+    NSMutableSet<NSString *> *fora = [NSMutableSet set];
+    if (gSem.length) {
+        NSString *texto = [NSString stringWithContentsOfFile:gSem encoding:NSUTF8StringEncoding error:NULL] ?: @"";
+        for (NSString *linha in [texto componentsSeparatedByString:@"\n"]) if (linha.length) [fora addObject:linha.precomposedStringWithCanonicalMapping];
+    }
+    if (gRumos.count || gLonges.count) {
+        const float *todos = vectores.bytes;
+        float soma[kDimensao];
+        memcpy(soma, alvo, sizeof(soma));
+        NSArray<NSArray *> *grupos = @[@[gRumos ?: @[], @0.6f], @[gLonges ?: @[], @-0.3f]];
+        for (NSArray *grupo in grupos) {
+            float media[kDimensao] = {0};
+            NSUInteger quantas = 0;
+            for (NSString *faixa in (NSArray<NSString *> *)grupo[0]) {
+                NSString *chave = faixa.precomposedStringWithCanonicalMapping;
+                if ([grupo[1] floatValue] < 0) [fora addObject:chave];   // as desmarcadas não voltam; as promovidas podem
+                for (NSUInteger i = 0; i < n; ++i) {
+                    // Um ficheiro pelo caminho, uma faixa do Música pelo «musica:PID».
+                    if ([faixas[i][0] isEqualToString:chave] || [faixas[i][4] isEqualToString:chave]
+                        || [[faixas[i][4] componentsSeparatedByString:@"\t"].firstObject isEqualToString:chave]) {
+                        vDSP_vadd(media, 1, todos + i * kDimensao, 1, media, 1, kDimensao);
+                        ++quantas;
+                        break;
+                    }
+                }
+            }
+            if (quantas == 0) continue;
+            float peso = [grupo[1] floatValue] / (float)quantas;
+            vDSP_vsma(media, 1, &peso, soma, 1, soma, 1, kDimensao);
+        }
+        float norma = 0;
+        vDSP_svesq(soma, 1, &norma, kDimensao);
+        norma = sqrtf(norma);
+        if (norma > 0) vDSP_vsdiv(soma, 1, &norma, alvo, 1, kDimensao);
+    }
+
     // Semelhança (co-seno: os vectores têm norma 1) e ordem decrescente.
     float *semelhanca = malloc(n * sizeof(float));
     vDSP_Length *ordem = malloc(n * sizeof(vDSP_Length));
@@ -852,11 +899,13 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     }
     printf("%s\n", caminhoDaSemente.UTF8String);
     NSMutableArray<NSString *> *porOrdem = [NSMutableArray array];   // as escolhidas, da mais parecida à menos
+    NSMutableString *info = [NSMutableString string];
     NSUInteger escolhidas = 1;
     for (NSUInteger k = 0; k < n && escolhidas < quantas; ++k) {
         NSArray<NSString *> *f = faixas[ordem[k]];
         if (musica && [f[0] isEqualToString:musica]) continue;
         if ([f[4] isEqualToString:caminhoDaSemente] || [f[0] isEqualToString:semente]) continue;
+        if (fora.count && ([fora containsObject:f[0]] || [fora containsObject:f[4]])) continue;   // f[0] das do Música é «musica:PID»
         NSString *chave = ZPChaveDoTitulo(f[3]);
         if (chave.length && [titulos containsObject:chave]) continue;          // outra versão da mesma canção
         NSString *artista = ZPChaveDoArtista(f[1], f[2]);
@@ -867,6 +916,8 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
         [artistas addObject:artista];
         [albuns addObject:album];
         [porOrdem addObject:f[4]];
+        // A chave é o que a linha tem antes da tabulação: o caminho ou «musica:PID».
+        [info appendFormat:@"%@\t%@\t%@\t%@\t%.3f\n", [f[4] componentsSeparatedByString:@"\t"].firstObject, f[1], f[3], f[2], semelhanca[ordem[k]]];
         ++escolhidas;
     }
     // Tocadas por ordem de semelhança, as faixas iam-se afastando da semente e
@@ -878,6 +929,7 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     for (NSUInteger onda = 0; onda < ondas; ++onda) {
         for (NSUInteger k = onda; k < porOrdem.count; k += ondas) printf("%s\n", porOrdem[k].UTF8String);
     }
+    if (gInfo.length) [info writeToFile:gInfo atomically:YES encoding:NSUTF8StringEncoding error:NULL];
     free(semelhanca);
     free(ordem);
     return 0;
@@ -1469,6 +1521,11 @@ int main(int argc, const char *argv[]) {
                 // cobrir cada um, como na semente solta de uma estação.
                 gSementeSolta = YES;
                 [args removeObjectAtIndex:i];
+            } else if ([@[@"--rumo", @"--longe", @"--sem", @"--info"] containsObject:a] && i + 1 < args.count) {
+                if ([a isEqualToString:@"--rumo"]) { if (!gRumos) gRumos = [NSMutableArray array]; [gRumos addObject:args[i + 1]]; }
+                else if ([a isEqualToString:@"--longe"]) { if (!gLonges) gLonges = [NSMutableArray array]; [gLonges addObject:args[i + 1]]; }
+                else if ([a isEqualToString:@"--sem"]) gSem = args[i + 1]; else gInfo = args[i + 1];
+                [args removeObjectsInRange:NSMakeRange(i, 2)];
             } else if ([a isEqualToString:@"--ancora"] && i + 1 < args.count) {
                 gAncora = MAX(args[i + 1].floatValue, 0.0f);
                 [args removeObjectsInRange:NSMakeRange(i, 2)];

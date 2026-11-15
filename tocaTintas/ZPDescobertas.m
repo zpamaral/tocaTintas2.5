@@ -5,53 +5,39 @@
 
 #import "ZPDescobertas.h"
 
-// As colunas da tabela, pela ordem dos campos que o vectorizar escreve.
-typedef NS_ENUM(NSUInteger, ZPCampo) {
-    ZPCampoId, ZPCampoLugar, ZPCampoSemelhanca, ZPCampoArtista, ZPCampoTitulo, ZPCampoAlbum,
-    ZPCampoEndereco, ZPCampoSemente, ZPCampoVizinho, ZPCampoQuantos,
-};
+// Os campos de cada linha, como a fonte os dá.
+typedef NS_ENUM(NSUInteger, ZPCampo) { ZPCampoChave, ZPCampoArtista, ZPCampoTitulo, ZPCampoAlbum, ZPCampoMarcada, ZPCampoQuantos };
+
+static NSPasteboardType const ZPTipoDaLinha = @"JPSdA.tocaTintas.linha-da-fila";
 
 @interface ZPDescobertas () <NSTableViewDataSource, NSTableViewDelegate>
-@property (nonatomic, strong) NSURL *vectorizar;
-@property (nonatomic, copy) NSString *base, *mapa;
-@property (nonatomic, copy, nullable) NSString *semente, *nomeDaSemente;
-@property (nonatomic, strong) NSArray<NSArray<NSString *> *> *linhas;
+@property (nonatomic, weak) id<ZPFonteDaEstacao> fonte;
+@property (nonatomic, strong) NSMutableArray<NSMutableArray<NSString *> *> *linhas;
 @property (nonatomic, strong) NSTableView *tabela;
-@property (nonatomic, strong) NSSegmentedControl *modo;
 @property (nonatomic, strong) NSTextField *legenda;
-@property (nonatomic, strong) NSButton *abrir, *esquecer;
-@property (nonatomic, assign) NSUInteger pedido;   // só a resposta ao último pedido conta
 @end
 
 @implementation ZPDescobertas
 
-- (instancetype)initWithVectorizar:(NSURL *)vectorizar base:(NSString *)base mapa:(NSString *)mapa {
-    NSWindow *janela = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 760, 420)
+- (instancetype)initComFonte:(id<ZPFonteDaEstacao>)fonte {
+    NSWindow *janela = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 620, 440)
                                                    styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                                                              NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
                                                      backing:NSBackingStoreBuffered defer:YES];
     if (!(self = [super initWithWindow:janela])) return nil;
-    _vectorizar = vectorizar;
-    _base = [base copy];
-    _mapa = [mapa copy];
-    _linhas = @[];
-    janela.title = NSLocalizedString(@"discoveries_title", @"Descobertas");
-    janela.minSize = NSMakeSize(520, 240);
+    _fonte = fonte;
+    _linhas = [NSMutableArray array];
+    janela.title = NSLocalizedString(@"up_next_title", @"A seguir");
+    janela.minSize = NSMakeSize(420, 200);
     janela.releasedWhenClosed = NO;
     [janela center];
-    janela.frameAutosaveName = @"ZPDescobertas";
+    janela.frameAutosaveName = @"ZPASeguir";
     [self montar];
     return self;
 }
 
 - (void)montar {
     NSView *fundo = self.window.contentView;
-
-    self.modo = [NSSegmentedControl segmentedControlWithLabels:@[NSLocalizedString(@"discoveries_for_current", @"Para a faixa que toca"),
-                                                                 NSLocalizedString(@"discoveries_all", @"Todas")]
-                                                  trackingMode:NSSegmentSwitchTrackingSelectOne
-                                                        target:self action:@selector(actualizar)];
-    self.modo.selectedSegment = 0;
 
     self.legenda = [NSTextField labelWithString:@""];
     self.legenda.textColor = NSColor.secondaryLabelColor;
@@ -63,21 +49,21 @@ typedef NS_ENUM(NSUInteger, ZPCampo) {
     self.tabela.delegate = self;
     self.tabela.usesAlternatingRowBackgroundColors = YES;
     self.tabela.allowsMultipleSelection = NO;
-    self.tabela.target = self;
-    self.tabela.doubleAction = @selector(abrirNoMusica:);
     self.tabela.columnAutoresizingStyle = NSTableViewUniformColumnAutoresizingStyle;
+    [self.tabela registerForDraggedTypes:@[ZPTipoDaLinha]];
+    [self.tabela setDraggingSourceOperationMask:NSDragOperationMove forLocal:YES];
     NSArray<NSArray *> *colunas = @[
-        @[@(ZPCampoLugar),   NSLocalizedString(@"discoveries_rank", @"Lugar"),          @60.0],
-        @[@(ZPCampoArtista), NSLocalizedString(@"discoveries_artist", @"Artista"),      @150.0],
-        @[@(ZPCampoTitulo),  NSLocalizedString(@"discoveries_song", @"Título"),         @190.0],
-        @[@(ZPCampoAlbum),   NSLocalizedString(@"discoveries_album", @"Álbum"),         @150.0],
-        @[@(ZPCampoSemente), NSLocalizedString(@"discoveries_brought_by", @"Trazida por"), @170.0],
+        @[@(ZPCampoMarcada), @"",                                              @24.0],
+        @[@(ZPCampoArtista), NSLocalizedString(@"up_next_artist", @"Artista"), @170.0],
+        @[@(ZPCampoTitulo),  NSLocalizedString(@"up_next_song", @"Título"),    @220.0],
+        @[@(ZPCampoAlbum),   NSLocalizedString(@"up_next_album", @"Álbum"),    @170.0],
     ];
     for (NSArray *c in colunas) {
         NSTableColumn *coluna = [[NSTableColumn alloc] initWithIdentifier:[c[0] stringValue]];
         coluna.title = c[1];
         coluna.width = [c[2] doubleValue];
-        coluna.minWidth = 40;
+        if ([c[0] unsignedIntegerValue] == ZPCampoMarcada) { coluna.minWidth = coluna.maxWidth = 24; }
+        else coluna.minWidth = 60;
         [self.tabela addTableColumn:coluna];
     }
     NSScrollView *rolo = [[NSScrollView alloc] initWithFrame:NSZeroRect];
@@ -85,30 +71,19 @@ typedef NS_ENUM(NSUInteger, ZPCampo) {
     rolo.hasVerticalScroller = YES;
     rolo.borderType = NSBezelBorder;
 
-    self.abrir = [NSButton buttonWithTitle:NSLocalizedString(@"discoveries_open", @"Abrir no Música") target:self action:@selector(abrirNoMusica:)];
-    self.abrir.keyEquivalent = @"\r";
-    self.esquecer = [NSButton buttonWithTitle:NSLocalizedString(@"discoveries_forget", @"Esquecer") target:self action:@selector(esquecerEscolhida:)];
-
-    for (NSView *v in @[self.modo, self.legenda, rolo, self.abrir, self.esquecer]) {
+    for (NSView *v in @[self.legenda, rolo]) {
         v.translatesAutoresizingMaskIntoConstraints = NO;
         [fundo addSubview:v];
     }
     [NSLayoutConstraint activateConstraints:@[
-        [self.modo.topAnchor constraintEqualToAnchor:fundo.topAnchor constant:14],
-        [self.modo.leadingAnchor constraintEqualToAnchor:fundo.leadingAnchor constant:20],
-        [self.legenda.centerYAnchor constraintEqualToAnchor:self.modo.centerYAnchor],
-        [self.legenda.leadingAnchor constraintEqualToAnchor:self.modo.trailingAnchor constant:12],
+        [self.legenda.topAnchor constraintEqualToAnchor:fundo.topAnchor constant:12],
+        [self.legenda.leadingAnchor constraintEqualToAnchor:fundo.leadingAnchor constant:20],
         [self.legenda.trailingAnchor constraintLessThanOrEqualToAnchor:fundo.trailingAnchor constant:-20],
-        [rolo.topAnchor constraintEqualToAnchor:self.modo.bottomAnchor constant:12],
+        [rolo.topAnchor constraintEqualToAnchor:self.legenda.bottomAnchor constant:8],
         [rolo.leadingAnchor constraintEqualToAnchor:fundo.leadingAnchor constant:20],
         [rolo.trailingAnchor constraintEqualToAnchor:fundo.trailingAnchor constant:-20],
-        [rolo.bottomAnchor constraintEqualToAnchor:self.abrir.topAnchor constant:-12],
-        [self.abrir.trailingAnchor constraintEqualToAnchor:fundo.trailingAnchor constant:-20],
-        [self.abrir.bottomAnchor constraintEqualToAnchor:fundo.bottomAnchor constant:-16],
-        [self.esquecer.trailingAnchor constraintEqualToAnchor:self.abrir.leadingAnchor constant:-12],
-        [self.esquecer.centerYAnchor constraintEqualToAnchor:self.abrir.centerYAnchor],
+        [rolo.bottomAnchor constraintEqualToAnchor:fundo.bottomAnchor constant:-20],
     ]];
-    [self acertarBotoes];
 }
 
 - (void)mostrar {
@@ -117,65 +92,32 @@ typedef NS_ENUM(NSUInteger, ZPCampo) {
     [self actualizar];
 }
 
-- (void)faixaEmCurso:(NSString *)semente nome:(NSString *)nome {
-    BOOL mudou = !(semente == self.semente || [semente isEqualToString:self.semente]);
-    self.semente = semente;
-    self.nomeDaSemente = nome;
-    if (mudou && self.window.visible && self.modo.selectedSegment == 0) [self actualizar];
-}
-
 - (void)refazerSeAVista {
     if (self.window.visible) [self actualizar];
 }
 
-// Pede a lista ao vectorizar, fora do thread principal (a base está no disco
-// externo, que pode estar a dormir).
 - (void)actualizar {
-    BOOL pelaFaixa = self.modo.selectedSegment == 0 && self.semente.length > 0;
-    if (self.modo.selectedSegment == 0) {
-        self.legenda.stringValue = self.semente.length ? (self.nomeDaSemente ?: @"")
-                                                       : NSLocalizedString(@"discoveries_nothing_playing", @"Não está nada a tocar: mostram-se todas.");
-    } else {
-        self.legenda.stringValue = @"";
-    }
-    NSMutableArray<NSString *> *args = [@[@"descobertas", self.mapa, self.base, @"-n", @"200"] mutableCopy];
-    if (pelaFaixa) [args addObjectsFromArray:@[@"--semente", self.semente]];
-    NSUInteger pedido = ++self.pedido;
-    NSURL *vectorizar = self.vectorizar;
-    __weak typeof(self) fraco = self;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSMutableArray<NSArray<NSString *> *> *linhas = [NSMutableArray array];
-        NSTask *task = [[NSTask alloc] init];
-        task.executableURL = vectorizar;
-        task.arguments = args;
-        task.standardInput = [NSFileHandle fileHandleWithNullDevice];
-        task.standardError = [NSFileHandle fileHandleWithNullDevice];
-        NSPipe *saida = [NSPipe pipe];
-        task.standardOutput = saida;
-        if ([task launchAndReturnError:NULL]) {
-            NSData *dados = [saida.fileHandleForReading readDataToEndOfFile];
-            [task waitUntilExit];
-            NSString *texto = [[NSString alloc] initWithData:dados encoding:NSUTF8StringEncoding] ?: @"";
-            for (NSString *linha in [texto componentsSeparatedByString:@"\n"]) {
-                NSArray<NSString *> *campos = [linha componentsSeparatedByString:@"\t"];
-                if (campos.count >= ZPCampoQuantos) [linhas addObject:campos];
-            }
-        }
-        dispatch_async(dispatch_get_main_queue(), ^{
-            __strong typeof(fraco) forte = fraco;
-            if (!forte || forte.pedido != pedido) return;
-            forte.linhas = linhas;
-            [forte.tabela reloadData];
-            if (linhas.count == 0) forte.legenda.stringValue = NSLocalizedString(@"discoveries_empty", @"Ainda não há descobertas.");
-            [forte acertarBotoes];
-        });
-    });
+    NSArray<NSArray<NSString *> *> *fila = [self.fonte proximasDaEstacao];
+    NSMutableArray *linhas = [NSMutableArray array];
+    for (NSArray<NSString *> *f in fila) if (f.count >= ZPCampoQuantos) [linhas addObject:[f mutableCopy]];
+    self.linhas = linhas;
+    [self.tabela reloadData];
+    self.legenda.stringValue = !fila ? NSLocalizedString(@"up_next_no_station", @"Não há estação a tocar.")
+                             : linhas.count ? NSLocalizedString(@"up_next_hint", @"Desmarque as que não quer ouvir; arraste para mudar a ordem.")
+                                            : NSLocalizedString(@"up_next_ended", @"A estação não tem mais faixas.");
 }
 
-- (void)acertarBotoes {
-    BOOL ha = self.tabela.selectedRow >= 0 && self.tabela.selectedRow < (NSInteger)self.linhas.count;
-    self.abrir.enabled = ha;
-    self.esquecer.enabled = ha;
+// A fila, como está na tabela, vai para a fonte.
+- (void)entregar { [self entregarComASubir:nil aDescer:nil]; }
+
+- (void)entregarComASubir:(NSString *)subiu aDescer:(NSString *)desceu {
+    NSMutableArray<NSString *> *chaves = [NSMutableArray array];
+    NSMutableSet<NSString *> *desmarcadas = [NSMutableSet set];
+    for (NSArray<NSString *> *l in self.linhas) {
+        [chaves addObject:l[ZPCampoChave]];
+        if (![l[ZPCampoMarcada] isEqualToString:@"1"]) [desmarcadas addObject:l[ZPCampoChave]];
+    }
+    [self.fonte filaDaEstacaoPassaASer:chaves desmarcadas:desmarcadas subiu:subiu desceu:desceu];
 }
 
 #pragma mark Tabela
@@ -185,6 +127,18 @@ typedef NS_ENUM(NSUInteger, ZPCampo) {
 }
 
 - (NSView *)tableView:(NSTableView *)tableView viewForTableColumn:(NSTableColumn *)coluna row:(NSInteger)linha {
+    NSArray<NSString *> *campos = self.linhas[linha];
+    NSUInteger campo = (NSUInteger)coluna.identifier.integerValue;
+    BOOL marcada = [campos[ZPCampoMarcada] isEqualToString:@"1"];
+    if (campo == ZPCampoMarcada) {
+        NSButton *caixa = [tableView makeViewWithIdentifier:@"caixa" owner:self];
+        if (!caixa) {
+            caixa = [NSButton checkboxWithTitle:@"" target:self action:@selector(marcar:)];
+            caixa.identifier = @"caixa";
+        }
+        caixa.state = marcada ? NSControlStateValueOn : NSControlStateValueOff;
+        return caixa;
+    }
     NSTableCellView *celula = [tableView makeViewWithIdentifier:@"celula" owner:self];
     if (!celula) {
         celula = [[NSTableCellView alloc] initWithFrame:NSZeroRect];
@@ -200,67 +154,54 @@ typedef NS_ENUM(NSUInteger, ZPCampo) {
             [texto.centerYAnchor constraintEqualToAnchor:celula.centerYAnchor],
         ]];
     }
-    NSArray<NSString *> *campos = self.linhas[linha];
-    NSUInteger campo = (NSUInteger)coluna.identifier.integerValue;
-    NSString *valor = campos[campo];
-    if (campo == ZPCampoLugar) {
-        // Lugar 0: trazida por uma faixa sem assinatura, ainda por medir.
-        valor = valor.integerValue > 0 ? [NSString stringWithFormat:NSLocalizedString(@"discoveries_rank_format", @"%ld.º"), (long)valor.integerValue] : @"—";
-        celula.textField.alignment = NSTextAlignmentRight;
-    } else {
-        celula.textField.alignment = NSTextAlignmentNatural;
-        if (campo == ZPCampoSemente) {
-            // «Ana Moura — Desfado, via Carminho»: a faixa que a trouxe e o vizinho.
-            NSString *vizinho = campos[ZPCampoVizinho];
-            NSRange doisPontos = [vizinho rangeOfString:@":"];
-            if (doisPontos.location != NSNotFound) vizinho = [vizinho substringFromIndex:NSMaxRange(doisPontos)];
-            if (vizinho.length) valor = [NSString stringWithFormat:NSLocalizedString(@"discoveries_via_format", @"%@, via %@"), valor, vizinho];
-        }
-    }
-    celula.textField.stringValue = valor ?: @"";
-    celula.toolTip = valor;
+    celula.textField.stringValue = campos[campo] ?: @"";
+    // Uma faixa desmarcada fica à vista, apagada.
+    celula.textField.textColor = marcada ? NSColor.labelColor : NSColor.tertiaryLabelColor;
+    celula.toolTip = campos[campo];
     return celula;
 }
 
-- (void)tableViewSelectionDidChange:(NSNotification *)nota {
-    [self acertarBotoes];
+- (void)marcar:(NSButton *)caixa {
+    NSInteger linha = [self.tabela rowForView:caixa];
+    if (linha < 0 || linha >= (NSInteger)self.linhas.count) return;
+    self.linhas[linha][ZPCampoMarcada] = caixa.state == NSControlStateValueOn ? @"1" : @"0";
+    [self.tabela reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)linha]
+                           columnIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, (NSUInteger)self.tabela.numberOfColumns)]];
+    [self entregar];
 }
 
-#pragma mark Acções
+#pragma mark Arrastar
 
-// O endereço da loja com «music:» em vez de «https:» abre a página da canção
-// no Música, e não no navegador. Ele não a toca sozinho: ouve-se e junta-se à
-// biblioteca lá.
-- (void)abrirNoMusica:(id)sender {
-    NSInteger linha = self.tabela.clickedRow >= 0 && sender == self.tabela ? self.tabela.clickedRow : self.tabela.selectedRow;
-    if (linha < 0 || linha >= (NSInteger)self.linhas.count) return;
-    NSURLComponents *c = [NSURLComponents componentsWithString:self.linhas[linha][ZPCampoEndereco]];
-    if (![c.host isEqualToString:@"music.apple.com"]) return;
-    c.scheme = @"music";
-    if (c.URL) [[NSWorkspace sharedWorkspace] openURL:c.URL];
+- (id<NSPasteboardWriting>)tableView:(NSTableView *)tableView pasteboardWriterForRow:(NSInteger)linha {
+    NSPasteboardItem *item = [[NSPasteboardItem alloc] init];
+    [item setString:[NSString stringWithFormat:@"%ld", (long)linha] forType:ZPTipoDaLinha];
+    return item;
 }
 
-- (void)esquecerEscolhida:(id)sender {
-    NSInteger linha = self.tabela.selectedRow;
-    if (linha < 0 || linha >= (NSInteger)self.linhas.count) return;
-    NSString *faixa = self.linhas[linha][ZPCampoId];
-    NSTask *task = [[NSTask alloc] init];
-    task.executableURL = self.vectorizar;
-    task.arguments = @[@"esquecer", self.mapa, faixa];
-    task.standardInput = [NSFileHandle fileHandleWithNullDevice];
-    task.standardOutput = [NSFileHandle fileHandleWithNullDevice];
-    task.standardError = [NSFileHandle fileHandleWithNullDevice];
-    __weak typeof(self) fraco = self;
-    task.terminationHandler = ^(NSTask *acabou) {
-        dispatch_async(dispatch_get_main_queue(), ^{ [fraco actualizar]; });
-    };
-    if (![task launchAndReturnError:NULL]) return;
-    // Sai já da tabela; a lista refaz-se quando o vectorizar acabar.
-    NSMutableArray *restantes = [self.linhas mutableCopy];
-    [restantes removeObjectAtIndex:(NSUInteger)linha];
-    self.linhas = restantes;
-    [self.tabela reloadData];
-    [self acertarBotoes];
+- (NSDragOperation)tableView:(NSTableView *)tableView validateDrop:(id<NSDraggingInfo>)info proposedRow:(NSInteger)linha
+       proposedDropOperation:(NSTableViewDropOperation)operacao {
+    if (info.draggingSource != tableView) return NSDragOperationNone;
+    // Só entre linhas, nunca para cima de uma.
+    if (operacao == NSTableViewDropOn) [tableView setDropRow:linha dropOperation:NSTableViewDropAbove];
+    return NSDragOperationMove;
+}
+
+- (BOOL)tableView:(NSTableView *)tableView acceptDrop:(id<NSDraggingInfo>)info row:(NSInteger)destino
+    dropOperation:(NSTableViewDropOperation)operacao {
+    NSString *texto = [info.draggingPasteboard stringForType:ZPTipoDaLinha];
+    if (!texto) return NO;
+    NSInteger origem = texto.integerValue;
+    if (origem < 0 || origem >= (NSInteger)self.linhas.count || destino < 0 || destino > (NSInteger)self.linhas.count) return NO;
+    if (destino == origem || destino == origem + 1) return NO;   // ficava onde estava
+    NSMutableArray<NSString *> *movida = self.linhas[origem];
+    [self.linhas removeObjectAtIndex:(NSUInteger)origem];
+    NSInteger onde = destino > origem ? destino - 1 : destino;
+    [self.linhas insertObject:movida atIndex:(NSUInteger)onde];
+    [tableView reloadData];
+    [tableView selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)onde] byExtendingSelection:NO];
+    NSString *chave = movida[ZPCampoChave];
+    [self entregarComASubir:(onde < origem ? chave : nil) aDescer:(onde > origem ? chave : nil)];
+    return YES;
 }
 
 @end
