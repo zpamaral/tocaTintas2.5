@@ -54,11 +54,14 @@ NS_ASSUME_NONNULL_BEGIN
 // O álbum, com os campos da pesquisa do iTunes (collectionId, collectionName,
 // artistName, artworkUrl100…), na primeira das lojas («us», «pt»…) que o
 // tiver; nil se nenhuma. Em `exacto`, só o mesmo nome: é o modo das etiquetas,
-// em que outra edição traria outras faixas. Síncrono e demorado (pedidos à
-// rede): nunca no thread principal.
+// em que outra edição traria outras faixas. As `marcas` ({titulo, duracao},
+// a duração em segundos e opcional) são faixas que se sabe estarem no álbum:
+// a primeira serve à procura pela faixa, e todas desempatam álbuns com o mesmo
+// nome (nil se nem elas desempatarem). Síncrono e demorado (pedidos à rede):
+// nunca no thread principal.
 + (nullable NSDictionary *)albumDe:(NSString *)artista
                            chamado:(NSString *)album
-                            titulo:(nullable NSString *)titulo
+                            marcas:(nullable NSArray<NSDictionary *> *)marcas
                              lojas:(NSArray<NSString *> *)lojas
                             exacto:(BOOL)exacto;
 

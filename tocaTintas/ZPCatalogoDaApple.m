@@ -128,73 +128,123 @@ static id ZPSeFor(id v, Class c) { return [v isKindOfClass:c] ? v : nil; }
     return ZPSeFor(r[@"results"], [NSArray class]);
 }
 
-// Dos resultados, o álbum com esse nome; o do mesmo artista à frente.
-+ (nullable NSDictionary *)melhor:(NSArray *)resultados album:(NSString *)album
-                         primeiro:(NSString *)primeiro exacto:(BOOL)exacto {
+// Dos resultados, os álbuns com esse nome, cada um com os seus pontos: 2 pelo
+// nome igual (1 fora do modo exacto, sem os sufixos de edição), mais 2 se for
+// do mesmo artista. Junta-os a `candidatos`, sem repetir o mesmo collectionId.
++ (void)juntar:(NSArray *)resultados album:(NSString *)album primeiro:(NSString *)primeiro
+        exacto:(BOOL)exacto loja:(NSString *)loja a:(NSMutableArray<NSDictionary *> *)candidatos {
     NSString *chave = ZPChaveDoNome(album), *simples = ZPChaveDoNome(ZPSemSufixosDeEdicao(album));
-    NSDictionary *melhor = nil;
-    NSInteger melhorPontos = 0;
     for (NSDictionary *a in resultados) {
         NSString *nome = ZPSeFor(ZPSeFor(a, [NSDictionary class])[@"collectionName"], [NSString class]);
         if (!nome || !a[@"collectionId"]) continue;
+        if ([[candidatos valueForKey:@"collectionId"] containsObject:a[@"collectionId"]]) continue;
         NSInteger pontos = [ZPChaveDoNome(nome) isEqualToString:chave] ? 2
                          : !exacto && simples.length && [ZPChaveDoNome(ZPSemSufixosDeEdicao(nome)) isEqualToString:simples] ? 1 : 0;
         if (pontos == 0) continue;
         NSString *dele = ZPSeFor(a[@"artistName"], [NSString class]) ?: @"";
         if (primeiro.length && [dele rangeOfString:primeiro options:NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch].location != NSNotFound) pontos += 2;
-        if (pontos > melhorPontos) { melhor = a; melhorPontos = pontos; }
+        NSMutableDictionary *m = [a mutableCopy];
+        m[@"loja"] = loja;   // de onde veio: as faixas e a capa pedem-se lá
+        m[@"_pontos"] = @(pontos);
+        [candidatos addObject:m];
     }
-    return melhor;
+}
+
+// Quantas das `marcas` ({titulo, duracao}) estão no álbum: o mesmo nome e, se
+// a marca tiver duração, a menos de 1,5 s.
++ (NSUInteger)marcas:(NSArray<NSDictionary *> *)marcas noAlbum:(NSDictionary *)album {
+    NSArray<NSDictionary *> *faixas = [self faixasDoAlbum:album];
+    NSUInteger n = 0;
+    for (NSDictionary *m in marcas) {
+        NSString *chave = ZPChaveDoNome(m[@"titulo"]);
+        double d = [m[@"duracao"] doubleValue];
+        for (NSDictionary *t in faixas) {
+            NSString *nome = ZPSeFor(t[@"trackName"], [NSString class]);
+            if (!nome || ![ZPChaveDoNome(nome) isEqualToString:chave]) continue;
+            if (d > 0 && fabs([ZPSeFor(t[@"trackTimeMillis"], [NSNumber class]) doubleValue] / 1000.0 - d) >= 1.5) continue;
+            ++n;
+            break;
+        }
+    }
+    return n;
+}
+
+// Dos candidatos, o de mais pontos. Empatados — dois álbuns com o mesmo nome e
+// do mesmo artista, como os dois «Alfredo Marceneiro» de 2006, um da World
+// Music Records e outro da Valentim de Carvalho, com alinhamentos diferentes
+// (visto em 2026-11-15: a gravação de um mostrava os números do outro) —
+// decidem as marcas: o que tiver mais delas, se for um só. Se nem elas
+// desempatarem, nil: um álbum adivinhado dá números e durações de outro disco.
++ (nullable NSDictionary *)escolher:(NSArray<NSDictionary *> *)candidatos marcas:(nullable NSArray<NSDictionary *> *)marcas {
+    NSInteger topo = [[candidatos valueForKeyPath:@"@max._pontos"] integerValue];
+    NSMutableArray<NSDictionary *> *empatados = [NSMutableArray array];
+    for (NSDictionary *a in candidatos) if ([a[@"_pontos"] integerValue] == topo) [empatados addObject:a];
+    NSDictionary *escolhido = nil;
+    if (empatados.count == 1) {
+        escolhido = empatados.firstObject;
+    } else if (empatados.count > 1 && marcas.count) {
+        NSUInteger melhor = 0, quantos = 0;
+        for (NSDictionary *a in empatados) {
+            NSUInteger n = [self marcas:marcas noAlbum:a];
+            if (n > melhor) { melhor = n; quantos = 1; escolhido = a; }
+            else if (n == melhor && n > 0) ++quantos;
+        }
+        if (quantos != 1) escolhido = nil;
+    }
+    if (!escolhido) return nil;
+    NSMutableDictionary *m = [escolhido mutableCopy];
+    [m removeObjectForKey:@"_pontos"];
+    return m;
 }
 
 + (nullable NSDictionary *)albumNaLoja:(NSString *)loja primeiro:(NSString *)primeiro album:(NSString *)album
-                                titulo:(nullable NSString *)titulo exacto:(BOOL)exacto {
+                                marcas:(nullable NSArray<NSDictionary *> *)marcas exacto:(BOOL)exacto {
+    NSMutableArray<NSDictionary *> *candidatos = [NSMutableArray array];
     // Pelo artista: os álbuns dele, todos. Há artistas com o mesmo nome (três
-    // «Alex G»): vêem-se os que tiverem exactamente esse, até três.
+    // «Alex G», dois «Alfredo Marceneiro»): vêem-se os que tiverem exactamente
+    // esse, até três, e juntam-se os álbuns de todos.
     if (primeiro.length) {
         NSUInteger vistos = 0;
         for (NSDictionary *a in [self resultados:@"search" loja:loja
                                           campos:@{ @"term": primeiro, @"entity": @"musicArtist", @"limit": @"5" }]) {
             NSString *nome = ZPSeFor(ZPSeFor(a, [NSDictionary class])[@"artistName"], [NSString class]);
             if (!nome || !a[@"artistId"] || ![ZPChaveDoNome(nome) isEqualToString:ZPChaveDoNome(primeiro)]) continue;
-            NSDictionary *achado = [self melhor:[self resultados:@"lookup" loja:loja
-                                                          campos:@{ @"id": [a[@"artistId"] description], @"entity": @"album",
-                                                                    @"limit": @"200" }]
-                                          album:album primeiro:primeiro exacto:exacto];
-            if (achado) return achado;
+            [self juntar:[self resultados:@"lookup" loja:loja
+                                   campos:@{ @"id": [a[@"artistId"] description], @"entity": @"album", @"limit": @"200" }]
+                   album:album primeiro:primeiro exacto:exacto loja:loja a:candidatos];
             if (++vistos >= 3) break;
         }
+        if (candidatos.count) return [self escolher:candidatos marcas:marcas];
     }
-    NSDictionary *achado = [self melhor:[self resultados:@"search" loja:loja
-                                                  campos:@{ @"term": [NSString stringWithFormat:@"%@ %@", primeiro, album],
-                                                            @"entity": @"album", @"limit": @"25" }]
-                                  album:album primeiro:primeiro exacto:exacto];
-    if (!achado && titulo.length) {
-        achado = [self melhor:[self resultados:@"search" loja:loja
-                                        campos:@{ @"term": [NSString stringWithFormat:@"%@ %@", primeiro, titulo],
-                                                  @"entity": @"song", @"limit": @"50" }]
-                        album:album primeiro:primeiro exacto:exacto];
+    [self juntar:[self resultados:@"search" loja:loja
+                           campos:@{ @"term": [NSString stringWithFormat:@"%@ %@", primeiro, album],
+                                     @"entity": @"album", @"limit": @"25" }]
+           album:album primeiro:primeiro exacto:exacto loja:loja a:candidatos];
+    NSString *titulo = marcas.firstObject[@"titulo"];
+    if (!candidatos.count && [titulo length]) {
+        [self juntar:[self resultados:@"search" loja:loja
+                               campos:@{ @"term": [NSString stringWithFormat:@"%@ %@", primeiro, titulo],
+                                         @"entity": @"song", @"limit": @"50" }]
+               album:album primeiro:primeiro exacto:exacto loja:loja a:candidatos];
     }
-    return achado;
+    return candidatos.count ? [self escolher:candidatos marcas:marcas] : nil;
 }
 
-+ (nullable NSDictionary *)albumDe:(NSString *)artista chamado:(NSString *)album titulo:(nullable NSString *)titulo
++ (nullable NSDictionary *)albumDe:(NSString *)artista chamado:(NSString *)album
+                            marcas:(nullable NSArray<NSDictionary *> *)marcas
                              lojas:(NSArray<NSString *> *)lojas exacto:(BOOL)exacto {
     if (album.length == 0) return nil;
     NSString *primeiro = ZPPrimeiroArtista(artista);
+    NSMutableString *dasMarcas = [NSMutableString string];
+    for (NSDictionary *m in marcas) [dasMarcas appendFormat:@"%@/%.1f;", m[@"titulo"], [m[@"duracao"] doubleValue]];
     NSString *chave = [NSString stringWithFormat:@"album|%@|%d|%@|%@|%@", [lojas componentsJoinedByString:@","],
-                       exacto, primeiro, album, titulo ?: @""];
+                       exacto, primeiro, album, dasMarcas];
     id visto = [[self memoria] objectForKey:chave];
     if (visto) return visto == [NSNull null] ? nil : visto;
     NSDictionary *achado = nil;
     for (NSString *loja in lojas) {
-        NSDictionary *a = [self albumNaLoja:loja primeiro:primeiro album:album titulo:titulo exacto:exacto];
-        if (a) {
-            NSMutableDictionary *m = [a mutableCopy];
-            m[@"loja"] = loja;   // de onde veio: as faixas e a capa pedem-se lá
-            achado = m;
-            break;
-        }
+        achado = [self albumNaLoja:loja primeiro:primeiro album:album marcas:marcas exacto:exacto];
+        if (achado) break;
     }
     [[self memoria] setObject:achado ?: [NSNull null] forKey:chave];
     return achado;
@@ -230,7 +280,8 @@ static id ZPSeFor(id v, Class c) { return [v isKindOfClass:c] ? v : nil; }
 + (void)capaDe:(NSString *)artista album:(NSString *)album titulo:(nullable NSString *)titulo
      concluido:(void (^)(NSData *_Nullable))concluido {
     dispatch_async([self fila], ^{
-        NSDictionary *a = [self albumDe:artista chamado:album titulo:titulo lojas:@[ [self lojaDoMac] ] exacto:NO];
+        NSDictionary *a = [self albumDe:artista chamado:album marcas:titulo.length ? @[ @{ @"titulo": titulo } ] : nil
+                                  lojas:@[ [self lojaDoMac] ] exacto:NO];
         NSData *capa = a ? [self capaDoAlbum:a lado:600] : nil;
         dispatch_async(dispatch_get_main_queue(), ^{ concluido(capa); });
     });
@@ -240,7 +291,8 @@ static id ZPSeFor(id v, Class c) { return [v isKindOfClass:c] ? v : nil; }
 // duração, a menos de 1,5 s, se só uma cair aí. Síncrono.
 + (nullable NSDictionary *)faixaDe:(NSString *)artista album:(NSString *)album titulo:(NSString *)titulo
                            duracao:(double)duracao todas:(NSArray<NSDictionary *> *_Nullable *_Nullable)todas {
-    NSDictionary *a = [self albumDe:artista chamado:album titulo:titulo lojas:@[ [self lojaDoMac] ] exacto:NO];
+    NSDictionary *a = [self albumDe:artista chamado:album marcas:@[ @{ @"titulo": titulo ?: @"", @"duracao": @(duracao) } ]
+                              lojas:@[ [self lojaDoMac] ] exacto:NO];
     NSArray<NSDictionary *> *faixas = a ? [self faixasDoAlbum:a] : @[];
     NSString *chave = ZPChaveDoNome(titulo);
     NSDictionary *achada = nil;

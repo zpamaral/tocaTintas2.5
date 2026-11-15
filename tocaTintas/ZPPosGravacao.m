@@ -321,8 +321,8 @@ static NSString *ZPSemSufixoDaApple(NSString *album) {
 // consigo própria. No «ОМ» do Grünberg (2026-11-08) deu o álbum em cirílico e
 // as faixas em inglês, e o Música mostra tudo em cirílico. O mesmo álbum tem o
 // mesmo collectionId e os mesmos trackId em todas as lojas.
-static NSDictionary *ZPAlbumNoCatalogo(NSString *artista, NSString *album) {
-    NSDictionary *a = [ZPCatalogoDaApple albumDe:artista chamado:album titulo:nil lojas:@[ @"us", @"pt" ] exacto:YES];
+static NSDictionary *ZPAlbumNoCatalogo(NSString *artista, NSString *album, NSArray<NSDictionary *> *marcas) {
+    NSDictionary *a = [ZPCatalogoDaApple albumDe:artista chamado:album marcas:marcas lojas:@[ @"us", @"pt" ] exacto:YES];
     NSArray *faixas = a ? [ZPCatalogoDaApple faixasDoAlbum:a] : nil;
     if (!faixas.count) return nil;
     NSString *loja = [ZPCatalogoDaApple lojaDoMac];
@@ -916,7 +916,13 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         [a[@"faixas"] addObject:f];
     }
     for (NSMutableDictionary *a in albuns) {
-        NSDictionary *cat = ZPAlbumNoCatalogo(a[@"artista"], a[@"nome"]);
+        // As marcas gravadas desempatam álbuns com o mesmo nome (ver
+        // +[ZPCatalogoDaApple albumDe:…]).
+        NSMutableArray<NSDictionary *> *dasMarcas = [NSMutableArray array];
+        for (NSDictionary *f in a[@"faixas"]) {
+            [dasMarcas addObject:@{ @"titulo": f[@"marca"][@"titulo"] ?: @"", @"duracao": f[@"marca"][@"duracao"] ?: @0 }];
+        }
+        NSDictionary *cat = ZPAlbumNoCatalogo(a[@"artista"], a[@"nome"], dasMarcas);
         NSArray<NSDictionary *> *doCatalogo = cat[@"faixas"];
         if (cat) {
             a[@"catalogo"] = cat[@"album"];
