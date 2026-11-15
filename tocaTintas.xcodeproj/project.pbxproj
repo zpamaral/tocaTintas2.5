@@ -24,6 +24,7 @@
 		1F26DC4330A8AF41008B82F3 /* vectorizar in Resources */ = {isa = PBXBuildFile; fileRef = 1F26DC4230A8AF41008B82F3 /* vectorizar */; };
 		1F26DC4430A8AF41008B82F3 /* clap_audio.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = 1F26DC4130A8AF41008B82F3 /* clap_audio.mlmodelc */; };
 		1F26DC4A30A8DC20008B82F3 /* ZPDescobertas.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F26DC4930A8DC20008B82F3 /* ZPDescobertas.m */; };
+		1F26DC4D30A9FBC9008B82F3 /* ZPOrigens.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F26DC4C30A9FBC9008B82F3 /* ZPOrigens.m */; };
 		1F2E27723096E283001B0268 /* ZPCatalogoDaApple.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F2E27713096E283001B0268 /* ZPCatalogoDaApple.m */; };
 		1F2E2775309DCEC9001B0268 /* ZPAgoraATocar.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F2E2774309DCEC9001B0268 /* ZPAgoraATocar.m */; };
 		1F2E2778309DD440001B0268 /* ZPLeitorEspacial.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F2E2777309DD440001B0268 /* ZPLeitorEspacial.m */; };
@@ -135,6 +136,8 @@
 		1F26DC4230A8AF41008B82F3 /* vectorizar */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; path = vectorizar; sourceTree = "<group>"; };
 		1F26DC4830A8DC20008B82F3 /* ZPDescobertas.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPDescobertas.h; sourceTree = "<group>"; };
 		1F26DC4930A8DC20008B82F3 /* ZPDescobertas.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPDescobertas.m; sourceTree = "<group>"; };
+		1F26DC4B30A9FBC9008B82F3 /* ZPOrigens.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPOrigens.h; sourceTree = "<group>"; };
+		1F26DC4C30A9FBC9008B82F3 /* ZPOrigens.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPOrigens.m; sourceTree = "<group>"; };
 		1F2E27703096E283001B0268 /* ZPCatalogoDaApple.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPCatalogoDaApple.h; sourceTree = "<group>"; };
 		1F2E27713096E283001B0268 /* ZPCatalogoDaApple.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPCatalogoDaApple.m; sourceTree = "<group>"; };
 		1F2E2773309DCEC9001B0268 /* ZPAgoraATocar.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPAgoraATocar.h; sourceTree = "<group>"; };
@@ -287,6 +290,8 @@
 				1F12F2B82C7C86D60064C694 /* Property List.plist */,
 				1F12F2A82C7C85480064C694 /* ViewController.h */,
 				1F12F2A92C7C85480064C694 /* ViewController.m */,
+				1F26DC4B30A9FBC9008B82F3 /* ZPOrigens.h */,
+				1F26DC4C30A9FBC9008B82F3 /* ZPOrigens.m */,
 				1F26DC4830A8DC20008B82F3 /* ZPDescobertas.h */,
 				1F26DC4930A8DC20008B82F3 /* ZPDescobertas.m */,
 				1F2E2776309DD440001B0268 /* ZPLeitorEspacial.h */,
@@ -639,6 +644,7 @@
 				1F2E2775309DCEC9001B0268 /* ZPAgoraATocar.m in Sources */,
 				1FA3F84B30949C2000ACF01D /* ZPPosGravacao.m in Sources */,
 				1F2E2778309DD440001B0268 /* ZPLeitorEspacial.m in Sources */,
+				1F26DC4D30A9FBC9008B82F3 /* ZPOrigens.m in Sources */,
 				1F12F2AA2C7C85480064C694 /* ViewController.m in Sources */,
 				1F12F2B12C7C854C0064C694 /* main.m in Sources */,
 				1F7D75232C963F600046E0AC /* ZPOpusDecoder.m in Sources */,

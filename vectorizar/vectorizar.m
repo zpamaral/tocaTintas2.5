@@ -59,6 +59,7 @@
 #import <mach/mach_time.h>
 #include <sqlite3.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include "mel_slaney.h"
 
 // O nome com que as assinaturas ficam na base: o modelo e a maneira de tirar
@@ -686,7 +687,105 @@ static NSMutableArray<NSString *> *gRumos;   // --rumo: faixas que quem ouve pux
 static NSMutableArray<NSString *> *gLonges;  // --longe: faixas que desmarcou; a estação afasta-se delas
 static NSString *gSem;                       // --sem: ficheiro com as faixas que já tocaram, uma por linha, para não voltarem
 static NSString *gInfo;                      // --info: onde escrever, para cada linha da estação, artista, título, álbum e semelhança
+static NSString *gOrigens;                   // --origens: o ficheiro das regras de origem (ver «Origens»)
 static NSUInteger gOndas = 5;   // --ondas: em quantas voltas à semente se reparte a estação (1 = por ordem de semelhança)
+
+#pragma mark Origens
+
+// A origem de uma faixa é a etiqueta GENRE do ficheiro, quando ela diz a
+// origem («Fado», «Portuguesa», «Brasileira»…). O ficheiro das regras
+// (--origens, um JSON) diz o que cada origem admite numa estação, e o que
+// admite cada artista que seja excepção:
+//     { "origens":  { "Fado": ["Fado", "Fado de Coimbra"], … },
+//       "artistas": { "Sérgio Godinho": ["Portuguesa", "Brasileira", "Cabo-verdiana"], … } }
+// Uma semente cuja origem (ou artista) não tenha regra dá uma estação sem
+// limite, como antes. Numa estação limitada, uma faixa só entra se a origem
+// dela estiver na lista; a de uma faixa do Música é a mais frequente entre os
+// ficheiros do mesmo artista, e sem ficheiros dele fica de fora.
+//
+// As etiquetas lêem-se pelo Core Audio (uns 4 ms por ficheiro) e guardam-se na
+// tabela generos da base, com a data do ficheiro: de cada vez só se relêem os
+// que mudaram.
+
+static NSDictionary<NSString *, NSString *> *ZPGenerosDosFicheiros(sqlite3 *db) {
+    NSMutableDictionary<NSString *, NSString *> *generos = [NSMutableDictionary dictionary];
+    sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS generos (caminho TEXT PRIMARY KEY, genero TEXT, data REAL NOT NULL)", NULL, NULL, NULL);
+    NSMutableDictionary<NSString *, NSArray *> *guardados = [NSMutableDictionary dictionary];
+    sqlite3_stmt *s = NULL;
+    if (sqlite3_prepare_v2(db, "SELECT caminho, genero, data FROM generos", -1, &s, NULL) == SQLITE_OK) {
+        while (sqlite3_step(s) == SQLITE_ROW) guardados[ZPTexto(s, 0)] = @[ZPTexto(s, 1), @(sqlite3_column_double(s, 2))];
+    }
+    sqlite3_finalize(s);
+    NSMutableArray<NSArray *> *novos = [NSMutableArray array];
+    if (sqlite3_prepare_v2(db, "SELECT caminho FROM ficheiros WHERE caminho IS NOT NULL", -1, &s, NULL) == SQLITE_OK) {
+        while (sqlite3_step(s) == SQLITE_ROW) {
+            NSString *caminho = ZPTexto(s, 0);
+            struct stat st;
+            if (stat(caminho.fileSystemRepresentation, &st) != 0) continue;
+            double data = (double)st.st_mtimespec.tv_sec + st.st_mtimespec.tv_nsec / 1e9;
+            NSArray *g = guardados[caminho];
+            if (g && [g[1] doubleValue] == data) { generos[caminho] = g[0]; continue; }
+            NSString *genero = @"";
+            AudioFileID f = NULL;
+            if (AudioFileOpenURL((__bridge CFURLRef)[NSURL fileURLWithPath:caminho], kAudioFileReadPermission, 0, &f) == noErr) {
+                CFDictionaryRef d = NULL;
+                UInt32 tamanho = sizeof(d);
+                if (AudioFileGetProperty(f, kAudioFilePropertyInfoDictionary, &tamanho, &d) == noErr && d) {
+                    NSDictionary *info = (__bridge_transfer NSDictionary *)d;
+                    id x = info[@kAFInfoDictionary_Genre];
+                    if ([x isKindOfClass:[NSString class]]) genero = [x stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+                }
+                AudioFileClose(f);
+            }
+            generos[caminho] = genero;
+            [novos addObject:@[caminho, genero, @(data)]];
+        }
+    }
+    sqlite3_finalize(s);
+    if (novos.count) {
+        sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
+        if (sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO generos VALUES (?, ?, ?)", -1, &s, NULL) == SQLITE_OK) {
+            for (NSArray *g in novos) {
+                sqlite3_bind_text(s, 1, [g[0] UTF8String], -1, SQLITE_TRANSIENT);
+                sqlite3_bind_text(s, 2, [g[1] UTF8String], -1, SQLITE_TRANSIENT);
+                sqlite3_bind_double(s, 3, [g[2] doubleValue]);
+                sqlite3_step(s);
+                sqlite3_reset(s);
+            }
+        }
+        sqlite3_finalize(s);
+        sqlite3_exec(db, "DELETE FROM generos WHERE caminho NOT IN (SELECT caminho FROM ficheiros WHERE caminho IS NOT NULL)", NULL, NULL, NULL);
+        sqlite3_exec(db, "COMMIT", NULL, NULL, NULL);
+        fprintf(stderr, "origens: %lu etiquetas lidas de novo\n", (unsigned long)novos.count);
+    }
+    return generos;
+}
+
+// As regras: origem → origens admitidas, e artista (pela chave) → origens admitidas.
+static BOOL ZPLerRegrasDeOrigem(NSDictionary<NSString *, NSSet<NSString *> *> **origens,
+                                NSDictionary<NSString *, NSSet<NSString *> *> **artistas) {
+    if (!gOrigens.length) return NO;
+    NSData *dados = [NSData dataWithContentsOfFile:gOrigens];
+    NSDictionary *j = dados ? [NSJSONSerialization JSONObjectWithData:dados options:0 error:NULL] : nil;
+    if (![j isKindOfClass:[NSDictionary class]]) {
+        fprintf(stderr, "origens: não consegui ler «%s»; a estação segue sem limite.\n", gOrigens.UTF8String);
+        return NO;
+    }
+    NSMutableDictionary *o = [NSMutableDictionary dictionary], *a = [NSMutableDictionary dictionary];
+    for (NSString *grupo in @[@"origens", @"artistas"]) {
+        NSDictionary *d = [j[grupo] isKindOfClass:[NSDictionary class]] ? j[grupo] : @{};
+        for (NSString *k in d) {
+            if (![d[k] isKindOfClass:[NSArray class]]) continue;
+            NSMutableSet *admitidas = [NSMutableSet set];
+            for (id x in d[k]) if ([x isKindOfClass:[NSString class]]) [admitidas addObject:[x precomposedStringWithCanonicalMapping]];
+            if ([grupo isEqualToString:@"origens"]) o[k.precomposedStringWithCanonicalMapping] = admitidas;
+            else a[ZPChaveDoArtista(k.precomposedStringWithCanonicalMapping, @"")] = admitidas;
+        }
+    }
+    *origens = o;
+    *artistas = a;
+    return YES;
+}
 
 static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, NSUInteger porArtista, NSUInteger porAlbum) {
     sqlite3 *db = ZPAbrirBase(base);
@@ -813,6 +912,66 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     NSUInteger n = faixas.count;
     if (n < 2) { sqlite3_close(mapa); fprintf(stderr, "A base não tem assinaturas: falta correr «vectorizar actualizar».\n"); return 4; }
 
+    // O limite por origem (ver «Origens»): o que a semente admite, ou nil.
+    NSSet<NSString *> *admitidas = nil;
+    NSMutableArray<NSString *> *origemDe = nil;   // a origem de cada faixa, pela ordem de «faixas»
+    NSDictionary<NSString *, NSSet<NSString *> *> *regrasDasOrigens = nil, *regrasDosArtistas = nil;
+    if (ZPLerRegrasDeOrigem(&regrasDasOrigens, &regrasDosArtistas)) {
+        sqlite3 *dbg = ZPAbrirBase(base);
+        NSDictionary<NSString *, NSString *> *generos = dbg ? ZPGenerosDosFicheiros(dbg) : @{};
+        if (dbg) sqlite3_close(dbg);
+        NSSet<NSString *> *conhecidas = [NSSet setWithArray:regrasDasOrigens.allKeys];
+        // A origem de cada artista, pelos ficheiros dele: a mais frequente das que têm regra.
+        NSMutableDictionary<NSString *, NSCountedSet *> *porArtistaContadas = [NSMutableDictionary dictionary];
+        origemDe = [NSMutableArray arrayWithCapacity:n];
+        for (NSArray<NSString *> *f in faixas) {
+            NSString *g = [f[0] hasPrefix:@"musica:"] ? @"" : (generos[f[4]] ?: @"").precomposedStringWithCanonicalMapping;
+            [origemDe addObject:g];
+            if (![conhecidas containsObject:g]) continue;
+            NSString *k = ZPChaveDoArtista(f[1], @"");
+            if ([k hasPrefix:@"álbum:"]) continue;   // «Vários»: o artista não diz nada
+            if (!porArtistaContadas[k]) porArtistaContadas[k] = [NSCountedSet set];
+            [porArtistaContadas[k] addObject:g];
+        }
+        NSMutableDictionary<NSString *, NSString *> *origemDoArtista = [NSMutableDictionary dictionary];
+        for (NSString *k in porArtistaContadas) {
+            NSCountedSet *c = porArtistaContadas[k];
+            NSString *melhor = nil;
+            for (NSString *g in c) if (!melhor || [c countForObject:g] > [c countForObject:melhor]) melhor = g;
+            origemDoArtista[k] = melhor;
+        }
+        for (NSUInteger i = 0; i < n; ++i) {
+            if ([faixas[i][0] hasPrefix:@"musica:"]) origemDe[i] = origemDoArtista[ZPChaveDoArtista(faixas[i][1], @"")] ?: @"";
+        }
+        // A semente: primeiro a regra do artista dela, depois a da origem.
+        NSString *artistaDaSemente = nil, *origemDaSemente = nil;
+        for (NSUInteger i = 0; i < n; ++i) {
+            NSArray<NSString *> *f = faixas[i];
+            if ((musica && [f[0] isEqualToString:musica]) || [f[4] isEqualToString:caminhoDaSemente] || [f[0] isEqualToString:caminhoDaSemente]) {
+                artistaDaSemente = ZPChaveDoArtista(f[1], @"");
+                origemDaSemente = origemDe[i];
+                break;
+            }
+        }
+        // «Sérgio Godinho com Caetano Veloso» é do Sérgio Godinho.
+        NSSet<NSString *> *doArtista = artistaDaSemente ? regrasDosArtistas[artistaDaSemente] : nil;
+        for (NSString *k in regrasDosArtistas) {
+            if (doArtista || !artistaDaSemente) break;
+            for (NSString *sep in @[@" com ", @" & ", @" e ", @" and ", @" feat"]) {
+                if ([artistaDaSemente hasPrefix:[k stringByAppendingString:sep]]) { doArtista = regrasDosArtistas[k]; break; }
+            }
+        }
+        if (doArtista) {
+            admitidas = doArtista;
+        } else if (origemDaSemente.length && regrasDasOrigens[origemDaSemente]) {
+            admitidas = regrasDasOrigens[origemDaSemente];
+        }
+        if (admitidas) {
+            fprintf(stderr, "origens: a semente (%s) admite %s\n", (origemDaSemente.length ? origemDaSemente : @"?").UTF8String,
+                    [[admitidas.allObjects sortedArrayUsingSelector:@selector(compare:)] componentsJoinedByString:@", "].UTF8String);
+        }
+    }
+
     // A âncora: os artistas que a ListenBrainz dá como vizinhos do artista da
     // semente (quem ouve um ouve os outros), guardados no mapa pela consulta
     // externa. A assinatura só conhece o som; a vizinhança de ouvintes traz a
@@ -918,6 +1077,7 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
         if (musica && [f[0] isEqualToString:musica]) continue;
         if ([f[4] isEqualToString:caminhoDaSemente] || [f[0] isEqualToString:semente]) continue;
         if (fora.count && ([fora containsObject:f[0]] || [fora containsObject:f[4]])) continue;   // f[0] das do Música é «musica:PID»
+        if (admitidas && ![admitidas containsObject:origemDe[ordem[k]]]) continue;   // de outra origem
         NSString *chave = ZPChaveDoTitulo(f[3]);
         if (chave.length && [titulos containsObject:chave]) continue;          // outra versão da mesma canção
         NSString *artista = ZPChaveDoArtista(f[1], f[2]);
@@ -1768,6 +1928,9 @@ int main(int argc, const char *argv[]) {
                 // cobrir cada um, como na semente solta de uma estação.
                 gSementeSolta = YES;
                 [args removeObjectAtIndex:i];
+            } else if ([a isEqualToString:@"--origens"] && i + 1 < args.count) {
+                gOrigens = args[i + 1];
+                [args removeObjectsInRange:NSMakeRange(i, 2)];
             } else if ([@[@"--rumo", @"--longe", @"--sem", @"--info"] containsObject:a] && i + 1 < args.count) {
                 if ([a isEqualToString:@"--rumo"]) { if (!gRumos) gRumos = [NSMutableArray array]; [gRumos addObject:args[i + 1]]; }
                 else if ([a isEqualToString:@"--longe"]) { if (!gLonges) gLonges = [NSMutableArray array]; [gLonges addObject:args[i + 1]]; }
@@ -1815,7 +1978,7 @@ int main(int argc, const char *argv[]) {
                             "     vectorizar esquecer MAPA ID\n"
                             "     vectorizar mapear BASE MAPA\n"
                             "     vectorizar falhou MAPA PID\n"
-                            "     vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--mapa MAPA]\n"
+                            "     vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--mapa MAPA] [--origens REGRAS.json]\n"
                             "     vectorizar importar BASE lista.tsv saída\n"
                             "     vectorizar [--modelo M.mlmodelc] [--cpu] [--loja] lista.tsv saída\n"
                             "     vectorizar --excerto segundos ficheiro pcm.f32\n"

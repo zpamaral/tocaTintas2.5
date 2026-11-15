@@ -64,6 +64,7 @@ SOFTWARE.
 #import "ZPLigacoesDoMusicaWindowController.h"
 #import "ZPAgoraATocar.h"   // O «A tocar» do sistema e os comandos dos AirPods e do teclado
 #import "ZPDescobertas.h"   // A janela «A seguir»: a fila da estação
+#import "ZPOrigens.h"       // A janela «Origens»: as regras de origem das estações
 #import "ZPLeitorEspacial.h"   // O leitor com áudio espacial, para a saída em Bluetooth
 
 #define NUM_BUFFERS 3  // Three is typically a good number for real-time audio playback
@@ -403,6 +404,7 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSTask *assinaturasTask;
 @property (nonatomic, strong) NSURL *sementeDoMusicaACabeca;   // a linha «musica:» da semente, quando a estação nasce do excerto dela
 @property (nonatomic) NSInteger caixaDesde;        // a primeira faixa da lista que a caixa das músicas mostra (0 fora de uma estação)
+@property (nonatomic, strong) ZPOrigens *janelaDasOrigens;   // Reprodução ▸ Origens…
 @property (nonatomic, strong) NSTask *mapearTask;   // o «vectorizar mapear» a correr
 @property (nonatomic, strong) NSTask *refinarTask;                // o «vectorizar refinar» em curso
 @property (nonatomic, strong) NSTimer *relogioDeRefinar;
@@ -4978,6 +4980,15 @@ static NSDictionary<NSString *, NSDictionary<NSString *, NSArray<NSString *> *> 
 // O executável: em Contents/Resources, como o bs2b_bridge, o raop_play e o
 // cava, com o modelo (clap_audio.mlmodelc) ao lado. nil se a aplicação foi
 // montada sem ele.
+// As regras de origem das estações (o que cada etiqueta GENRE admite, e as
+// excepções por artista): um ficheiro na pasta de dados da aplicação, que
+// quem ouve edita à mão. Sem ele, a estação não tem limite de origem.
+static NSArray<NSString *> *ZPArgumentosDasOrigens(void) {
+    NSString *regras = [[[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject
+                         URLByAppendingPathComponent:@"tocaTintas/origens.json"] path];
+    return [[NSFileManager defaultManager] fileExistsAtPath:regras] ? @[@"--origens", regras] : @[];
+}
+
 static NSURL *ZPVectorizar(void) {
     NSURL *url = [[NSBundle mainBundle] URLForResource:@"vectorizar" withExtension:nil];
     return url && [[NSFileManager defaultManager] isExecutableFileAtPath:url.path] ? url : nil;
@@ -5172,6 +5183,7 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
     NSString *info = [NSTemporaryDirectory() stringByAppendingPathComponent:
                       [NSString stringWithFormat:@"tocaTintas-estacao-%@.tsv", NSUUID.UUID.UUIDString]];
     NSMutableArray<NSString *> *argumentos = [@[@"estacao", base, semente, @"--info", info] mutableCopy];
+    [argumentos addObjectsFromArray:ZPArgumentosDasOrigens()];
     if ([[NSFileManager defaultManager] fileExistsAtPath:mapa]) [argumentos addObjectsFromArray:@[@"--mapa", mapa]];
     // O que se fez na janela «A seguir» das outras vezes com esta semente.
     NSDictionary<NSString *, NSArray<NSString *> *> *lembrado = apagar ? nil : ZPGestosDasEstacoes()[semente];
@@ -5305,6 +5317,7 @@ static NSDictionary<NSString *, NSDictionary<NSString *, NSArray<NSString *> *> 
     for (NSURL *u in self.estacaoFila) [jaLa addObject:ZPChaveDaLinha(u)];
     [[jaLa.array componentsJoinedByString:@"\n"] writeToFile:sem atomically:YES encoding:NSUTF8StringEncoding error:NULL];
     NSMutableArray<NSString *> *argumentos = [@[@"estacao", base, semente, @"-n", @"26", @"--sem", sem, @"--info", info] mutableCopy];
+    [argumentos addObjectsFromArray:ZPArgumentosDasOrigens()];
     for (NSString *chave in self.estacaoPromovidas) [argumentos addObjectsFromArray:@[@"--rumo", chave]];
     for (NSString *chave in self.estacaoRejeitadas) [argumentos addObjectsFromArray:@[@"--longe", chave]];
     if ([[NSFileManager defaultManager] fileExistsAtPath:mapa]) [argumentos addObjectsFromArray:@[@"--mapa", mapa]];
@@ -5574,6 +5587,16 @@ static NSMutableDictionary<NSString *, NSArray<NSString *> *> *ZPLerInfoDaEstaca
         return;
     }
     self.associarTask = task;
+}
+
+// As regras de origem das estações, numa janela (o mesmo origens.json que o
+// ZPArgumentosDasOrigens passa ao vectorizar).
+- (IBAction)mostrarOrigens:(id)sender {
+    NSString *base = [[self loadSongsDirectoryPath] stringByAppendingPathComponent:@".fonoteca.sqlite"];
+    NSString *regras = [[[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject
+                         URLByAppendingPathComponent:@"tocaTintas/origens.json"] path];
+    if (!self.janelaDasOrigens) self.janelaDasOrigens = [[ZPOrigens alloc] initComBase:base regras:regras];
+    [self.janelaDasOrigens mostrar];
 }
 
 - (IBAction)mostrarDescobertas:(id)sender {
@@ -5870,6 +5893,10 @@ typedef NS_ENUM(NSInteger, ZPTecla) {
                                                          action:@selector(mostrarDescobertas:) keyEquivalent:@""];
     descobertas.target = self;
     [menu addItem:descobertas];
+    NSMenuItem *origens = [[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"origins_menu", @"Origens…")
+                                                     action:@selector(mostrarOrigens:) keyEquivalent:@""];
+    origens.target = self;
+    [menu addItem:origens];
 
     NSMenuItem *topo = [[NSMenuItem alloc] initWithTitle:menu.title action:NULL keyEquivalent:@""];
     topo.submenu = menu;
