@@ -271,16 +271,24 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <p>Ficam pendentes as faixas com candidatas mas sem nenhuma certa. São encontradas pelo título sem sufixos de versão («Live», «Mix», «Edit»…), pelo álbum e número da faixa, muito usado na música clássica, em que o Música e o MusicBrainz escrevem o artista de maneiras diferentes, ou pelo título com outra duração. Uma faixa pendente ainda não conta. O que o Música tiver contado entretanto entra quando ela for ligada.</p>
 <h3>A janela «Ligar faixas do Música»</h3>
 <p>Abre-se em <strong>Ficheiro</strong> ▸ <strong>Ligar faixas do Música…</strong>, ou clicando na notificação «Faixas do Música por ligar», que aparece quando o número de pendentes aumenta. É o mesmo género de escolha que o Música propõe quando um CD tem várias entradas.</p>
-<p>À esquerda estão as faixas pendentes, com um campo para filtrar por artista, álbum ou título. À direita estão as candidatas da faixa escolhida, com a sugestão já seleccionada, a diferença de duração, onde está cada uma (o formato, o CD ou «só no Música») e o critério que a encontrou. A última opção é sempre <strong>Nenhuma — fica como música própria</strong>.</p>
+<p>À esquerda estão as faixas pendentes, com um campo para filtrar por artista, álbum ou título. À direita estão as candidatas da faixa escolhida, com a sugestão já seleccionada, a diferença de duração, onde está cada uma (o formato, o CD ou «só no Música») e o parecer. A última opção é sempre <strong>Nenhuma — fica como música própria</strong>.</p>
+<p>O <strong>parecer</strong> vem da diferença de duração e do que os títulos dizem da versão (o que está entre parênteses ou depois de « - », sem contar a remasterização nem os convidados):</p>
+<ul>
+<li><strong>mesma gravação</strong>: até 3 s de diferença e nenhuma indicação de versão diferente. Uma remasterização diferente não muda o parecer;</li>
+<li><strong>outra versão</strong>: mais de 10 s de diferença;</li>
+<li><strong>por ouvir</strong>: tudo o resto, como a mesma duração com «(7″ Version)» de um lado e nada do outro.</li>
+</ul>
+<p>Entre parênteses fica o critério com que a candidata foi encontrada.</p>
+<p>Por baixo das duas tabelas lê-se a comparação da escolha seleccionada: o parecer por extenso e a razão dele; a faixa do Música e a candidata lado a lado, com álbum, número, duração, onde está a candidata, as audições que cada uma já tem e quantas faixas do Música já estão ligadas à candidata; e a consequência da escolha. Ao ligar, as audições da faixa passam a contar para a candidata, e diz-se com quantas fica. Se a candidata tem ficheiro local, é ele que toca nas estações, e a faixa do Música não entra nelas; se não tem, continua a tocar pelo Música. Com «Nenhuma», a faixa fica como música própria, com contagem só dela, e entra nas estações como faixa do Música.</p>
 <p class="rotulo"><strong>Ligar</strong> (↩, ou duplo clique)</p>
 <p>Liga a faixa à candidata escolhida e passa à seguinte.</p>
 <p class="rotulo"><strong>Saltar</strong></p>
 <p>Deixa a faixa pendente e passa à seguinte.</p>
 <p class="rotulo"><strong>Aceitar o álbum</strong></p>
 <p>Aceita as sugestões de todas as faixas pendentes do mesmo álbum, depois de uma confirmação que diz quantas ficam ligadas e quantas ficam como músicas próprias. É a forma rápida de tratar os discos de música clássica.</p>
-<p class="rotulo"><strong>▶︎ Ouvir 10 s</strong></p>
-<p>Toca dez segundos da versão local, a partir de 30 % da duração, para comparar de ouvido. Não conta como audição. Só funciona com os formatos que o macOS lê sozinho (FLAC, ALAC, AAC e MP3).</p>
-<p>A sugestão é a primeira candidata, excepto quando só se encontrou uma pelo título com outra duração. Nesse caso, a sugestão é <strong>Nenhuma</strong>.</p>
+<p class="rotulo"><strong>▶︎ Ouvir a do Música</strong> e <strong>▶︎ Ouvir a candidata</strong></p>
+<p>Tocam dez segundos de cada lado, para comparar de ouvido. Não contam como audição nem mexem no Música. A candidata com ficheiro ouve-se dele, a partir de 30 % da duração (só nos formatos que o macOS lê sozinho: FLAC, ALAC, AAC e MP3). A faixa do Música, e a candidata que só lá existe, ouvem-se pelo excerto de 30 segundos da loja da Apple: o da própria versão, escolhido pela duração, ou nenhum, e nesse caso a comparação diz que não há amostra. Para a loja vão só o artista e o título.</p>
+<p>A sugestão é a primeira candidata com parecer de mesma gravação. Não havendo nenhuma, é a primeira de todas, excepto quando só foi encontrada pelo título com outra duração: nesse caso, a sugestão é <strong>Nenhuma</strong>.</p>
 
 <h2 id="listas-m3u">Listas M3U e M3U8</h2>
 <p class="rotulo"><strong>Ficheiro</strong> ▸ <strong>Abrir…</strong> (⌘O)</p>
@@ -324,6 +332,7 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <p>As duas opções só estão activas enquanto a estação for a lista em vigor.</p>
 <h3>Faixas do Música na estação</h3>
 <p>Havendo o <strong>mapa do catálogo</strong> (<code>.mapa-do-catalogo.sqlite</code>, na pasta das músicas, ao lado da fonoteca), a estação também vai buscar vizinhas às faixas da biblioteca do Música que não existem em ficheiro. A assinatura dessas vem do excerto de 30 segundos da loja da Apple, e é menos fina do que a de uma faixa inteira: serve para dizer se soa parecido, não para ordenar ao pormenor.</p>
+<p>O mapa mantém-se sozinho. Depois de cada sincronização com o Música (ao arrancar e de meia em meia hora), as faixas novas da biblioteca dele que já estejam ligadas a uma música e não tenham ficheiro local são procuradas na loja, assinadas e guardadas; o que se fez fica no <code>mapear.log</code>, na pasta de apoio da aplicação. Um álbum acabado de juntar ao Música entra nas estações, no pior dos casos, meia hora depois, mais uns segundos por álbum. As faixas pendentes só entram depois de ligadas, e as que a loja não tem não se voltam a pedir. Não corre durante uma gravação nem no modo de pouca energia.</p>
 <p>Na caixa das músicas aparecem com «♫» e «(Música)». Quando chega a vez de uma, o tocaTintas manda o Música tocá-la uma vez e mostra-o na janela; no fim, a lista segue. Com o Música à vista por conta da lista, o ⏹, o ⏭ e o ⏮ são da lista, e o ▶ e o ⏸ são do Música. Se o Música não estiver a correr, ou a faixa já não estiver na biblioteca dele, a linha é saltada sem aviso; o tocaTintas nunca abre o Música por sua conta.</p>
 <p>Numa lista guardada, estas faixas vão como <code>musica:</code> seguido do identificador que o Música lhes dá, com o nome numa linha <code>#EXTINF</code> antes. O identificador só vale nesta biblioteca: noutro computador, ou noutro tocador, essas linhas são saltadas. As faixas que só existem no catálogo da Apple não entram, porque o Música não as toca a partir de um endereço.</p>
 <h3>A seguir</h3>

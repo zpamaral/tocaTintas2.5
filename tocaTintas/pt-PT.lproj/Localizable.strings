@@ -157,10 +157,10 @@
 "music_links_col_duration" = "Duração";
 "music_links_col_plays" = "Vezes";
 "music_links_col_format" = "Onde";
-"music_links_col_criterion" = "Porquê";
+"music_links_col_criterion" = "Parecer";
 "music_links_none" = "Nenhuma — fica como música própria";
 "music_links_only_music" = "só no Música";
-"music_links_listen" = "▶︎ Ouvir 10 s";
+"music_links_listen" = "▶︎ Ouvir a candidata";
 "music_links_stop" = "■ Parar";
 "music_links_accept_album" = "Aceitar o álbum";
 "music_links_skip" = "Saltar";
@@ -178,6 +178,34 @@
 "music_links_crit_suffixes" = "sem sufixos";
 "music_links_crit_album_track" = "álbum e faixa";
 "music_links_crit_other_length" = "outra duração";
+"music_links_listen_music" = "▶︎ Ouvir a do Música";
+"music_links_short_same" = "mesma gravação";
+"music_links_short_other" = "outra versão";
+"music_links_short_listen" = "por ouvir";
+"music_links_verdict_same" = "Mesma gravação, provavelmente";
+"music_links_verdict_same_remaster" = "Mesma gravação noutra masterização, provavelmente";
+"music_links_verdict_other" = "Outra versão, provavelmente";
+"music_links_verdict_listen" = "Só o ouvido decide";
+"music_links_verdict_none" = "Nenhuma das candidatas";
+"music_links_cmp_track" = ", faixa %ld";
+"music_links_cmp_same_length" = "a mesma duração";
+"music_links_cmp_length_diff" = "%@ s de diferença na duração";
+"music_links_cmp_no_mark" = "sem indicação";
+"music_links_cmp_same_marks" = "os títulos não indicam versões diferentes";
+"music_links_cmp_other_marks" = "os títulos indicam versões diferentes: «%@» no Música, «%@» na candidata";
+"music_links_cmp_music" = "No Música: ";
+"music_links_cmp_candidate" = "Candidata: ";
+"music_links_cmp_music_plays" = " · audições no Música: %ld";
+"music_links_cmp_library_plays" = " · audições na fonoteca: %ld";
+"music_links_cmp_linked" = " · faixas do Música já ligadas: %ld";
+"music_links_where_file" = "ficheiro %@";
+"music_links_where_cd" = "CD, sem ficheiro";
+"music_links_cons_link_file" = "Se ligar: as audições desta faixa passam a contar para a candidata, que fica com %ld no total. Nas estações toca o ficheiro, e esta faixa do Música não entra.";
+"music_links_cons_link_no_file" = "Se ligar: as audições desta faixa passam a contar para a candidata, que fica com %ld no total. Como não há ficheiro local, continua a tocar pelo Música.";
+"music_links_cons_none" = "Com «Nenhuma»: fica como música própria, com contagem só dela (%ld até agora), e nas estações entra como faixa do Música.";
+"music_links_cons_none_others" = " Na fonoteca passa a haver %ld músicas com este título.";
+"music_links_sample_unreadable" = "O macOS não lê este ficheiro: não há amostra.";
+"music_links_sample_missing" = "A loja não tem excerto desta versão: não há amostra.";
 
 /* Menu Janela: traz de volta a janela do leitor, mesmo depois de fechada */
 "menu_show_player" = "Leitor";

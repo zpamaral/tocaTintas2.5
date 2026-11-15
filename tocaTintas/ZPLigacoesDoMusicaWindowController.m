@@ -39,6 +39,51 @@ static NSString *const ZPCriterioOutraDuracao = @"título, outra duração";
 // silêncios do princípio e chega a um sítio onde as versões se distinguem.
 static const NSTimeInterval ZPDuracaoDaAmostra = 10.0;
 
+#pragma mark - Comparação
+
+// O que o título diz da versão: o que vem entre parênteses ou depois de « - »,
+// sem a remasterização (a mesma gravação noutra masterização) nem os
+// convidados. «remaster» diz se havia remasterização, e qual.
+static NSString *ZPLMMarcas(NSString *titulo, NSString **remaster) {
+    static NSRegularExpression *rx;
+    static dispatch_once_t uma;
+    dispatch_once(&uma, ^{
+        rx = [NSRegularExpression regularExpressionWithPattern:@"[\\(\\[]([^\\)\\]]*)[\\)\\]]|\\s-\\s+(.+)$" options:0 error:NULL];
+    });
+    NSMutableArray<NSString *> *marcas = [NSMutableArray array];
+    NSString *r = @"";
+    titulo = titulo ?: @"";
+    for (NSTextCheckingResult *m in [rx matchesInString:titulo options:0 range:NSMakeRange(0, titulo.length)]) {
+        NSRange onde = [m rangeAtIndex:1].location != NSNotFound ? [m rangeAtIndex:1] : [m rangeAtIndex:2];
+        NSString *marca = [[titulo substringWithRange:onde] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        NSString *chave = [marca stringByFoldingWithOptions:NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch locale:nil];
+        if ([chave containsString:@"remaster"]) { r = marca; continue; }
+        if ([chave hasPrefix:@"feat"] || [chave hasPrefix:@"ft."] || [chave hasPrefix:@"with "] || marca.length == 0) continue;
+        [marcas addObject:marca];
+    }
+    if (remaster) *remaster = r;
+    return [marcas componentsJoinedByString:@", "];
+}
+
+static NSString *ZPLMChave(NSString *s) {
+    NSString *c = [(s ?: @"") stringByFoldingWithOptions:NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch | NSWidthInsensitiveSearch locale:nil];
+    return [c stringByReplacingOccurrencesOfString:@"[^\\p{L}\\p{N}]+" withString:@"" options:NSRegularExpressionSearch range:NSMakeRange(0, c.length)];
+}
+
+// O parecer sobre uma candidata, pela diferença de duração e pelo que os
+// títulos dizem da versão. Mais de dez segundos é outra versão; até três, sem
+// versões diferentes no título, é a mesma gravação; o resto só o ouvido decide.
+typedef NS_ENUM(NSInteger, ZPLMParecer) { ZPLMMesma, ZPLMMesmaRemasterizada, ZPLMOutra, ZPLMPorOuvir };
+
+static ZPLMParecer ZPLMParecerDe(NSDictionary *caso, NSDictionary *candidata) {
+    double d = fabs([candidata[@"dif_duracao"] doubleValue]);
+    if (d > 10.0) return ZPLMOutra;
+    NSString *r1 = nil, *r2 = nil;
+    NSString *m1 = ZPLMMarcas(caso[@"titulo"], &r1), *m2 = ZPLMMarcas(candidata[@"titulo"], &r2);
+    if (d > 3.0 || ![ZPLMChave(m1) isEqualToString:ZPLMChave(m2)]) return ZPLMPorOuvir;
+    return [ZPLMChave(r1) isEqualToString:ZPLMChave(r2)] ? ZPLMMesma : ZPLMMesmaRemasterizada;
+}
+
 #pragma mark - SQLite
 
 // Os mesmos três passos que o ViewController usa com a base, aqui à parte: esta
@@ -110,6 +155,8 @@ static NSString *ZPLMDuracao(id segundos) {
 @property (nonatomic, strong) NSTextField *contagem;
 @property (nonatomic, strong) NSTableView *tabelaDosCasos;
 @property (nonatomic, strong) NSTableView *tabelaDasCandidatas;
+@property (nonatomic, strong) NSTextField *comparacao;   // a comparação e a consequência da escolha à vista
+@property (nonatomic, strong) NSButton *botaoOuvirMusica;
 @property (nonatomic, strong) NSButton *botaoOuvir;
 @property (nonatomic, strong) NSButton *botaoAlbum;
 @property (nonatomic, strong) NSButton *botaoSaltar;
@@ -117,6 +164,9 @@ static NSString *ZPLMDuracao(id segundos) {
 
 @property (nonatomic, strong, nullable) AVAudioPlayer *amostra;
 @property (nonatomic, strong, nullable) NSTimer *fimDaAmostra;
+@property (nonatomic) NSInteger ladoDaAmostra;        // 0 nada, 1 a faixa do Música, 2 a candidata
+@property (nonatomic) NSUInteger pedidoDaAmostra;     // muda a cada pedido: uma resposta atrasada da loja não toca
+@property (nonatomic, copy, nullable) NSString *aviso; // o que correu mal com a amostra, para a comparação
 @end
 
 @implementation ZPLigacoesDoMusicaWindowController
@@ -133,7 +183,7 @@ static NSString *ZPLMDuracao(id segundos) {
     _fila = dispatch_queue_create("tocaTintas.ligacoesDoMusica", DISPATCH_QUEUE_SERIAL);
     _casos = @[]; _casosVisiveis = @[]; _candidatas = @{};
     janela.title = NSLocalizedString(@"music_links_title", @"Ligar faixas do Música");
-    janela.minSize = NSMakeSize(820, 420);
+    janela.minSize = NSMakeSize(900, 520);
     janela.delegate = self;
     janela.releasedWhenClosed = NO;
     [janela center];
@@ -204,7 +254,7 @@ static NSString *ZPLMDuracao(id segundos) {
         @[@"artista", artista, @120], @[@"album", album, @120], @[@"faixa", numero, @32],
         @[@"titulo", titulo, @170], @[@"duracao", duracao, @80],
         @[@"formato", NSLocalizedString(@"music_links_col_format", @"Onde"), @56],
-        @[@"criterio", NSLocalizedString(@"music_links_col_criterion", @"Porquê"), @110] ]];
+        @[@"criterio", NSLocalizedString(@"music_links_col_criterion", @"Parecer"), @190] ]];
     self.tabelaDasCandidatas.doubleAction = @selector(ligar:);
     self.tabelaDasCandidatas.target = self;
 
@@ -216,13 +266,21 @@ static NSString *ZPLMDuracao(id segundos) {
     [divisao addArrangedSubview:[self rolar:self.tabelaDasCandidatas]];
     divisao.autosaveName = @"LigacoesDoMusicaDivisao";
 
-    self.botaoOuvir = [self botao:@"music_links_listen" comentario:@"▶︎ Ouvir 10 s" accao:@selector(ouvir:)];
+    self.comparacao = [NSTextField wrappingLabelWithString:@""];
+    self.comparacao.selectable = YES;
+    self.comparacao.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.comparacao setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
+    [self.comparacao setContentHuggingPriority:NSLayoutPriorityDefaultHigh forOrientation:NSLayoutConstraintOrientationVertical];
+
+    self.botaoOuvirMusica = [self botao:@"music_links_listen_music" comentario:@"▶︎ Ouvir a do Música" accao:@selector(ouvir:)];
+    self.botaoOuvir = [self botao:@"music_links_listen" comentario:@"▶︎ Ouvir a candidata" accao:@selector(ouvir:)];
     self.botaoAlbum = [self botao:@"music_links_accept_album" comentario:@"Aceitar o álbum" accao:@selector(aceitarOAlbum:)];
     self.botaoSaltar = [self botao:@"music_links_skip" comentario:@"Saltar" accao:@selector(saltar:)];
     self.botaoLigar = [self botao:@"music_links_link" comentario:@"Ligar" accao:@selector(ligar:)];
     self.botaoLigar.keyEquivalent = @"\r";
 
-    for (NSView *x in @[self.filtro, self.contagem, divisao, self.botaoOuvir, self.botaoAlbum, self.botaoSaltar, self.botaoLigar]) {
+    for (NSView *x in @[self.filtro, self.contagem, divisao, self.comparacao, self.botaoOuvirMusica, self.botaoOuvir,
+                        self.botaoAlbum, self.botaoSaltar, self.botaoLigar]) {
         [v addSubview:x];
     }
     CGFloat m = 12;
@@ -235,14 +293,21 @@ static NSString *ZPLMDuracao(id segundos) {
         [divisao.topAnchor constraintEqualToAnchor:self.filtro.bottomAnchor constant:m],
         [divisao.leadingAnchor constraintEqualToAnchor:v.leadingAnchor],
         [divisao.trailingAnchor constraintEqualToAnchor:v.trailingAnchor],
-        [divisao.bottomAnchor constraintEqualToAnchor:self.botaoLigar.topAnchor constant:-m],
+        [divisao.bottomAnchor constraintEqualToAnchor:self.comparacao.topAnchor constant:-m],
+        [divisao.heightAnchor constraintGreaterThanOrEqualToConstant:120],
+        [self.comparacao.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:m],
+        [self.comparacao.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-m],
+        [self.comparacao.heightAnchor constraintGreaterThanOrEqualToConstant:112],
+        [self.comparacao.bottomAnchor constraintEqualToAnchor:self.botaoLigar.topAnchor constant:-m],
         [self.botaoLigar.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-m],
         [self.botaoLigar.bottomAnchor constraintEqualToAnchor:v.bottomAnchor constant:-m],
         [self.botaoSaltar.trailingAnchor constraintEqualToAnchor:self.botaoLigar.leadingAnchor constant:-8],
         [self.botaoSaltar.centerYAnchor constraintEqualToAnchor:self.botaoLigar.centerYAnchor],
         [self.botaoAlbum.trailingAnchor constraintEqualToAnchor:self.botaoSaltar.leadingAnchor constant:-8],
         [self.botaoAlbum.centerYAnchor constraintEqualToAnchor:self.botaoLigar.centerYAnchor],
-        [self.botaoOuvir.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:m],
+        [self.botaoOuvirMusica.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:m],
+        [self.botaoOuvirMusica.centerYAnchor constraintEqualToAnchor:self.botaoLigar.centerYAnchor],
+        [self.botaoOuvir.leadingAnchor constraintEqualToAnchor:self.botaoOuvirMusica.trailingAnchor constant:8],
         [self.botaoOuvir.centerYAnchor constraintEqualToAnchor:self.botaoLigar.centerYAnchor],
     ]];
 }
@@ -286,7 +351,12 @@ static NSString *ZPLMDuracao(id segundos) {
                              "   ORDER BY f.formato <> 'flac', f.caminho LIMIT 1) AS caminho,"
                              " (SELECT f.formato FROM ficheiros f WHERE f.musica = m.id AND f.caminho IS NOT NULL"
                              "   ORDER BY f.formato <> 'flac', f.caminho LIMIT 1) AS formato,"
-                             " EXISTS (SELECT 1 FROM faixas_cd fc WHERE fc.musica = m.id) AS do_cd"
+                             " EXISTS (SELECT 1 FROM faixas_cd fc WHERE fc.musica = m.id) AS do_cd,"
+                             // O que a base já sabe dela: as audições (as registadas e as que o Música
+                             // trazia das faixas já ligadas) e quantas faixas do Música tem ligadas.
+                             " (SELECT COUNT(*) FROM audicoes a WHERE a.musica = m.id)"
+                             "   + (SELECT COALESCE(SUM(y.contagem_inicial), 0) FROM faixas_musica y WHERE y.musica = m.id) AS audicoes,"
+                             " (SELECT COUNT(*) FROM faixas_musica y WHERE y.musica = m.id) AS ligadas"
                              " FROM candidatas_musica c JOIN musicas m ON m.id = c.musica"
                              " JOIN faixas_musica fm ON fm.pid = c.pid AND fm.estado = 'pendente'"
                              " ORDER BY c.pid, c.ordem", nil, &st)) {
@@ -368,9 +438,11 @@ static NSString *ZPLMDuracao(id segundos) {
     [self mostrarCandidatas];
 }
 
-// A sugestão: a primeira candidata, menos quando é de outra duração.
+// A sugestão: a primeira candidata que parece a mesma gravação; não havendo, a
+// primeira de todas, menos quando é de outra duração.
 - (NSInteger)sugestaoPara:(NSDictionary *)caso {
     NSArray *cs = [self candidatasDe:caso];
+    for (NSUInteger i = 0; i < cs.count; ++i) if (ZPLMParecerDe(caso, cs[i]) <= ZPLMMesmaRemasterizada) return (NSInteger)i;
     if (cs.count == 0 || [cs[0][@"criterio"] isEqualToString:ZPCriterioOutraDuracao]) return (NSInteger)cs.count;   // «Nenhuma»
     return 0;
 }
@@ -398,10 +470,115 @@ static NSString *ZPLMDuracao(id segundos) {
     self.botaoLigar.enabled = ha;
     self.botaoSaltar.enabled = ha;
     self.botaoAlbum.enabled = ha && [ZPLMTexto([self casoSeleccionado][@"album"]) length] > 0;
-    self.botaoOuvir.enabled = ha && [self candidataSeleccionada][@"caminho"] != nil;
-    self.botaoOuvir.title = self.amostra
-        ? NSLocalizedString(@"music_links_stop", @"■ Parar")
-        : NSLocalizedString(@"music_links_listen", @"▶︎ Ouvir 10 s");
+    NSString *parar = NSLocalizedString(@"music_links_stop", @"■ Parar");
+    self.botaoOuvirMusica.enabled = ha && self.ladoDaAmostra != 2;
+    self.botaoOuvirMusica.title = self.ladoDaAmostra == 1 ? parar : NSLocalizedString(@"music_links_listen_music", @"▶︎ Ouvir a do Música");
+    self.botaoOuvir.enabled = ha && [self candidataSeleccionada] != nil && self.ladoDaAmostra != 1;
+    self.botaoOuvir.title = self.ladoDaAmostra == 2 ? parar : NSLocalizedString(@"music_links_listen", @"▶︎ Ouvir a candidata");
+    [self mostrarComparacao];
+}
+
+#pragma mark - Comparação e consequência
+
+static NSString *ZPLMNumero(double x) {
+    return [NSString localizedStringWithFormat:@"%.1f", x];
+}
+
+// «Artista — Título · Álbum, faixa 3 · 4:02»
+static NSString *ZPLMDescricao(NSDictionary *f) {
+    NSMutableString *t = [NSMutableString stringWithFormat:@"%@ — %@", ZPLMTexto(f[@"artista"]), ZPLMTexto(f[@"titulo"])];
+    if (ZPLMTexto(f[@"album"]).length) [t appendFormat:@" · %@", ZPLMTexto(f[@"album"])];
+    if ([f[@"faixa"] integerValue] > 0) {
+        [t appendFormat:NSLocalizedString(@"music_links_cmp_track", @", faixa %ld"), (long)[f[@"faixa"] integerValue]];
+    }
+    if (f[@"duracao"]) [t appendFormat:@" · %@", ZPLMDuracao(f[@"duracao"])];
+    return t;
+}
+
+- (NSString *)ondeEsta:(NSDictionary *)c {
+    if (c[@"caminho"]) {
+        return [NSString stringWithFormat:NSLocalizedString(@"music_links_where_file", @"ficheiro %@"), [ZPLMTexto(c[@"formato"]) uppercaseString]];
+    }
+    return [c[@"do_cd"] boolValue] ? NSLocalizedString(@"music_links_where_cd", @"CD, sem ficheiro")
+                                   : NSLocalizedString(@"music_links_only_music", @"só no Música");
+}
+
+// O que se lê antes de decidir: o parecer e porquê, as duas faixas lado a lado
+// com o que a fonoteca sabe de cada uma, e o que acontece com a escolha que
+// está seleccionada.
+- (void)mostrarComparacao {
+    NSDictionary *caso = [self casoSeleccionado];
+    if (!caso) { self.comparacao.stringValue = @""; return; }
+    NSDictionary *c = [self candidataSeleccionada];
+    NSArray *cs = [self candidatasDe:caso];
+    NSInteger vezes = [caso[@"vezes"] integerValue];
+    NSDictionary *normal = @{ NSFontAttributeName: [NSFont systemFontOfSize:NSFont.systemFontSize],
+                              NSForegroundColorAttributeName: NSColor.labelColor };
+    NSDictionary *forte = @{ NSFontAttributeName: [NSFont systemFontOfSize:NSFont.systemFontSize weight:NSFontWeightSemibold],
+                             NSForegroundColorAttributeName: NSColor.labelColor };
+    NSDictionary *fraco = @{ NSFontAttributeName: [NSFont systemFontOfSize:NSFont.systemFontSize],
+                             NSForegroundColorAttributeName: NSColor.secondaryLabelColor };
+    NSMutableAttributedString *t = [[NSMutableAttributedString alloc] init];
+    void (^junta)(NSString *, NSDictionary *) = ^(NSString *s, NSDictionary *a) {
+        [t appendAttributedString:[[NSAttributedString alloc] initWithString:s attributes:a]];
+    };
+
+    // 1. O parecer.
+    if (c) {
+        ZPLMParecer p = ZPLMParecerDe(caso, c);
+        NSString *chave = p == ZPLMMesma ? @"music_links_verdict_same" : p == ZPLMMesmaRemasterizada ? @"music_links_verdict_same_remaster"
+                        : p == ZPLMOutra ? @"music_links_verdict_other" : @"music_links_verdict_listen";
+        junta(NSLocalizedString(chave, @"O parecer sobre a candidata"), forte);
+        double d = fabs([c[@"dif_duracao"] doubleValue]);
+        NSString *duracao = d < 0.05 ? NSLocalizedString(@"music_links_cmp_same_length", @"a mesma duração")
+            : [NSString stringWithFormat:NSLocalizedString(@"music_links_cmp_length_diff", @"%@ s de diferença na duração"), ZPLMNumero(d)];
+        NSString *m1 = ZPLMMarcas(caso[@"titulo"], NULL), *m2 = ZPLMMarcas(c[@"titulo"], NULL);
+        NSString *nada = NSLocalizedString(@"music_links_cmp_no_mark", @"sem indicação");
+        NSString *versoes = [ZPLMChave(m1) isEqualToString:ZPLMChave(m2)]
+            ? NSLocalizedString(@"music_links_cmp_same_marks", @"os títulos não indicam versões diferentes")
+            : [NSString stringWithFormat:NSLocalizedString(@"music_links_cmp_other_marks", @"os títulos indicam versões diferentes: «%@» no Música, «%@» na candidata"),
+               m1.length ? m1 : nada, m2.length ? m2 : nada];
+        junta([NSString stringWithFormat:@" — %@; %@.\n", duracao, versoes], normal);
+    } else {
+        junta(NSLocalizedString(@"music_links_verdict_none", @"Nenhuma das candidatas"), forte);
+        junta(@"\n", normal);
+    }
+
+    // 2. As duas faixas.
+    junta(NSLocalizedString(@"music_links_cmp_music", @"No Música: "), fraco);
+    junta(ZPLMDescricao(caso), normal);
+    junta([NSString stringWithFormat:NSLocalizedString(@"music_links_cmp_music_plays", @" · audições no Música: %ld"), (long)vezes], normal);
+    junta(@"\n", normal);
+    if (c) {
+        junta(NSLocalizedString(@"music_links_cmp_candidate", @"Candidata: "), fraco);
+        junta(ZPLMDescricao(c), normal);
+        junta([NSString stringWithFormat:@" · %@", [self ondeEsta:c]], normal);
+        junta([NSString stringWithFormat:NSLocalizedString(@"music_links_cmp_library_plays", @" · audições na fonoteca: %ld"),
+               (long)[c[@"audicoes"] integerValue]], normal);
+        if ([c[@"ligadas"] integerValue] > 0) {
+            junta([NSString stringWithFormat:NSLocalizedString(@"music_links_cmp_linked", @" · faixas do Música já ligadas: %ld"),
+                   (long)[c[@"ligadas"] integerValue]], normal);
+        }
+        junta(@"\n", normal);
+    }
+
+    // 3. A consequência.
+    NSString *consequencia;
+    if (c) {
+        NSInteger total = [c[@"audicoes"] integerValue] + vezes;
+        consequencia = [NSString stringWithFormat:NSLocalizedString(c[@"caminho"] ? @"music_links_cons_link_file" : @"music_links_cons_link_no_file",
+                                                                    @"O que acontece ao ligar"), (long)total];
+    } else {
+        consequencia = [NSString stringWithFormat:NSLocalizedString(@"music_links_cons_none", @"O que acontece com «Nenhuma»"), (long)vezes];
+        if (cs.count) {
+            consequencia = [consequencia stringByAppendingFormat:NSLocalizedString(@"music_links_cons_none_others",
+                                                                                   @" Na fonoteca passa a haver %ld músicas com este título."),
+                            (long)cs.count + 1];
+        }
+    }
+    junta(consequencia, normal);
+    if (self.aviso.length) { junta(@"\n", normal); junta(self.aviso, fraco); }
+    self.comparacao.attributedStringValue = t;
 }
 
 #pragma mark - Tabelas
@@ -446,7 +623,13 @@ static NSString *ZPLMNomeDoCriterio(NSString *c) {
         if (c[@"caminho"]) return ZPLMTexto(c[@"formato"]);
         return [c[@"do_cd"] boolValue] ? @"CD" : NSLocalizedString(@"music_links_only_music", @"só no Música");
     }
-    if ([col isEqualToString:@"criterio"]) return ZPLMNomeDoCriterio(c[@"criterio"]);
+    if ([col isEqualToString:@"criterio"]) {
+        ZPLMParecer p = ZPLMParecerDe([self casoSeleccionado], c);
+        NSString *curto = p <= ZPLMMesmaRemasterizada ? NSLocalizedString(@"music_links_short_same", @"mesma gravação")
+                        : p == ZPLMOutra ? NSLocalizedString(@"music_links_short_other", @"outra versão")
+                        : NSLocalizedString(@"music_links_short_listen", @"por ouvir");
+        return [NSString stringWithFormat:@"%@ (%@)", curto, ZPLMNomeDoCriterio(c[@"criterio"])];
+    }
     if ([col isEqualToString:@"faixa"]) return [c[@"faixa"] integerValue] > 0 ? ZPLMTexto(c[@"faixa"]) : @"";
     return ZPLMTexto(c[col]);
 }
@@ -471,6 +654,7 @@ static NSString *ZPLMNomeDoCriterio(NSString *c) {
 }
 
 - (void)tableViewSelectionDidChange:(NSNotification *)nota {
+    self.aviso = nil;
     if (nota.object == self.tabelaDosCasos) [self mostrarCandidatas];
     else { [self pararAmostra]; [self actualizarBotoes]; }
 }
@@ -578,20 +762,53 @@ static NSString *ZPLMNomeDoCriterio(NSString *c) {
 
 #pragma mark - Ouvir
 
-// Uma amostra da candidata local, à parte do leitor do tocaTintas: não conta
-// como audição (pela regra dos 5 s, dez segundos contariam) e não mexe na lista.
+// Uma amostra de dez segundos de cada lado, à parte do leitor do tocaTintas:
+// não conta como audição (pela regra dos 5 s, dez segundos contariam) e não
+// mexe na lista nem no Música. A candidata que tem ficheiro ouve-se dele, a
+// 30 % da duração; a faixa do Música, e a candidata que só lá existe, ouvem-se
+// pelo excerto de 30 s da loja da Apple — o desta versão, pela duração, ou
+// nenhum. Para a loja vão só o artista e o título.
 - (IBAction)ouvir:(id)sender {
-    if (self.amostra) { [self pararAmostra]; return; }
-    NSString *caminho = [self candidataSeleccionada][@"caminho"];
-    if (!caminho) return;
-    NSError *erro = nil;
-    AVAudioPlayer *p = [[AVAudioPlayer alloc] initWithContentsOfURL:[NSURL fileURLWithPath:caminho] error:&erro];
-    if (!p) {
-        NSLog(@"[Ligações do Música] Não consigo tocar %@: %@", caminho, erro.localizedDescription);
-        NSBeep();
+    if (self.ladoDaAmostra) { [self pararAmostra]; return; }
+    NSDictionary *caso = [self casoSeleccionado];
+    NSDictionary *c = [self candidataSeleccionada];
+    BOOL doMusica = sender == self.botaoOuvirMusica;
+    NSDictionary *faixa = doMusica ? caso : c;
+    if (!faixa) return;
+    self.aviso = nil;
+    self.pedidoDaAmostra++;
+    self.ladoDaAmostra = doMusica ? 1 : 2;
+    NSString *caminho = doMusica ? nil : c[@"caminho"];
+    if (caminho) {
+        NSError *erro = nil;
+        AVAudioPlayer *p = [[AVAudioPlayer alloc] initWithContentsOfURL:[NSURL fileURLWithPath:caminho] error:&erro];
+        if (!p) {
+            NSLog(@"[Ligações do Música] Não consigo tocar %@: %@", caminho, erro.localizedDescription);
+            self.aviso = NSLocalizedString(@"music_links_sample_unreadable", @"O macOS não lê este ficheiro: não há amostra.");
+            [self pararAmostra];
+            return;
+        }
+        p.currentTime = MAX(0.0, MIN(p.duration * 0.3, p.duration - ZPDuracaoDaAmostra));
+        [self tocarAmostra:p];
         return;
     }
-    p.currentTime = MAX(0.0, MIN(p.duration * 0.3, p.duration - ZPDuracaoDaAmostra));
+    [self actualizarBotoes];
+    NSUInteger pedido = self.pedidoDaAmostra;
+    __weak typeof(self) fraco = self;
+    [self excertoDaLojaDe:faixa depois:^(NSData *som) {
+        __strong typeof(fraco) eu = fraco;
+        if (!eu || eu.pedidoDaAmostra != pedido || eu.ladoDaAmostra == 0) return;   // entretanto parou ou mudou
+        AVAudioPlayer *p = som ? [[AVAudioPlayer alloc] initWithData:som fileTypeHint:AVFileTypeAppleM4A error:NULL] : nil;
+        if (!p) {
+            eu.aviso = NSLocalizedString(@"music_links_sample_missing", @"A loja não tem excerto desta versão: não há amostra.");
+            [eu pararAmostra];
+            return;
+        }
+        [eu tocarAmostra:p];
+    }];
+}
+
+- (void)tocarAmostra:(AVAudioPlayer *)p {
     [p play];
     self.amostra = p;
     __weak typeof(self) fraco = self;
@@ -601,11 +818,54 @@ static NSString *ZPLMNomeDoCriterio(NSString *c) {
     [self actualizarBotoes];
 }
 
+// O excerto da loja para esta faixa: o resultado com o mesmo título de base e
+// artista, e a duração a menos de três segundos. Chama no thread principal, com
+// nil se não houver.
+- (void)excertoDaLojaDe:(NSDictionary *)faixa depois:(void (^)(NSData * _Nullable som))depois {
+    NSString *artista = [[ZPLMTexto(faixa[@"artista"]) componentsSeparatedByString:@";"].firstObject
+                         stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    NSString *titulo = ZPLMTexto(faixa[@"titulo"]);
+    double duracao = [faixa[@"duracao"] doubleValue];
+    NSString *(^base)(NSString *) = ^NSString *(NSString *t) {
+        NSString *semMarcas = [t stringByReplacingOccurrencesOfString:@"[\\(\\[][^\\)\\]]*[\\)\\]]|\\s-\\s+.+$" withString:@""
+                                                              options:NSRegularExpressionSearch range:NSMakeRange(0, t.length)];
+        return ZPLMChave(semMarcas);
+    };
+    NSString *kt = base(titulo), *ka = ZPLMChave(artista);
+    NSURLComponents *u = [NSURLComponents componentsWithString:@"https://itunes.apple.com/search"];
+    u.queryItems = @[ [NSURLQueryItem queryItemWithName:@"term" value:[NSString stringWithFormat:@"%@ %@", artista, titulo]],
+                      [NSURLQueryItem queryItemWithName:@"country" value:@"pt"], [NSURLQueryItem queryItemWithName:@"media" value:@"music"],
+                      [NSURLQueryItem queryItemWithName:@"entity" value:@"song"], [NSURLQueryItem queryItemWithName:@"limit" value:@"50"] ];
+    void (^acabar)(NSData *) = ^(NSData *som) { dispatch_async(dispatch_get_main_queue(), ^{ depois(som); }); };
+    NSURLSession *sessao = [NSURLSession sharedSession];
+    [[sessao dataTaskWithURL:u.URL completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+        NSDictionary *j = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:NULL] : nil;
+        NSArray *resultados = [j isKindOfClass:[NSDictionary class]] && [j[@"results"] isKindOfClass:[NSArray class]] ? j[@"results"] : @[];
+        NSString *melhor = nil;
+        double melhorD = 3.0;
+        for (NSDictionary *x in resultados) {
+            if (![x isKindOfClass:[NSDictionary class]] || ![x[@"previewUrl"] isKindOfClass:[NSString class]]
+                || ![x[@"trackName"] isKindOfClass:[NSString class]] || ![x[@"trackTimeMillis"] isKindOfClass:[NSNumber class]]) continue;
+            if (![base(x[@"trackName"]) isEqualToString:kt]) continue;
+            NSString *xa = ZPLMChave([x[@"artistName"] isKindOfClass:[NSString class]] ? x[@"artistName"] : @"");
+            if (ka.length && xa.length && ![xa containsString:ka] && ![ka containsString:xa]) continue;
+            double dd = fabs([x[@"trackTimeMillis"] doubleValue] / 1000.0 - duracao);
+            if (dd <= melhorD) { melhorD = dd; melhor = x[@"previewUrl"]; }
+        }
+        NSURL *excerto = melhor ? [NSURL URLWithString:melhor] : nil;
+        if (!excerto) { acabar(nil); return; }
+        [[sessao dataTaskWithURL:excerto completionHandler:^(NSData *som, NSURLResponse *r2, NSError *e2) {
+            acabar(som.length >= 10000 ? som : nil);
+        }] resume];
+    }] resume];
+}
+
 - (void)pararAmostra {
     [self.fimDaAmostra invalidate];
     self.fimDaAmostra = nil;
     [self.amostra stop];
     self.amostra = nil;
+    self.ladoDaAmostra = 0;
     if (self.botaoOuvir) [self actualizarBotoes];
 }
 

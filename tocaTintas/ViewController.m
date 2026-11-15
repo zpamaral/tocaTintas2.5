@@ -401,6 +401,7 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSArray<NSString *> *> *estacaoInfo;   // chave → artista, título, álbum
 @property (nonatomic, assign) BOOL estacaoAPreparar;    // à espera da base, do catálogo ou do vectorizar
 @property (nonatomic, strong) NSTask *assinaturasTask;
+@property (nonatomic, strong) NSTask *mapearTask;   // o «vectorizar mapear» a correr
 @property (nonatomic, strong) NSTask *refinarTask;                // o «vectorizar refinar» em curso
 @property (nonatomic, strong) NSTimer *relogioDeRefinar;
 @property (nonatomic, strong) NSTask *associarTask;               // o «vectorizar associar» em curso
@@ -5596,6 +5597,48 @@ static NSMutableDictionary<NSString *, NSArray<NSString *> *> *ZPLerInfoDaEstaca
     self.assinaturasTask = task;
 }
 
+// Depois de cada sincronização com o Música: as faixas novas da biblioteca dele
+// que não têm ficheiro local entram no mapa do catálogo, assinadas pelo excerto
+// da loja, e daí em diante nas estações («vectorizar mapear»). Sem nada de
+// novo não sai pedido nenhum. Em segundo plano, com a saída no mapear.log;
+// nunca durante uma gravação.
+- (void)mapearOCatalogo {
+    if (self.mapearTask || self.isRecording || NSProcessInfo.processInfo.lowPowerModeEnabled) return;
+    NSURL *vectorizar = ZPVectorizar();
+    NSString *pasta = [self loadSongsDirectoryPath];
+    NSString *base = [pasta stringByAppendingPathComponent:@".fonoteca.sqlite"];
+    NSString *mapa = [pasta stringByAppendingPathComponent:@".mapa-do-catalogo.sqlite"];
+    if (!vectorizar || ![[NSFileManager defaultManager] fileExistsAtPath:base]) return;
+    NSString *registo = [[[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject
+                          URLByAppendingPathComponent:@"tocaTintas/mapear.log"] path];
+    NSFileHandle *log = ZPRegistoParaAcrescentar(registo);
+    NSString *cabecalho = [NSString stringWithFormat:@"\n=== %@ mapear\n",
+                           [NSISO8601DateFormatter stringFromDate:[NSDate date] timeZone:[NSTimeZone localTimeZone]
+                                                    formatOptions:NSISO8601DateFormatWithInternetDateTime]];
+    [log writeData:[cabecalho dataUsingEncoding:NSUTF8StringEncoding]];
+    NSTask *task = [[NSTask alloc] init];
+    task.executableURL = vectorizar;
+    task.arguments = @[@"mapear", base, mapa];
+    task.qualityOfService = NSQualityOfServiceUtility;
+    task.standardInput = [NSFileHandle fileHandleWithNullDevice];
+    task.standardOutput = log ?: [NSFileHandle fileHandleWithNullDevice];
+    task.standardError = log ?: [NSFileHandle fileHandleWithNullDevice];
+    __weak typeof(self) fraco = self;
+    task.terminationHandler = ^(NSTask *acabou) {
+        [log closeFile];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (fraco.mapearTask == acabou) fraco.mapearTask = nil;
+        });
+    };
+    NSError *erro = nil;
+    if (![task launchAndReturnError:&erro]) {
+        NSLog(@"[Estação] Não consegui correr o vectorizar mapear: %@", erro.localizedDescription);
+        [log closeFile];
+        return;
+    }
+    self.mapearTask = task;
+}
+
 #pragma mark - Menu Reprodução
 
 // As teclas do tocador no menu. Cada item carrega no botão correspondente, e
@@ -10633,6 +10676,7 @@ static NSString *const kZPAvisoDasLigacoes = @"LigacoesDoMusica";
 // escolhas feitas.
 - (void)depoisDaSincronizacao {
     [self.ligacoesDoMusica recarregar];
+    [self mapearOCatalogo];
     dispatch_async(self.filaDaFonoteca, ^{
         if (![self abrirFonoteca]) return;
         NSNumber *n = ZPFonotecaValor(self.fonoteca, "SELECT COUNT(*) FROM faixas_musica WHERE estado = 'pendente'", nil);

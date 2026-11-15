@@ -30,6 +30,7 @@
 //        os vizinhos por ordem de semelhança. Se a semente ainda não tiver
 //        assinatura, calcula-a (e guarda-a, se a música for da fonoteca).
 //        Sai com 3 se a semente não servir e com 4 se a base não tiver assinaturas.
+//    vectorizar mapear BASE MAPA
 //    vectorizar importar BASE lista.tsv saída
 //        Traz para a base os vectores de saída.f32/saída.ids (ver abaixo).
 //    vectorizar [--modelo clap_audio.mlmodelc] [--cpu] [--loja] lista.tsv saída
@@ -1479,6 +1480,188 @@ static int ZPModoEsquecer(NSString *caminhoDoMapa, NSString *faixa) {
     return ok ? 0 : 1;
 }
 
+#pragma mark - Mapear
+
+// As faixas da biblioteca do Música que ainda não estão no mapa do catálogo:
+// as que a fonoteca conhece («sincronizar-musica»), já ligadas a uma música e
+// sem ficheiro local. Procura-se cada álbum na loja da Apple (um pedido; os que
+// sobrarem, um por faixa), tira-se a assinatura do excerto de 30 s e guarda-se.
+// O que a loja não tem fica nas tentativas e não se volta a pedir. As
+// pendentes ficam de fora enquanto não forem ligadas: não têm música.
+//
+// O tocaTintas corre isto depois de cada sincronização com o Música. Para fora
+// vão só nomes de artistas, álbuns e títulos; um pedido de três em três
+// segundos, que é o que a loja aceita.
+
+static NSString *ZPChaveDoAlbum(NSString *album) {
+    NSMutableString *t = [[album ?: @"" stringByFoldingWithOptions:NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch | NSWidthInsensitiveSearch
+                                                            locale:nil] mutableCopy];
+    [t replaceOccurrencesOfString:@"[\\(\\[].*?[\\)\\]]" withString:@"" options:NSRegularExpressionSearch range:NSMakeRange(0, t.length)];
+    [t replaceOccurrencesOfString:@"\\s+-\\s+(ep|single)\\s*$" withString:@"" options:NSRegularExpressionSearch range:NSMakeRange(0, t.length)];
+    [t replaceOccurrencesOfString:@"[^\\p{L}\\p{N}]+" withString:@"" options:NSRegularExpressionSearch range:NSMakeRange(0, t.length)];
+    return t;
+}
+
+// O melhor resultado da loja para a faixa, e por que critério (do mais certo
+// para o menos): os do «remapear.py», que são os das contagens da fonoteca.
+static NSDictionary *ZPCasarComALoja(NSDictionary *f, NSArray *resultados, NSString **criterio) {
+    static NSArray<NSString *> *nomes;
+    if (!nomes) nomes = @[@"artista+título", @"álbum+faixa", @"mesmo álbum", @"título, outra duração"];
+    NSString *ka = ZPChaveDoArtista(f[@"artista"], @""), *kt = ZPChaveDoTitulo(f[@"titulo"]), *kb = ZPChaveDoAlbum(f[@"album"]);
+    BOOL varios = [ka hasPrefix:@"álbum:"];
+    double duracao = [f[@"duracao"] doubleValue];
+    NSDictionary *melhor = nil;
+    NSInteger melhorC = 99;
+    double melhorD = 0.0;
+    for (NSDictionary *r in resultados) {
+        if (![r isKindOfClass:[NSDictionary class]] || ![r[@"previewUrl"] isKindOfClass:[NSString class]]
+            || ![r[@"trackName"] isKindOfClass:[NSString class]] || ![r[@"trackTimeMillis"] isKindOfClass:[NSNumber class]]
+            || ![r[@"trackId"] isKindOfClass:[NSNumber class]]) continue;
+        double d = fabs([r[@"trackTimeMillis"] doubleValue] / 1000.0 - duracao);
+        NSString *rt = ZPChaveDoTitulo(r[@"trackName"]);
+        NSString *ra = ZPChaveDoArtista([r[@"artistName"] isKindOfClass:[NSString class]] ? r[@"artistName"] : @"", @"");
+        NSString *rb = ZPChaveDoAlbum([r[@"collectionName"] isKindOfClass:[NSString class]] ? r[@"collectionName"] : @"");
+        BOOL titulo = kt.length && [kt isEqualToString:rt];
+        BOOL album = kb.length && [kb isEqualToString:rb];
+        // Numa colectânea o artista da biblioteca não diz nada: vale o álbum.
+        BOOL artista = varios ? album : (ka.length && ra.length && ([ka containsString:ra] || [ra containsString:ka]));
+        BOOL parecidos = kt.length && rt.length && ([kt containsString:rt] || [rt containsString:kt]);
+        NSInteger c;
+        if (artista && titulo && d <= 2.0) c = 0;
+        else if (album && d <= 2.0 && parecidos && [f[@"faixa"] integerValue] > 0
+                 && [r[@"trackNumber"] integerValue] == [f[@"faixa"] integerValue]
+                 && MAX([r[@"discNumber"] integerValue], 1) == MAX([f[@"disco"] integerValue], 1)) c = 1;
+        else if (artista && album && titulo && d <= 5.0) c = 2;
+        else if (artista && titulo && d <= 30.0) c = 3;
+        else continue;
+        if (c == 0 && !album) d += 1.0;   // prefere o mesmo álbum
+        if (c < melhorC || (c == melhorC && d < melhorD)) { melhor = r; melhorC = c; melhorD = d; }
+    }
+    if (melhor && criterio) *criterio = nomes[melhorC];
+    return melhor;
+}
+
+// Um pedido à loja, nunca a menos de 3,1 s do anterior. nil se ela não responder.
+static NSArray *ZPProcurarNaLoja(NSString *termo, NSUInteger limite) {
+    static double ultimo = 0.0;
+    for (int tentativa = 0; tentativa < 3; ++tentativa) {
+        double espera = 3.1 - (ZPAgora() - ultimo);
+        if (espera > 0.0) [NSThread sleepForTimeInterval:espera];
+        ultimo = ZPAgora();
+        NSDictionary *r = ZPPedirJSON(@"https://itunes.apple.com/search",
+                                      @{ @"term": termo, @"country": @"pt", @"media": @"music", @"entity": @"song",
+                                         @"limit": [NSString stringWithFormat:@"%lu", (unsigned long)limite] });
+        if ([r isKindOfClass:[NSDictionary class]] && [r[@"results"] isKindOfClass:[NSArray class]]) return r[@"results"];
+        [NSThread sleepForTimeInterval:20.0 * (tentativa + 1)];
+    }
+    return nil;
+}
+
+static int ZPModoMapear(NSString *base, NSString *caminhoDoMapa) {
+    sqlite3 *db = ZPAbrirBase(base);
+    if (!db) return 1;
+    sqlite3 *mapa = ZPAbrirMapaParaEscrever(caminhoDoMapa);
+    if (!mapa) { sqlite3_close(db); return 1; }
+    ZPReconciliarMapa(db, mapa);   // as descobertas que entretanto foram para a biblioteca já têm assinatura
+    ZPMapaExecutar(mapa, "DELETE FROM tentativas WHERE pid IN (SELECT pid FROM faixas WHERE pid IS NOT NULL)", @[]);
+
+    NSMutableSet<NSString *> *feitas = [NSMutableSet set];
+    sqlite3_stmt *s = NULL;
+    if (sqlite3_prepare_v2(mapa, "SELECT pid FROM faixas WHERE pid IS NOT NULL UNION SELECT pid FROM tentativas", -1, &s, NULL) == SQLITE_OK) {
+        while (sqlite3_step(s) == SQLITE_ROW) [feitas addObject:ZPTexto(s, 0)];
+    }
+    sqlite3_finalize(s);
+    NSMutableDictionary<NSString *, NSMutableArray<NSDictionary *> *> *albuns = [NSMutableDictionary dictionary];
+    NSUInteger porFazer = 0;
+    if (sqlite3_prepare_v2(db, "SELECT x.pid, x.musica, x.artista, x.album, x.disco, x.faixa, x.titulo, x.duracao FROM faixas_musica x"
+                               " WHERE x.tipo = 'streaming' AND x.musica IS NOT NULL"
+                               " AND NOT EXISTS (SELECT 1 FROM ficheiros f WHERE f.musica = x.musica)", -1, &s, NULL) == SQLITE_OK) {
+        while (sqlite3_step(s) == SQLITE_ROW) {
+            NSString *pid = ZPTexto(s, 0), *titulo = ZPTexto(s, 6);
+            if (pid.length == 0 || titulo.length == 0 || [feitas containsObject:pid]) continue;
+            NSDictionary *f = @{ @"pid": pid, @"musica": ZPTexto(s, 1), @"artista": ZPTexto(s, 2), @"album": ZPTexto(s, 3),
+                                 @"disco": @(sqlite3_column_int(s, 4)), @"faixa": @(sqlite3_column_int(s, 5)),
+                                 @"titulo": titulo, @"duracao": @(sqlite3_column_double(s, 7)) };
+            NSString *k = [NSString stringWithFormat:@"%@\t%@", f[@"artista"], f[@"album"]];
+            if (!albuns[k]) albuns[k] = [NSMutableArray array];
+            [albuns[k] addObject:f];
+            ++porFazer;
+        }
+    }
+    sqlite3_finalize(s);
+    sqlite3_close(db);
+    if (porFazer == 0) { printf("mapear: nada de novo\n"); sqlite3_close(mapa); return 0; }
+    printf("mapear: %lu faixas por fazer em %lu álbuns\n", (unsigned long)porFazer, (unsigned long)albuns.count);
+    fflush(stdout);
+
+    MLModel *modelo = nil;
+    ZPMel *melador = NULL;
+    ZPTempos tempos = {0};
+    NSUInteger novas = 0, semLoja = 0, semExcerto = 0;
+    double t0 = ZPAgora();
+    BOOL calada = NO;
+    for (NSString *k in [albuns.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+        NSArray<NSDictionary *> *faixas = albuns[k];
+        NSString *artista = [faixas[0][@"artista"] componentsSeparatedByString:@";"].firstObject;
+        NSString *album = faixas[0][@"album"];
+        if ([ZPChaveDoArtista(artista, @"") hasPrefix:@"álbum:"]) artista = @"";
+        NSArray *doAlbum = @[];
+        if (faixas.count > 1 && album.length) {
+            doAlbum = ZPProcurarNaLoja([[NSString stringWithFormat:@"%@ %@", artista, album]
+                                        stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet], 200);
+            if (!doAlbum) { calada = YES; break; }
+        }
+        for (NSDictionary *f in faixas) {
+            @autoreleasepool {
+                NSString *criterio = nil;
+                NSDictionary *r = ZPCasarComALoja(f, doAlbum, &criterio);
+                if (!r) {
+                    NSArray *daFaixa = ZPProcurarNaLoja([[NSString stringWithFormat:@"%@ %@", artista, f[@"titulo"]]
+                                                         stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet], 50);
+                    if (!daFaixa) { calada = YES; break; }
+                    r = ZPCasarComALoja(f, daFaixa, &criterio);
+                }
+                if (!r) {
+                    ZPMapaExecutar(mapa, "INSERT OR REPLACE INTO tentativas VALUES (?, 'sem correspondência (2)', ?)", @[f[@"pid"], ZPAgoraISO()]);
+                    ++semLoja;
+                    continue;
+                }
+                // O excerto e a assinatura dele. Se falhar, fica para a próxima vez.
+                NSData *som = ZPPedir(r[@"previewUrl"], nil);
+                BOOL ok = NO;
+                float vector[kDimensao];
+                if (som.length >= 10000) {
+                    NSString *temporario = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                                            [NSString stringWithFormat:@"vectorizar-excerto-%@.m4a", NSUUID.UUID.UUIDString]];
+                    [som writeToFile:temporario atomically:NO];
+                    if (!modelo) { modelo = ZPModeloQuandoPreciso(); melador = ZPMelCriar(); }
+                    gSementeSolta = YES;
+                    ok = modelo && ZPVectorDaFaixa(modelo, melador, temporario, 0.0, vector, &tempos);
+                    [[NSFileManager defaultManager] removeItemAtPath:temporario error:NULL];
+                }
+                if (!ok) { ++semExcerto; continue; }
+                _Float16 meio[kDimensao];
+                for (int i = 0; i < kDimensao; ++i) meio[i] = (_Float16)vector[i];
+                NSString *endereco = [[([r[@"trackViewUrl"] isKindOfClass:[NSString class]] ? r[@"trackViewUrl"] : @"")
+                                       componentsSeparatedByString:@"&uo="] firstObject];
+                if (!ZPMapaExecutar(mapa, "INSERT INTO faixas (loja, pid, musica, artista, album, titulo, duracao, endereco, origem, associacao, vista_em)"
+                                          " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'biblioteca', ?, ?)",
+                                    @[r[@"trackId"], f[@"pid"], f[@"musica"], f[@"artista"], f[@"album"], f[@"titulo"], f[@"duracao"],
+                                      endereco, criterio, ZPAgoraISO()])) continue;
+                ZPMapaExecutar(mapa, "INSERT OR REPLACE INTO assinaturas VALUES (?, ?, ?, ?)",
+                               @[@(sqlite3_last_insert_rowid(mapa)), @(kModeloDoExcerto), [NSData dataWithBytes:meio length:sizeof(meio)], ZPAgoraISO()]);
+                ++novas;
+            }
+        }
+        if (calada) break;
+    }
+    if (calada) printf("mapear: a loja não responde; o resto fica para a próxima vez\n");
+    printf("mapear: %lu assinadas, %lu sem correspondência na loja, %lu sem excerto, %.0f s\n",
+           (unsigned long)novas, (unsigned long)semLoja, (unsigned long)semExcerto, ZPAgora() - t0);
+    sqlite3_close(mapa);
+    return 0;
+}
+
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         NSMutableArray<NSString *> *args = [NSMutableArray array];
@@ -1555,6 +1738,7 @@ int main(int argc, const char *argv[]) {
         if ((args.count == 2 || args.count == 3) && [args[0] isEqualToString:@"descobertas"]) {
             return ZPModoDescobertas(args[1], args.count == 3 ? args[2] : nil, semente, quantas);
         }
+        if (args.count == 3 && [args[0] isEqualToString:@"mapear"]) return ZPModoMapear(args[1], args[2]);
         if (args.count == 3 && [args[0] isEqualToString:@"esquecer"]) return ZPModoEsquecer(args[1], args[2]);
         if (args.count == 3 && [args[0] isEqualToString:@"estacao"]) return ZPModoEstacao(args[1], args[2], quantas, porArtista, porAlbum);
         if (args.count == 4 && [args[0] isEqualToString:@"importar"]) return ZPModoImportar(args[1], args[2], args[3]);
@@ -1564,6 +1748,7 @@ int main(int argc, const char *argv[]) {
                             "     vectorizar associar BASE MAPA --artista A [--titulo T] [--semente (caminho | uuid | musica:PID)] [-n 24]\n"
                             "     vectorizar descobertas MAPA [BASE [--semente S]] [-n 50]\n"
                             "     vectorizar esquecer MAPA ID\n"
+                            "     vectorizar mapear BASE MAPA\n"
                             "     vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--mapa MAPA]\n"
                             "     vectorizar importar BASE lista.tsv saída\n"
                             "     vectorizar [--modelo M.mlmodelc] [--cpu] [--loja] lista.tsv saída\n"

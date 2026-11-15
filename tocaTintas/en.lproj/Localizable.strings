@@ -157,10 +157,10 @@
 "music_links_col_duration" = "Length";
 "music_links_col_plays" = "Plays";
 "music_links_col_format" = "Where";
-"music_links_col_criterion" = "Why";
+"music_links_col_criterion" = "Verdict";
 "music_links_none" = "None — keep as a song of its own";
 "music_links_only_music" = "Music only";
-"music_links_listen" = "▶︎ Listen 10 s";
+"music_links_listen" = "▶︎ Listen to Candidate";
 "music_links_stop" = "■ Stop";
 "music_links_accept_album" = "Accept Album";
 "music_links_skip" = "Skip";
@@ -178,6 +178,34 @@
 "music_links_crit_suffixes" = "without suffixes";
 "music_links_crit_album_track" = "album and track";
 "music_links_crit_other_length" = "other length";
+"music_links_listen_music" = "▶︎ Listen to Music Track";
+"music_links_short_same" = "same recording";
+"music_links_short_other" = "other version";
+"music_links_short_listen" = "needs listening";
+"music_links_verdict_same" = "Probably the same recording";
+"music_links_verdict_same_remaster" = "Probably the same recording in another mastering";
+"music_links_verdict_other" = "Probably another version";
+"music_links_verdict_listen" = "Only listening can tell";
+"music_links_verdict_none" = "None of the candidates";
+"music_links_cmp_track" = ", track %ld";
+"music_links_cmp_same_length" = "the same length";
+"music_links_cmp_length_diff" = "%@ s difference in length";
+"music_links_cmp_no_mark" = "no mark";
+"music_links_cmp_same_marks" = "the titles do not point to different versions";
+"music_links_cmp_other_marks" = "the titles point to different versions: “%@” in Music, “%@” in the candidate";
+"music_links_cmp_music" = "In Music: ";
+"music_links_cmp_candidate" = "Candidate: ";
+"music_links_cmp_music_plays" = " · plays in Music: %ld";
+"music_links_cmp_library_plays" = " · plays in the library: %ld";
+"music_links_cmp_linked" = " · Music tracks already linked: %ld";
+"music_links_where_file" = "%@ file";
+"music_links_where_cd" = "CD, no file";
+"music_links_cons_link_file" = "If you link: this track’s plays count towards the candidate, which will have %ld in all. Stations play the file, and this Music track stays out.";
+"music_links_cons_link_no_file" = "If you link: this track’s plays count towards the candidate, which will have %ld in all. With no local file, it keeps playing through Music.";
+"music_links_cons_none" = "With “None”: it becomes a song of its own, with its own count (%ld so far), and stations use it as a Music track.";
+"music_links_cons_none_others" = " The library will then hold %ld songs with this title.";
+"music_links_sample_unreadable" = "macOS cannot read this file: no sample.";
+"music_links_sample_missing" = "The store has no preview of this version: no sample.";
 
 /* Window menu: brings back the player window, even after it was closed */
 "menu_show_player" = "Player";

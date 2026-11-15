@@ -165,10 +165,10 @@
 "music_links_col_duration" = "Длительность";
 "music_links_col_plays" = "Раз";
 "music_links_col_format" = "Где";
-"music_links_col_criterion" = "Почему";
+"music_links_col_criterion" = "Оценка";
 "music_links_none" = "Никакой — остаётся отдельной записью";
 "music_links_only_music" = "только в «Музыке»";
-"music_links_listen" = "▶︎ Прослушать 10 с";
+"music_links_listen" = "▶︎ Прослушать вариант";
 "music_links_stop" = "■ Стоп";
 "music_links_accept_album" = "Принять альбом";
 "music_links_skip" = "Пропустить";
@@ -186,6 +186,34 @@
 "music_links_crit_suffixes" = "без суффиксов";
 "music_links_crit_album_track" = "альбом и трек";
 "music_links_crit_other_length" = "другая длительность";
+"music_links_listen_music" = "▶︎ Прослушать трек «Музыки»";
+"music_links_short_same" = "та же запись";
+"music_links_short_other" = "другая версия";
+"music_links_short_listen" = "нужно послушать";
+"music_links_verdict_same" = "Вероятно, та же запись";
+"music_links_verdict_same_remaster" = "Вероятно, та же запись в другом мастеринге";
+"music_links_verdict_other" = "Вероятно, другая версия";
+"music_links_verdict_listen" = "Решит только слух";
+"music_links_verdict_none" = "Ни один из вариантов";
+"music_links_cmp_track" = ", трек %ld";
+"music_links_cmp_same_length" = "та же длительность";
+"music_links_cmp_length_diff" = "разница в длительности %@ с";
+"music_links_cmp_no_mark" = "без пометки";
+"music_links_cmp_same_marks" = "названия не указывают на разные версии";
+"music_links_cmp_other_marks" = "названия указывают на разные версии: «%@» в «Музыке», «%@» у варианта";
+"music_links_cmp_music" = "В «Музыке»: ";
+"music_links_cmp_candidate" = "Вариант: ";
+"music_links_cmp_music_plays" = " · прослушиваний в «Музыке»: %ld";
+"music_links_cmp_library_plays" = " · прослушиваний в фонотеке: %ld";
+"music_links_cmp_linked" = " · уже связано треков «Музыки»: %ld";
+"music_links_where_file" = "файл %@";
+"music_links_where_cd" = "CD, без файла";
+"music_links_cons_link_file" = "Если связать: прослушивания этого трека засчитываются варианту, всего у него станет %ld. В станциях играет файл, а этот трек «Музыки» в них не попадает.";
+"music_links_cons_link_no_file" = "Если связать: прослушивания этого трека засчитываются варианту, всего у него станет %ld. Локального файла нет, поэтому трек по-прежнему играет через «Музыку».";
+"music_links_cons_none" = "Если выбрать «Никакой»: трек становится отдельной записью со своим счётчиком (сейчас %ld), а в станции попадает как трек «Музыки».";
+"music_links_cons_none_others" = " В фонотеке станет %ld записей с таким названием.";
+"music_links_sample_unreadable" = "macOS не читает этот файл: образца нет.";
+"music_links_sample_missing" = "В магазине нет фрагмента этой версии: образца нет.";
 
 /* Меню «Окно»: возвращает окно плеера, даже если оно было закрыто */
 "menu_show_player" = "Плеер";
