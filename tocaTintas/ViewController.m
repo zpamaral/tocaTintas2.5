@@ -4779,6 +4779,16 @@ static NSString *ZPLinhaDoURL(NSURL *url) {
         }
         acabou = pertoDoFim;
     } else {
+        // Ainda a arrancar: a notícia é da faixa anterior. No fim de uma linha,
+        // o Música avança pela fila dele (o resto do álbum, a reprodução
+        // automática) e essa notícia chega depois de já se lhe ter pedido a
+        // linha seguinte. Tomada por «quem ouve escolheu outra coisa», a lista
+        // largava o Música, e o -arrumarOMusicaDepoisDaLinha, um segundo
+        // depois, via-o no princípio de uma faixa sem dono e parava-o: foi o
+        // que encravou a estação a 2026-11-15 (stop às 20:21:38.92, 0,1 s
+        // depois de a linha começar a tocar). Como no ramo «parado»: dez
+        // segundos para arrancar.
+        if (!self.musicaDaListaTocou && -self.musicaDaListaPedidaEm.timeIntervalSinceNow < 10.0) return NO;
         // O Música passou a outra faixa. No fim da nossa, é ele a seguir pela
         // biblioteca: pára-se. A meio, foi quem ouve que escolheu outra coisa.
         acabou = pertoDoFim;
