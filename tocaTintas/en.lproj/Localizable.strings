@@ -258,3 +258,14 @@
 "origins_nothing" = "nothing";
 "origins_hint_origin" = "A station from a “%@” track only takes tracks from: %@.";
 "origins_hint_artist" = "A station from %@ only takes tracks from: %@.";
+"origins_tab_music_artists" = "Music Artists";
+"origins_tab_music_genres" = "Music Genres";
+"origins_col_name" = "Artist";
+"origins_col_music_genre" = "Genre in Music";
+"origins_col_origin" = "Origin";
+"origins_filter_artists" = "Filter artists";
+"origins_auto" = "By genre (%@)";
+"origins_none_dash" = "—";
+"origins_none" = "None";
+"origins_hint_music_artists" = "Artists that exist only in Music. Their origin comes from the genre Music gives them (see the next tab) unless you choose it here; “None” keeps them out of any restricted station.";
+"origins_hint_music_genres" = "The origin each Music genre gives to tracks whose artist has no files. Artists with files keep the origin from their tags.";

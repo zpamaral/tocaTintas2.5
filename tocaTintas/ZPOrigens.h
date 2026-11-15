@@ -13,12 +13,15 @@ NS_ASSUME_NONNULL_BEGIN
 /// etiqueta GENRE que é uma origem, as etiquetas que uma semente com ela
 /// admite; para cada artista que seja excepção, as que ele admite. À esquerda
 /// as sementes com regra (origens ou artistas), à direita todas as etiquetas
-/// GENRE da fonoteca, com uma caixa de marca. Cada mudança grava-se logo.
+/// GENRE da fonoteca, com uma caixa de marca. Dois separadores mais dão origem
+/// às faixas do Música cujo artista não tem ficheiros: à mão, por artista, ou
+/// pelo género que o Música lhes dá. Cada mudança grava-se logo.
 @interface ZPOrigens : NSWindowController
 
 /// `base` é a fonoteca (as etiquetas vêm da tabela generos, que o vectorizar
-/// mantém); `regras`, o caminho do origens.json.
-- (instancetype)initComBase:(NSString *)base regras:(NSString *)regras;
+/// mantém); `mapa`, o mapa do catálogo (as faixas do Música e o género que ele
+/// lhes dá); `regras`, o caminho do origens.json.
+- (instancetype)initComBase:(NSString *)base mapa:(NSString *)mapa regras:(NSString *)regras;
 
 /// Traz a janela para a frente e relê a base e as regras.
 - (void)mostrar;

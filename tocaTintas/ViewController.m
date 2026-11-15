@@ -5595,7 +5595,8 @@ static NSMutableDictionary<NSString *, NSArray<NSString *> *> *ZPLerInfoDaEstaca
     NSString *base = [[self loadSongsDirectoryPath] stringByAppendingPathComponent:@".fonoteca.sqlite"];
     NSString *regras = [[[[NSFileManager defaultManager] URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject
                          URLByAppendingPathComponent:@"tocaTintas/origens.json"] path];
-    if (!self.janelaDasOrigens) self.janelaDasOrigens = [[ZPOrigens alloc] initComBase:base regras:regras];
+    NSString *mapa = [[self loadSongsDirectoryPath] stringByAppendingPathComponent:@".mapa-do-catalogo.sqlite"];
+    if (!self.janelaDasOrigens) self.janelaDasOrigens = [[ZPOrigens alloc] initComBase:base mapa:mapa regras:regras];
     [self.janelaDasOrigens mostrar];
 }
 

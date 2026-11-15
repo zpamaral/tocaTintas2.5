@@ -258,3 +258,14 @@
 "origins_nothing" = "nada";
 "origins_hint_origin" = "Uma estação a partir de uma faixa «%@» só leva faixas de: %@.";
 "origins_hint_artist" = "Uma estação a partir de %@ só leva faixas de: %@.";
+"origins_tab_music_artists" = "Artistas do Música";
+"origins_tab_music_genres" = "Géneros do Música";
+"origins_col_name" = "Artista";
+"origins_col_music_genre" = "Género no Música";
+"origins_col_origin" = "Origem";
+"origins_filter_artists" = "Filtrar artistas";
+"origins_auto" = "Pelo género (%@)";
+"origins_none_dash" = "—";
+"origins_none" = "Nenhuma";
+"origins_hint_music_artists" = "Artistas que só existem no Música. A origem vem do género que o Música lhes dá (ver o separador ao lado), a não ser que a escolha aqui; «Nenhuma» deixa-os fora de qualquer estação restrita.";
+"origins_hint_music_genres" = "A origem que cada género do Música dá às faixas cujo artista não tem ficheiros. Os artistas com ficheiros ficam com a origem das etiquetas deles.";

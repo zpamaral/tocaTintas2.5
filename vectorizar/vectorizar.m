@@ -762,6 +762,9 @@ static NSDictionary<NSString *, NSString *> *ZPGenerosDosFicheiros(sqlite3 *db) 
 }
 
 // As regras: origem → origens admitidas, e artista (pela chave) → origens admitidas.
+static NSDictionary<NSString *, NSString *> *gGenerosDoMusica;    // género do Música → origem
+static NSDictionary<NSString *, NSString *> *gArtistasDoMusica;   // chave do artista → origem dada à mão
+
 static BOOL ZPLerRegrasDeOrigem(NSDictionary<NSString *, NSSet<NSString *> *> **origens,
                                 NSDictionary<NSString *, NSSet<NSString *> *> **artistas) {
     if (!gOrigens.length) return NO;
@@ -782,6 +785,16 @@ static BOOL ZPLerRegrasDeOrigem(NSDictionary<NSString *, NSSet<NSString *> *> **
             else a[ZPChaveDoArtista(k.precomposedStringWithCanonicalMapping, @"")] = admitidas;
         }
     }
+    // A origem das faixas do Música cujo artista não tem ficheiros: dada à mão
+    // por artista («artistasDoMusica»), ou pelo género que o Música lhes dá
+    // («generosDoMusica»: «MPB» → «Brasileira»).
+    NSMutableDictionary *gm = [NSMutableDictionary dictionary], *am = [NSMutableDictionary dictionary];
+    NSDictionary *dg = [j[@"generosDoMusica"] isKindOfClass:[NSDictionary class]] ? j[@"generosDoMusica"] : @{};
+    for (NSString *k in dg) if ([dg[k] isKindOfClass:[NSString class]] && [dg[k] length]) gm[k.precomposedStringWithCanonicalMapping] = [dg[k] precomposedStringWithCanonicalMapping];
+    NSDictionary *da = [j[@"artistasDoMusica"] isKindOfClass:[NSDictionary class]] ? j[@"artistasDoMusica"] : @{};
+    for (NSString *k in da) if ([da[k] isKindOfClass:[NSString class]]) am[ZPChaveDoArtista(k.precomposedStringWithCanonicalMapping, @"")] = [da[k] precomposedStringWithCanonicalMapping];
+    gGenerosDoMusica = gm;
+    gArtistasDoMusica = am;
     *origens = o;
     *artistas = a;
     return YES;
@@ -889,12 +902,14 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     // como já não disponíveis, e as que falharam ao arrancar em dois dias
     // diferentes (ver o modo «falhou»). Um mapa antigo não tem essas colunas.
     sqlite3 *mapa = ZPAbrirMapa();
-    const char *doMapa = mapa && ZPMapaTemColuna(mapa, "faixas", "falhas")
-        ? "SELECT f.pid, a.vector, f.artista, f.album, f.titulo FROM assinaturas a"
+    BOOL mapaNovo = mapa && ZPMapaTemColuna(mapa, "faixas", "genero");
+    const char *doMapa = mapaNovo
+        ? "SELECT f.pid, a.vector, f.artista, f.album, f.titulo, COALESCE(f.genero, '') FROM assinaturas a"
           " JOIN faixas f ON f.id = a.faixa WHERE f.pid IS NOT NULL AND a.modelo = ?"
           " AND f.indisponivel_em IS NULL AND COALESCE(f.falhas, 0) < 2"
-        : "SELECT f.pid, a.vector, f.artista, f.album, f.titulo FROM assinaturas a"
+        : "SELECT f.pid, a.vector, f.artista, f.album, f.titulo, '' FROM assinaturas a"
           " JOIN faixas f ON f.id = a.faixa WHERE f.pid IS NOT NULL AND a.modelo = ?";
+    NSMutableDictionary<NSString *, NSString *> *generoNoMusica = [NSMutableDictionary dictionary];   // «musica:PID» → género que o Música lhe dá
     if (mapa && sqlite3_prepare_v2(mapa, doMapa, -1, &s, NULL) == SQLITE_OK) {
         sqlite3_bind_text(s, 1, kModeloDoExcerto, -1, SQLITE_STATIC);
         while (sqlite3_step(s) == SQLITE_ROW) {
@@ -904,6 +919,7 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
             [vectores appendBytes:um length:sizeof(um)];
             // «musica:<pid>», e depois de uma tabulação o nome a mostrar.
             NSString *pid = [@"musica:" stringByAppendingString:ZPTexto(s, 0)];
+            if (ZPTexto(s, 5).length) generoNoMusica[pid] = ZPTexto(s, 5);
             NSString *linha = [NSString stringWithFormat:@"%@\t%@ — %@", pid, ZPTexto(s, 2), ZPTexto(s, 4)];
             [faixas addObject:@[pid, ZPTexto(s, 2), ZPTexto(s, 3), ZPTexto(s, 4), linha]];
         }
@@ -940,8 +956,13 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
             for (NSString *g in c) if (!melhor || [c countForObject:g] > [c countForObject:melhor]) melhor = g;
             origemDoArtista[k] = melhor;
         }
+        // A de uma faixa do Música: a dada à mão ao artista (uma cadeia vazia é
+        // «nenhuma»), senão a do artista nos ficheiros, senão a do género que o
+        // Música lhe dá.
         for (NSUInteger i = 0; i < n; ++i) {
-            if ([faixas[i][0] hasPrefix:@"musica:"]) origemDe[i] = origemDoArtista[ZPChaveDoArtista(faixas[i][1], @"")] ?: @"";
+            if (![faixas[i][0] hasPrefix:@"musica:"]) continue;
+            NSString *k = ZPChaveDoArtista(faixas[i][1], @"");
+            origemDe[i] = gArtistasDoMusica[k] ?: origemDoArtista[k] ?: gGenerosDoMusica[generoNoMusica[faixas[i][0]] ?: @""] ?: @"";
         }
         // A semente: primeiro a regra do artista dela, depois a da origem.
         NSString *artistaDaSemente = nil, *origemDaSemente = nil;
@@ -1236,6 +1257,8 @@ static sqlite3 *ZPAbrirMapaParaEscrever(NSString *caminho) {
                            "ALTER TABLE faixas ADD COLUMN falhas INTEGER DEFAULT 0;"
                            "ALTER TABLE faixas ADD COLUMN falhou_em TEXT", NULL, NULL, NULL);
     }
+    // O género que o Música dá à faixa: a origem das que não têm artista em ficheiro.
+    if (!ZPMapaTemColuna(mapa, "faixas", "genero")) sqlite3_exec(mapa, "ALTER TABLE faixas ADD COLUMN genero TEXT", NULL, NULL, NULL);
     return mapa;
 }
 
@@ -1736,16 +1759,18 @@ static NSArray *ZPProcurarNaLoja(NSString *termo, NSUInteger limite) {
     return nil;
 }
 
-// As faixas que o Música diz já não estarem disponíveis («no longer
-// available»: saíram do catálogo): continuam na biblioteca, mas não tocam.
-// Pergunta-se-lhe pelo osascript, que responde num só pedido; se ele não
-// estiver aberto ou não responder, fica tudo como estava.
-static void ZPMarcarIndisponiveis(sqlite3 *mapa) {
+// O que o Música sabe de cada faixa da biblioteca, num só pedido pelo
+// osascript: as que ele diz já não estarem disponíveis («no longer
+// available»: saíram do catálogo; continuam na biblioteca, mas não tocam) e o
+// género de cada uma. Se ele não estiver aberto ou não responder, fica tudo
+// como estava.
+static void ZPLerOMusica(sqlite3 *mapa) {
     NSTask *t = [[NSTask alloc] init];
     t.executableURL = [NSURL fileURLWithPath:@"/usr/bin/osascript"];
     NSString *pergunta = @"function run() { var m = Application('Music'); if (!m.running()) return '';"
-                          " var t = m.libraryPlaylists[0].tracks; var p = t.persistentID(), c = t.cloudStatus(), o = ['ok'];"
-                          " for (var i = 0; i < p.length; i++) if (c[i] == 'no longer available') o.push(p[i]); return o.join('\\n'); }";
+                          " var t = m.libraryPlaylists[0].tracks; var p = t.persistentID(), c = t.cloudStatus(), g = t.genre(), o = ['ok'];"
+                          " for (var i = 0; i < p.length; i++) o.push(p[i] + '\\t' + (c[i] == 'no longer available' ? 'fora' : '') + '\\t' + (g[i] || ''));"
+                          " return o.join('\\n'); }";
     t.arguments = @[@"-l", @"JavaScript", @"-e", pergunta];
     NSPipe *saida = [NSPipe pipe];
     t.standardOutput = saida;
@@ -1757,14 +1782,34 @@ static void ZPMarcarIndisponiveis(sqlite3 *mapa) {
     NSArray<NSString *> *linhas = [[[[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]
                                     stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] componentsSeparatedByString:@"\n"];
     if (t.terminationStatus != 0 || ![linhas.firstObject isEqualToString:@"ok"]) return;
-    sqlite3_exec(mapa, "BEGIN; CREATE TEMP TABLE IF NOT EXISTS fora (pid TEXT PRIMARY KEY); DELETE FROM fora", NULL, NULL, NULL);
-    for (NSUInteger i = 1; i < linhas.count; ++i) ZPMapaExecutar(mapa, "INSERT OR IGNORE INTO fora VALUES (?)", @[linhas[i].uppercaseString]);
-    ZPMapaExecutar(mapa, "UPDATE faixas SET indisponivel_em = ? WHERE indisponivel_em IS NULL AND pid IN (SELECT pid FROM fora)", @[ZPAgoraISO()]);
+    sqlite3_exec(mapa, "BEGIN; CREATE TEMP TABLE IF NOT EXISTS domusica (pid TEXT PRIMARY KEY, fora INTEGER, genero TEXT); DELETE FROM domusica",
+                 NULL, NULL, NULL);
+    sqlite3_stmt *s = NULL;
+    if (sqlite3_prepare_v2(mapa, "INSERT OR IGNORE INTO domusica VALUES (?, ?, ?)", -1, &s, NULL) == SQLITE_OK) {
+        for (NSUInteger i = 1; i < linhas.count; ++i) {
+            NSArray<NSString *> *c = [linhas[i] componentsSeparatedByString:@"\t"];
+            if (c.count < 3) continue;
+            sqlite3_bind_text(s, 1, c[0].uppercaseString.UTF8String, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(s, 2, c[1].length > 0);
+            sqlite3_bind_text(s, 3, c[2].precomposedStringWithCanonicalMapping.UTF8String, -1, SQLITE_TRANSIENT);
+            sqlite3_step(s);
+            sqlite3_reset(s);
+        }
+    }
+    sqlite3_finalize(s);
+    ZPMapaExecutar(mapa, "UPDATE faixas SET indisponivel_em = ? WHERE indisponivel_em IS NULL AND pid IN (SELECT pid FROM domusica WHERE fora)",
+                   @[ZPAgoraISO()]);
     int postas = sqlite3_changes(mapa);
-    sqlite3_exec(mapa, "UPDATE faixas SET indisponivel_em = NULL WHERE indisponivel_em IS NOT NULL AND pid NOT IN (SELECT pid FROM fora)", NULL, NULL, NULL);
+    sqlite3_exec(mapa, "UPDATE faixas SET indisponivel_em = NULL WHERE indisponivel_em IS NOT NULL"
+                       " AND pid NOT IN (SELECT pid FROM domusica WHERE fora)", NULL, NULL, NULL);
     int tiradas = sqlite3_changes(mapa);
+    sqlite3_exec(mapa, "UPDATE faixas SET genero = (SELECT d.genero FROM domusica d WHERE d.pid = faixas.pid)"
+                       " WHERE pid IN (SELECT pid FROM domusica)"
+                       " AND COALESCE(genero, '') <> (SELECT COALESCE(d.genero, '') FROM domusica d WHERE d.pid = faixas.pid)", NULL, NULL, NULL);
+    int generos = sqlite3_changes(mapa);
     sqlite3_exec(mapa, "COMMIT", NULL, NULL, NULL);
     if (postas || tiradas) printf("mapear: %d faixas passaram a indisponíveis no Música, %d voltaram\n", postas, tiradas);
+    if (generos) printf("mapear: %d géneros do Música acertados\n", generos);
 }
 
 // O tocaTintas pediu a faixa ao Música e ele não a tocou. Conta uma falha por
@@ -1785,7 +1830,7 @@ static int ZPModoMapear(NSString *base, NSString *caminhoDoMapa) {
     if (!db) return 1;
     sqlite3 *mapa = ZPAbrirMapaParaEscrever(caminhoDoMapa);
     if (!mapa) { sqlite3_close(db); return 1; }
-    ZPMarcarIndisponiveis(mapa);
+    ZPLerOMusica(mapa);
     ZPReconciliarMapa(db, mapa);   // as descobertas que entretanto foram para a biblioteca já têm assinatura
     ZPMapaExecutar(mapa, "DELETE FROM tentativas WHERE pid IN (SELECT pid FROM faixas WHERE pid IS NOT NULL)", @[]);
 

@@ -14,12 +14,20 @@
 #import "ZPOrigens.h"
 #include <sqlite3.h>
 
-typedef NS_ENUM(NSInteger, ZPLado) { ZPLadoOrigens = 0, ZPLadoArtistas = 1 };
+typedef NS_ENUM(NSInteger, ZPLado) { ZPLadoOrigens = 0, ZPLadoArtistas = 1, ZPLadoArtistasDoMusica = 2, ZPLadoGenerosDoMusica = 3 };
 
 static NSString *const ZPLeia =
     @"Regras de origem das estações. «origens»: o que uma semente com essa etiqueta GENRE admite. "
-     "«artistas»: excepções, que mandam sobre a origem. Uma semente sem regra dá uma estação sem limite. "
-     "Os nomes têm de ser escritos como nas etiquetas. Edita-se também em Reprodução ▸ Origens…";
+     "«artistas»: excepções, que mandam sobre a origem. «generosDoMusica»: a origem das faixas do Música pelo género "
+     "que ele lhes dá, quando o artista não tem ficheiros. «artistasDoMusica»: a origem dada à mão a um artista do Música "
+     "(vazio: nenhuma). Edita-se também em Reprodução ▸ Origens…";
+
+// A chave de um artista, como a do vectorizar (ZPChaveDoArtista): o primeiro,
+// sem maiúsculas nem acentos.
+static NSString *ZPChaveDoArtistaDasOrigens(NSString *a) {
+    NSString *p = [[a ?: @"" componentsSeparatedByString:@";"].firstObject stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    return [p stringByFoldingWithOptions:NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch locale:nil];
+}
 
 @interface ZPOrigens () <NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate, NSSearchFieldDelegate>
 @property (nonatomic, copy) NSString *base;
@@ -27,6 +35,17 @@ static NSString *const ZPLeia =
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *origens;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *artistas;
 @property (nonatomic, copy) NSString *leia;
+@property (nonatomic, copy) NSString *mapa;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *generosDoMusica;    // género do Música → origem
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *artistasDoMusica;   // artista do Música → origem («» = nenhuma)
+@property (nonatomic, strong) NSArray<NSArray *> *artistasSoNoMusica;   // (artista, género mais frequente, faixas)
+@property (nonatomic, strong) NSArray<NSArray *> *generosNoMusica;      // (género, faixas)
+@property (nonatomic, strong) NSArray<NSArray *> *linhasDoMusica;       // as do separador à vista
+@property (nonatomic, strong) NSArray<NSArray *> *linhasVisiveis;       // as que passam o filtro
+@property (nonatomic, strong) NSTableView *lista;                       // a tabela dos dois separadores do Música
+@property (nonatomic, strong) NSScrollView *rolLista;
+@property (nonatomic, strong) NSScrollView *rolSementes;
+@property (nonatomic, strong) NSScrollView *rolEtiquetas;
 @property (nonatomic, strong) NSArray<NSArray *> *generos;          // (etiqueta, faixas), da mais frequente para a menos
 @property (nonatomic, strong) NSArray<NSArray *> *generosVisiveis;  // os que passam o filtro
 @property (nonatomic, strong) NSArray<NSString *> *nomesDosArtistas; // os da fonoteca, para escolher uma excepção
@@ -42,8 +61,8 @@ static NSString *const ZPLeia =
 
 @implementation ZPOrigens
 
-- (instancetype)initComBase:(NSString *)base regras:(NSString *)regras {
-    NSWindow *janela = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 640, 480)
+- (instancetype)initComBase:(NSString *)base mapa:(NSString *)mapa regras:(NSString *)regras {
+    NSWindow *janela = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 820, 520)
                                                    styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
                                                              | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
                                                      backing:NSBackingStoreBuffered defer:YES];
@@ -51,11 +70,15 @@ static NSString *const ZPLeia =
     if (!self) return nil;
     _base = [base copy];
     _caminhoDasRegras = [regras copy];
+    _mapa = [mapa copy];
+    _generosDoMusica = [NSMutableDictionary dictionary];
+    _artistasDoMusica = [NSMutableDictionary dictionary];
+    _linhasDoMusica = @[]; _linhasVisiveis = @[];
     _origens = [NSMutableDictionary dictionary];
     _artistas = [NSMutableDictionary dictionary];
     _generos = @[]; _generosVisiveis = @[]; _nomesDosArtistas = @[]; _origemDoArtista = @{};
     janela.title = NSLocalizedString(@"origins_title", @"Origens das estações");
-    janela.minSize = NSMakeSize(520, 320);
+    janela.minSize = NSMakeSize(720, 360);
     janela.releasedWhenClosed = NO;
     janela.delegate = self;
     [janela center];
@@ -95,13 +118,16 @@ static NSString *const ZPLeia =
     NSView *v = self.window.contentView;
 
     self.lado = [NSSegmentedControl segmentedControlWithLabels:@[NSLocalizedString(@"origins_tab_origins", @"Origens"),
-                                                                 NSLocalizedString(@"origins_tab_artists", @"Artistas")]
+                                                                 NSLocalizedString(@"origins_tab_artists", @"Artistas"),
+                                                                 NSLocalizedString(@"origins_tab_music_artists", @"Artistas do Música"),
+                                                                 NSLocalizedString(@"origins_tab_music_genres", @"Géneros do Música")]
                                                   trackingMode:NSSegmentSwitchTrackingSelectOne target:self action:@selector(mudarDeLado:)];
     self.lado.selectedSegment = ZPLadoOrigens;
 
     self.sementes = [self tabelaComColunas:@[@[@"semente", NSLocalizedString(@"origins_col_seed", @"Semente"), @180]]];
     self.sementes.allowsEmptySelection = NO;
     NSScrollView *rolSementes = [self rolar:self.sementes];
+    self.rolSementes = rolSementes;
 
     self.maisMenos = [NSSegmentedControl segmentedControlWithImages:@[[NSImage imageNamed:NSImageNameAddTemplate],
                                                                       [NSImage imageNamed:NSImageNameRemoveTemplate]]
@@ -116,12 +142,20 @@ static NSString *const ZPLeia =
                                               @[@"genero", NSLocalizedString(@"origins_col_genre", @"Etiqueta GENRE"), @200],
                                               @[@"faixas", NSLocalizedString(@"origins_col_tracks", @"Faixas"), @60]]];
     NSScrollView *rolEtiquetas = [self rolar:self.etiquetas];
+    self.rolEtiquetas = rolEtiquetas;
+    self.lista = [self tabelaComColunas:@[@[@"nome", NSLocalizedString(@"origins_col_name", @"Artista"), @200],
+                                          @[@"generoMusica", NSLocalizedString(@"origins_col_music_genre", @"Género no Música"), @140],
+                                          @[@"faixas", NSLocalizedString(@"origins_col_tracks", @"Faixas"), @50],
+                                          @[@"origem", NSLocalizedString(@"origins_col_origin", @"Origem"), @200]]];
+    self.lista.rowHeight = 24;
+    self.rolLista = [self rolar:self.lista];
+    self.rolLista.hidden = YES;
 
     self.legenda = [NSTextField wrappingLabelWithString:@""];
     self.legenda.textColor = NSColor.secondaryLabelColor;
     [self.legenda setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
 
-    for (NSView *x in @[self.lado, rolSementes, self.maisMenos, self.filtro, rolEtiquetas, self.legenda]) {
+    for (NSView *x in @[self.lado, rolSementes, self.maisMenos, self.filtro, rolEtiquetas, self.rolLista, self.legenda]) {
         x.translatesAutoresizingMaskIntoConstraints = NO;
         [v addSubview:x];
     }
@@ -136,12 +170,17 @@ static NSString *const ZPLeia =
         [self.maisMenos.leadingAnchor constraintEqualToAnchor:rolSementes.leadingAnchor],
         [self.maisMenos.bottomAnchor constraintEqualToAnchor:self.legenda.topAnchor constant:-12],
         [self.filtro.centerYAnchor constraintEqualToAnchor:self.lado.centerYAnchor],
-        [self.filtro.leadingAnchor constraintEqualToAnchor:rolSementes.trailingAnchor constant:m],
+        [self.filtro.leadingAnchor constraintGreaterThanOrEqualToAnchor:self.lado.trailingAnchor constant:m],
+        [self.filtro.widthAnchor constraintGreaterThanOrEqualToConstant:160],
         [self.filtro.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-m],
         [rolEtiquetas.topAnchor constraintEqualToAnchor:rolSementes.topAnchor],
-        [rolEtiquetas.leadingAnchor constraintEqualToAnchor:self.filtro.leadingAnchor],
+        [rolEtiquetas.leadingAnchor constraintEqualToAnchor:rolSementes.trailingAnchor constant:m],
         [rolEtiquetas.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-m],
         [rolEtiquetas.bottomAnchor constraintEqualToAnchor:self.maisMenos.bottomAnchor],
+        [self.rolLista.topAnchor constraintEqualToAnchor:rolSementes.topAnchor],
+        [self.rolLista.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:m],
+        [self.rolLista.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-m],
+        [self.rolLista.bottomAnchor constraintEqualToAnchor:self.maisMenos.bottomAnchor],
         [self.legenda.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:m],
         [self.legenda.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-m],
         [self.legenda.bottomAnchor constraintEqualToAnchor:v.bottomAnchor constant:-m],
@@ -166,11 +205,17 @@ static NSString *ZPPrimeiroArtista(NSString *a) {
     // As regras.
     [self.origens removeAllObjects];
     [self.artistas removeAllObjects];
+    [self.generosDoMusica removeAllObjects];
+    [self.artistasDoMusica removeAllObjects];
     self.leia = ZPLeia;
     NSData *dados = [NSData dataWithContentsOfFile:self.caminhoDasRegras];
     NSDictionary *j = dados ? [NSJSONSerialization JSONObjectWithData:dados options:0 error:NULL] : nil;
     if ([j isKindOfClass:[NSDictionary class]]) {
-        if ([j[@"_leia"] isKindOfClass:[NSString class]]) self.leia = j[@"_leia"];
+        for (NSString *grupo in @[@"generosDoMusica", @"artistasDoMusica"]) {
+            NSDictionary *d = [j[grupo] isKindOfClass:[NSDictionary class]] ? j[grupo] : @{};
+            for (NSString *k in d) if ([d[k] isKindOfClass:[NSString class]])
+                ([grupo isEqualToString:@"generosDoMusica"] ? self.generosDoMusica : self.artistasDoMusica)[k] = d[k];
+        }
         for (NSString *grupo in @[@"origens", @"artistas"]) {
             NSDictionary *d = [j[grupo] isKindOfClass:[NSDictionary class]] ? j[grupo] : @{};
             for (NSString *k in d) {
@@ -227,12 +272,57 @@ static NSString *ZPPrimeiroArtista(NSString *a) {
     }
     self.origemDoArtista = origemDoArtista;
     self.nomesDosArtistas = [porArtista.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    NSMutableSet<NSString *> *comFicheiros = [NSMutableSet set];
+    for (NSString *a in porArtista) [comFicheiros addObject:ZPChaveDoArtistaDasOrigens(a)];
+    [self lerOMapa:comFicheiros];
     [self aplicarFiltro];
     [self refazerAsSementes:nil];
 }
 
+// As faixas do Música no mapa do catálogo: os artistas que não têm ficheiros
+// (com o género mais frequente e quantas faixas), e os géneros que o Música dá.
+- (void)lerOMapa:(NSSet<NSString *> *)comFicheiros {
+    NSMutableDictionary<NSString *, NSMutableArray *> *artistas = [NSMutableDictionary dictionary];   // nome → (contagens de género, faixas)
+    NSMutableDictionary<NSString *, NSNumber *> *generos = [NSMutableDictionary dictionary];
+    sqlite3 *db = NULL;
+    if (self.mapa && sqlite3_open_v2(self.mapa.fileSystemRepresentation, &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
+        sqlite3_busy_timeout(db, 5000);
+        sqlite3_stmt *s = NULL;
+        if (sqlite3_prepare_v2(db, "SELECT artista, COALESCE(genero, ''), COUNT(*) FROM faixas WHERE pid IS NOT NULL"
+                                   " AND indisponivel_em IS NULL GROUP BY 1, 2", -1, &s, NULL) == SQLITE_OK) {
+            while (sqlite3_step(s) == SQLITE_ROW) {
+                if (sqlite3_column_type(s, 0) == SQLITE_NULL) continue;
+                NSString *a = ZPPrimeiroArtista(@((const char *)sqlite3_column_text(s, 0)));
+                NSString *g = @((const char *)sqlite3_column_text(s, 1));
+                int n = sqlite3_column_int(s, 2);
+                if (g.length) generos[g] = @(generos[g].integerValue + n);
+                if (a.length == 0 || [comFicheiros containsObject:ZPChaveDoArtistaDasOrigens(a)]) continue;
+                if (!artistas[a]) artistas[a] = [@[[NSCountedSet set], @0] mutableCopy];
+                for (int i = 0; i < n && g.length; ++i) [artistas[a][0] addObject:g];
+                artistas[a][1] = @([artistas[a][1] integerValue] + n);
+            }
+        }
+        sqlite3_finalize(s);
+    }
+    sqlite3_close(db);
+    NSMutableArray *la = [NSMutableArray array];
+    for (NSString *a in artistas) {
+        NSCountedSet *c = artistas[a][0];
+        NSString *melhor = @"";
+        for (NSString *g in c) if (!melhor.length || [c countForObject:g] > [c countForObject:melhor]) melhor = g;
+        [la addObject:@[a, melhor, artistas[a][1]]];
+    }
+    [la sortUsingComparator:^NSComparisonResult(NSArray *x, NSArray *y) { return [x[0] localizedCaseInsensitiveCompare:y[0]]; }];
+    self.artistasSoNoMusica = la;
+    NSMutableArray *lg = [NSMutableArray array];
+    for (NSString *g in generos) [lg addObject:@[g, @"", generos[g]]];
+    [lg sortUsingComparator:^NSComparisonResult(NSArray *x, NSArray *y) { return [y[2] compare:x[2]]; }];
+    self.generosNoMusica = lg;
+}
+
 - (void)gravar {
-    NSDictionary *tudo = @{ @"_leia": self.leia ?: ZPLeia, @"origens": self.origens, @"artistas": self.artistas };
+    NSDictionary *tudo = @{ @"_leia": self.leia ?: ZPLeia, @"origens": self.origens, @"artistas": self.artistas,
+                            @"generosDoMusica": self.generosDoMusica, @"artistasDoMusica": self.artistasDoMusica };
     NSData *dados = [NSJSONSerialization dataWithJSONObject:tudo
                                                     options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys | NSJSONWritingWithoutEscapingSlashes
                                                       error:NULL];
@@ -252,6 +342,7 @@ static NSString *ZPPrimeiroArtista(NSString *a) {
 }
 
 - (nullable NSString *)sementeSeleccionada {
+    if ([self ladoDoMusica]) return nil;
     NSArray *k = [self chavesDoLado];
     NSInteger i = self.sementes.selectedRow;
     return (i >= 0 && i < (NSInteger)k.count) ? k[i] : nil;
@@ -270,7 +361,21 @@ static NSString *ZPPrimeiroArtista(NSString *a) {
     [self actualizarLegenda];
 }
 
+- (BOOL)ladoDoMusica {
+    return self.lado.selectedSegment >= ZPLadoArtistasDoMusica;
+}
+
 - (IBAction)mudarDeLado:(id)sender {
+    BOOL doMusica = [self ladoDoMusica];
+    self.rolLista.hidden = !doMusica;
+    self.rolSementes.hidden = self.rolEtiquetas.hidden = self.maisMenos.hidden = doMusica;
+    self.filtro.placeholderString = doMusica
+        ? NSLocalizedString(self.lado.selectedSegment == ZPLadoArtistasDoMusica ? @"origins_filter_artists" : @"origins_filter", @"Filtrar")
+        : NSLocalizedString(@"origins_filter", @"Filtrar etiquetas");
+    self.lista.tableColumns[0].title = self.lado.selectedSegment == ZPLadoArtistasDoMusica
+        ? NSLocalizedString(@"origins_col_name", @"Artista") : NSLocalizedString(@"origins_col_music_genre", @"Género no Música");
+    self.lista.tableColumns[1].hidden = self.lado.selectedSegment != ZPLadoArtistasDoMusica;
+    [self aplicarFiltro];
     [self refazerAsSementes:nil];
 }
 
@@ -341,6 +446,16 @@ static NSString *ZPPrimeiroArtista(NSString *a) {
 
 - (void)aplicarFiltro {
     NSString *f = self.filtro.stringValue;
+    self.linhasDoMusica = self.lado.selectedSegment == ZPLadoArtistasDoMusica ? self.artistasSoNoMusica
+                        : self.lado.selectedSegment == ZPLadoGenerosDoMusica ? self.generosNoMusica : @[];
+    if (f.length == 0) self.linhasVisiveis = self.linhasDoMusica;
+    else {
+        NSStringCompareOptions o = NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch;
+        self.linhasVisiveis = [self.linhasDoMusica filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSArray *l, NSDictionary *b) {
+            return [l[0] rangeOfString:f options:o].location != NSNotFound || [l[1] rangeOfString:f options:o].location != NSNotFound;
+        }]];
+    }
+    [self.lista reloadData];
     if (f.length == 0) { self.generosVisiveis = self.generos; }
     else {
         NSStringCompareOptions o = NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch;
@@ -368,6 +483,11 @@ static NSString *ZPPrimeiroArtista(NSString *a) {
 }
 
 - (void)actualizarLegenda {
+    if ([self ladoDoMusica]) {
+        self.legenda.stringValue = NSLocalizedString(self.lado.selectedSegment == ZPLadoArtistasDoMusica ? @"origins_hint_music_artists"
+                                                                                                         : @"origins_hint_music_genres", @"");
+        return;
+    }
     NSString *k = [self sementeSeleccionada];
     if (!k) {
         self.legenda.stringValue = self.lado.selectedSegment == ZPLadoOrigens
@@ -385,11 +505,84 @@ static NSString *ZPPrimeiroArtista(NSString *a) {
 #pragma mark - Tabelas
 
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)t {
+    if (t == self.lista) return (NSInteger)self.linhasVisiveis.count;
     if (t == self.sementes) return (NSInteger)[self chavesDoLado].count;
     return [self sementeSeleccionada] ? (NSInteger)self.generosVisiveis.count : 0;
 }
 
+// A origem que uma linha teria sem escolha à mão: a do género do Música,
+// pela tradução dos géneros (só nos artistas).
+- (NSString *)origemAutomaticaDe:(NSArray *)l {
+    return self.lado.selectedSegment == ZPLadoArtistasDoMusica ? (self.generosDoMusica[l[1]] ?: @"") : @"";
+}
+
+- (NSView *)vistaDaListaNaColuna:(NSString *)col linha:(NSInteger)linha {
+    NSArray *l = self.linhasVisiveis[linha];
+    BOOL artistas = self.lado.selectedSegment == ZPLadoArtistasDoMusica;
+    if ([col isEqualToString:@"origem"]) {
+        NSPopUpButton *b = [self.lista makeViewWithIdentifier:@"escolha" owner:self];
+        if (!b) {
+            b = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
+            b.identifier = @"escolha";
+            b.controlSize = NSControlSizeSmall;
+            b.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
+            b.bordered = NO;
+            b.target = self;
+            b.action = @selector(escolherOrigem:);
+        }
+        [b removeAllItems];
+        NSString *automatica = [self origemAutomaticaDe:l];
+        NSString *primeira = artistas
+            ? [NSString stringWithFormat:NSLocalizedString(@"origins_auto", @"Pelo género (%@)"),
+               automatica.length ? automatica : NSLocalizedString(@"origins_nothing", @"nada")]
+            : NSLocalizedString(@"origins_none_dash", @"—");
+        [b addItemWithTitle:primeira];
+        b.lastItem.representedObject = [NSNull null];
+        [b.menu addItem:[NSMenuItem separatorItem]];
+        for (NSString *o in [self.origens.allKeys sortedArrayUsingSelector:@selector(localizedCaseInsensitiveCompare:)]) {
+            [b addItemWithTitle:o];
+            b.lastItem.representedObject = o;
+        }
+        if (artistas) {
+            [b.menu addItem:[NSMenuItem separatorItem]];
+            [b addItemWithTitle:NSLocalizedString(@"origins_none", @"Nenhuma")];
+            b.lastItem.representedObject = @"";
+        }
+        NSString *escolhida = artistas ? self.artistasDoMusica[l[0]] : self.generosDoMusica[l[0]];
+        if (!escolhida) [b selectItemAtIndex:0];
+        else {
+            NSInteger i = [b indexOfItemWithRepresentedObject:escolhida];
+            if (i < 0) { [b addItemWithTitle:escolhida]; b.lastItem.representedObject = escolhida; i = b.numberOfItems - 1; }
+            [b selectItemAtIndex:i];
+        }
+        return b;
+    }
+    NSTextField *campo = [self.lista makeViewWithIdentifier:col owner:self];
+    if (!campo) {
+        campo = [NSTextField labelWithString:@""];
+        campo.identifier = col;
+        campo.lineBreakMode = NSLineBreakByTruncatingTail;
+    }
+    campo.stringValue = [col isEqualToString:@"nome"] ? l[0] : [col isEqualToString:@"faixas"] ? [l[2] description] : l[1];
+    campo.alignment = [col isEqualToString:@"faixas"] ? NSTextAlignmentRight : NSTextAlignmentNatural;
+    campo.textColor = [col isEqualToString:@"nome"] ? NSColor.labelColor : NSColor.secondaryLabelColor;
+    return campo;
+}
+
+- (IBAction)escolherOrigem:(NSPopUpButton *)b {
+    NSInteger linha = [self.lista rowForView:b];
+    if (linha < 0 || linha >= (NSInteger)self.linhasVisiveis.count) return;
+    NSString *k = self.linhasVisiveis[linha][0];
+    id o = b.selectedItem.representedObject;
+    NSMutableDictionary *d = self.lado.selectedSegment == ZPLadoArtistasDoMusica ? self.artistasDoMusica : self.generosDoMusica;
+    if (o == [NSNull null] || !o) [d removeObjectForKey:k]; else d[k] = o;
+    [self gravar];
+    // Mudar a tradução de um género muda a origem automática dos artistas.
+    if (self.lado.selectedSegment == ZPLadoGenerosDoMusica) [self.lista reloadData];
+}
+
 - (NSView *)tableView:(NSTableView *)t viewForTableColumn:(NSTableColumn *)coluna row:(NSInteger)linha {
+    if (t == self.lista) return [self vistaDaListaNaColuna:coluna.identifier linha:linha];
     if ([coluna.identifier isEqualToString:@"marca"]) {
         NSButton *caixa = [t makeViewWithIdentifier:@"caixa" owner:self];
         if (!caixa) {
