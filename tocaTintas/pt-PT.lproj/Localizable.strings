@@ -150,6 +150,7 @@
 "music_links_search" = "Filtrar por artista, álbum ou título";
 "music_links_count" = "%ld por ligar";
 "music_links_empty" = "Nenhuma faixa por ligar.";
+"music_links_updating" = "A actualizar com o Música…";
 "music_links_col_artist" = "Artista";
 "music_links_col_album" = "Álbum";
 "music_links_col_number" = "N.º";

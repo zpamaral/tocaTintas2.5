@@ -158,6 +158,7 @@
 "music_links_search" = "Фильтр по исполнителю, альбому или названию";
 "music_links_count" = "Осталось связать: %ld";
 "music_links_empty" = "Нет треков для связывания.";
+"music_links_updating" = "Обновление из «Музыки»…";
 "music_links_col_artist" = "Исполнитель";
 "music_links_col_album" = "Альбом";
 "music_links_col_number" = "№";

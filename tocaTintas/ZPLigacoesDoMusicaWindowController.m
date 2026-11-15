@@ -167,6 +167,7 @@ static NSString *ZPLMDuracao(id segundos) {
 @property (nonatomic) NSInteger ladoDaAmostra;        // 0 nada, 1 a faixa do Música, 2 a candidata
 @property (nonatomic) NSUInteger pedidoDaAmostra;     // muda a cada pedido: uma resposta atrasada da loja não toca
 @property (nonatomic, copy, nullable) NSString *aviso; // o que correu mal com a amostra, para a comparação
+@property (nonatomic) BOOL aActualizar;               // a sincronizar: as escolhas esperam
 @end
 
 @implementation ZPLigacoesDoMusicaWindowController
@@ -396,10 +397,34 @@ static NSString *ZPLMDuracao(id segundos) {
             }]];
     }
     [self.tabelaDosCasos reloadData];
-    self.contagem.stringValue = self.casos.count == 0
+    [self escreverContagem];
+    [self actualizarBotoes];
+}
+
+- (void)escreverContagem {
+    self.contagem.stringValue = self.aActualizar
+        ? NSLocalizedString(@"music_links_updating", @"A actualizar com o Música…")
+        : self.casos.count == 0
         ? NSLocalizedString(@"music_links_empty", @"Nenhuma faixa por ligar.")
         : [NSString stringWithFormat:NSLocalizedString(@"music_links_count", @"%ld por ligar"), (long)self.casos.count];
+}
+
+- (void)mostrarActualizacao:(BOOL)aActualizar {
+    if (aActualizar == self.aActualizar) return;
+    self.aActualizar = aActualizar;
+    // Uma passagem suave de um texto ao outro: some, muda, volta.
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *c) {
+        c.duration = 0.15;
+        self.contagem.animator.alphaValue = 0.0;
+    } completionHandler:^{
+        [self escreverContagem];
+        [NSAnimationContext runAnimationGroup:^(NSAnimationContext *c) {
+            c.duration = 0.25;
+            self.contagem.animator.alphaValue = 1.0;
+        }];
+    }];
     [self actualizarBotoes];
+    if (!aActualizar) [self recarregar];
 }
 
 - (void)controlTextDidChange:(NSNotification *)nota {
@@ -467,9 +492,11 @@ static NSString *ZPLMDuracao(id segundos) {
 
 - (void)actualizarBotoes {
     BOOL ha = [self casoSeleccionado] != nil;
-    self.botaoLigar.enabled = ha;
-    self.botaoSaltar.enabled = ha;
-    self.botaoAlbum.enabled = ha && [ZPLMTexto([self casoSeleccionado][@"album"]) length] > 0;
+    // Ouvir pode-se sempre; escolher só com a base em dia.
+    BOOL escolher = ha && !self.aActualizar;
+    self.botaoLigar.enabled = escolher;
+    self.botaoSaltar.enabled = escolher;
+    self.botaoAlbum.enabled = escolher && [ZPLMTexto([self casoSeleccionado][@"album"]) length] > 0;
     NSString *parar = NSLocalizedString(@"music_links_stop", @"■ Parar");
     self.botaoOuvirMusica.enabled = ha && self.ladoDaAmostra != 2;
     self.botaoOuvirMusica.title = self.ladoDaAmostra == 1 ? parar : NSLocalizedString(@"music_links_listen_music", @"▶︎ Ouvir a do Música");
@@ -713,7 +740,7 @@ static NSString *ZPLMNomeDoCriterio(NSString *c) {
 
 - (IBAction)ligar:(id)sender {
     NSDictionary *caso = [self casoSeleccionado];
-    if (!caso) return;
+    if (!caso || self.aActualizar) return;
     if (sender == self.tabelaDasCandidatas && self.tabelaDasCandidatas.clickedRow < 0) return;
     NSDictionary *c = [self candidataSeleccionada];
     if ([self gravar:@[@[caso[@"pid"], c[@"musica"] ?: [NSNull null]]]]) {

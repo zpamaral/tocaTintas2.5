@@ -150,6 +150,7 @@
 "music_links_search" = "Filter by artist, album or title";
 "music_links_count" = "%ld to link";
 "music_links_empty" = "No tracks to link.";
+"music_links_updating" = "Updating from Music…";
 "music_links_col_artist" = "Artist";
 "music_links_col_album" = "Album";
 "music_links_col_number" = "No.";

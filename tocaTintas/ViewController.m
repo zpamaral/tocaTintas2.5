@@ -380,6 +380,9 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong) NSMutableSet<NSString *> *caminhosPorRegistar;
 @property (nonatomic, assign) NSUInteger geracaoDoRegisto;
 @property (nonatomic, strong) NSTask *registoTask;
+// A janela das ligações abriu com um registo a correr: sincroniza-se quando
+// ele acabar (ver -sincronizarParaAsLigacoes).
+@property (nonatomic) BOOL sincronizarDepoisDoRegisto;
 - (void)agendarRegistoNaFonoteca:(NSSet<NSString *> *)caminhos tudo:(BOOL)tudo;   // chamado do callback do FSEvents
 // As faixas do Música (fonoteca.py sincronizar-musica) — ver «Faixas do Música».
 @property (nonatomic, strong) NSTask *sincronizacaoTask;
@@ -10595,6 +10598,9 @@ static NSFileHandle *ZPRegistoParaAcrescentar(NSString *caminho) {
             [weakSelf actualizarAssinaturas];
             if (weakSelf.caminhosPorRegistar.count > 0) {
                 [weakSelf agendarRegistoNaFonoteca:[NSSet set] tudo:NO];
+            } else if (weakSelf.sincronizarDepoisDoRegisto) {
+                weakSelf.sincronizarDepoisDoRegisto = NO;
+                [weakSelf sincronizarParaAsLigacoes];
             }
         });
     };
@@ -10694,6 +10700,8 @@ static NSString *const kZPAvisoDasLigacoes = @"LigacoesDoMusica";
         // Uma base por migrar sai com 1 e fica tudo como estava: só o registo
         // o diz.
         if (estado == 0) [fraco depoisDaSincronizacao];
+        // Acabe como acabar, a janela das ligações deixa de esperar (e relê).
+        if (!fraco.sincronizarDepoisDoRegisto) [fraco.ligacoesDoMusica mostrarActualizacao:NO];
     }];
     self.sincronizacaoTask = task;
 }
@@ -10829,6 +10837,33 @@ static NSString *const kZPConsistenciaEmKey = @"fonotecaConsistenciaEm";
     [self.ligacoesDoMusica showWindow:self];
     [self.ligacoesDoMusica.window makeKeyAndOrderFront:self];
     [NSApp activate];
+    [self sincronizarParaAsLigacoes];
+}
+
+// Ao abrir a janela das ligações, sincroniza-se logo: as candidatas das
+// pendentes são as da última sincronização, e o que entretanto se registou não
+// está lá. Em 2026-11-15, o Marceneiro gravado foi aprovado e aberto a seguir
+// a um sincronizar, e as 7 faixas da biblioteca que eram dele ficaram
+// pendentes, sem ele entre as candidatas, até ao ciclo seguinte. Com um registo
+// a correr, espera-se por ele. Sem o Música aberto não há sincronização, e a
+// janela fica com o que a base tem.
+- (void)sincronizarParaAsLigacoes {
+    if (self.registoTask || self.caminhosPorRegistar.count > 0) {
+        self.sincronizarDepoisDoRegisto = YES;
+        [self.ligacoesDoMusica mostrarActualizacao:YES];
+        // Um registo que não chegue a correr (sem python, sem base) deixava a
+        // janela à espera para sempre: ao fim de dois minutos sem registo a
+        // correr, sincroniza-se na mesma.
+        __weak typeof(self) fraco = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(120 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (!fraco.sincronizarDepoisDoRegisto || fraco.registoTask) return;
+            fraco.sincronizarDepoisDoRegisto = NO;
+            [fraco sincronizarParaAsLigacoes];
+        });
+        return;
+    }
+    [self sincronizarComOMusica];
+    [self.ligacoesDoMusica mostrarActualizacao:self.sincronizacaoTask != nil];
 }
 
 // Com o tocaTintas à frente, o macOS não mostra os avisos dele: só os põe no

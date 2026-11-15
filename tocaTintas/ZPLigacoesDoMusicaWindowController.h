@@ -46,6 +46,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// Volta a ler as pendentes (depois de um sincronizar, por exemplo).
 - (void)recarregar;
 
+/// Enquanto a base se actualiza (a sincronização que a abertura da janela
+/// pede): no lugar da contagem, «A actualizar com o Música…», e as escolhas
+/// paradas — feitas antes, seriam entre candidatas que podem já não valer. Com
+/// NO, relê as pendentes e devolve a contagem.
+- (void)mostrarActualizacao:(BOOL)aActualizar;
+
 @end
 
 NS_ASSUME_NONNULL_END
