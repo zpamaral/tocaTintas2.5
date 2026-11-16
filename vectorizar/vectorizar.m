@@ -25,7 +25,7 @@
 //    vectorizar esquecer MAPA ID
 //        Calcula as assinaturas que faltam: músicas novas, ou cujo ficheiro
 //        preferido mudou de áudio.
-//    vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--mapa MAPA]
+//    vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--mapa MAPA] [--artista A --album B --titulo T]
 //        Escreve os caminhos da estação, um por linha, com a semente à cabeça e
 //        os vizinhos por ordem de semelhança. Se a semente ainda não tiver
 //        assinatura, calcula-a (e guarda-a, se a música for da fonoteca).
@@ -687,6 +687,7 @@ static NSMutableArray<NSString *> *gRumos;   // --rumo: faixas que quem ouve pux
 static NSMutableArray<NSString *> *gLonges;  // --longe: faixas que desmarcou; a estação afasta-se delas
 static NSString *gSem;                       // --sem: ficheiro com as faixas que já tocaram, uma por linha, para não voltarem
 static NSString *gInfo;                      // --info: onde escrever, para cada linha da estação, artista, título, álbum e semelhança
+static NSString *gSementeArtista, *gSementeAlbum, *gSementeTitulo;   // --artista/--album/--titulo no estacao: quem é uma semente que não está na base nem no mapa (o excerto da loja de uma faixa do catálogo)
 static NSString *gOrigens;                   // --origens: o ficheiro das regras de origem (ver «Origens»)
 static NSUInteger gOndas = 5;   // --ondas: em quantas voltas à semente se reparte a estação (1 = por ordem de semelhança)
 
@@ -1079,6 +1080,7 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     // quem é; se não, só se evita repeti-la pelo caminho.
     NSMutableSet<NSString *> *titulos = [NSMutableSet set];
     NSCountedSet<NSString *> *artistas = [NSCountedSet set], *albuns = [NSCountedSet set];
+    BOOL sementeConhecida = NO;
     for (NSArray<NSString *> *f in faixas) {
         if ((musica && [f[0] isEqualToString:musica]) || [f[4] isEqualToString:caminhoDaSemente] || [f[0] isEqualToString:caminhoDaSemente]) {
             if (sementeDoMusica) caminhoDaSemente = f[4];   // com o nome, para quem lê a lista
@@ -1086,7 +1088,21 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
             if (chave.length) [titulos addObject:chave];
             [artistas addObject:ZPChaveDoArtista(f[1], f[2])];
             [albuns addObject:[NSString stringWithFormat:@"%@|%@", f[1], f[2]]];
+            sementeConhecida = YES;
             break;
+        }
+    }
+    // Uma semente que não está em lado nenhum (o excerto de uma faixa do
+    // catálogo) não se reconhecia, e a versão da mesma canção na biblioteca do
+    // Música vinha logo a seguir: a estação repetia a semente (2026-11-15,
+    // Beach Fossils). Quem a pediu sabe quem ela é; conta como as outras.
+    if (!sementeConhecida && gSementeTitulo.length) {
+        NSString *chave = ZPChaveDoTitulo(gSementeTitulo);
+        if (chave.length) [titulos addObject:chave];
+        if (gSementeArtista.length) {
+            NSString *album = gSementeAlbum ?: @"";
+            [artistas addObject:ZPChaveDoArtista(gSementeArtista, album)];
+            [albuns addObject:[NSString stringWithFormat:@"%@|%@", gSementeArtista, album]];
         }
     }
     printf("%s\n", caminhoDaSemente.UTF8String);
@@ -1948,7 +1964,7 @@ int main(int argc, const char *argv[]) {
         double inicioDoExcerto = 0.0;
         NSUInteger quantas = 50, porArtista = 3, porAlbum = 2;
         double minutos = 0.0;
-        NSString *artista = nil, *titulo = nil, *semente = nil;
+        NSString *artista = nil, *titulo = nil, *semente = nil, *album = nil;
         for (NSUInteger i = 0; i < args.count; ) {
             NSString *a = args[i];
             if ([a isEqualToString:@"--modelo"] && i + 1 < args.count) {
@@ -1957,9 +1973,10 @@ int main(int argc, const char *argv[]) {
             } else if ([a isEqualToString:@"--cpu"]) {
                 soCPU = YES;
                 [args removeObjectAtIndex:i];
-            } else if ([@[@"--artista", @"--titulo", @"--semente"] containsObject:a] && i + 1 < args.count) {
+            } else if ([@[@"--artista", @"--titulo", @"--album", @"--semente"] containsObject:a] && i + 1 < args.count) {
                 if ([a isEqualToString:@"--artista"]) artista = args[i + 1];
                 else if ([a isEqualToString:@"--titulo"]) titulo = args[i + 1];
+                else if ([a isEqualToString:@"--album"]) album = args[i + 1];
                 else semente = args[i + 1];
                 [args removeObjectsInRange:NSMakeRange(i, 2)];
             } else if ([a isEqualToString:@"--minutos"] && i + 1 < args.count) {
@@ -2013,6 +2030,11 @@ int main(int argc, const char *argv[]) {
         if (args.count == 3 && [args[0] isEqualToString:@"mapear"]) return ZPModoMapear(args[1], args[2]);
         if (args.count == 3 && [args[0] isEqualToString:@"falhou"]) return ZPModoFalhou(args[1], args[2]);
         if (args.count == 3 && [args[0] isEqualToString:@"esquecer"]) return ZPModoEsquecer(args[1], args[2]);
+        if (args.count == 3 && [args[0] isEqualToString:@"estacao"]) {
+            gSementeArtista = artista.precomposedStringWithCanonicalMapping;
+            gSementeAlbum = album.precomposedStringWithCanonicalMapping;
+            gSementeTitulo = titulo.precomposedStringWithCanonicalMapping;
+        }
         if (args.count == 3 && [args[0] isEqualToString:@"estacao"]) return ZPModoEstacao(args[1], args[2], quantas, porArtista, porAlbum);
         if (args.count == 4 && [args[0] isEqualToString:@"importar"]) return ZPModoImportar(args[1], args[2], args[3]);
         if (args.count != 2) {
@@ -2023,7 +2045,7 @@ int main(int argc, const char *argv[]) {
                             "     vectorizar esquecer MAPA ID\n"
                             "     vectorizar mapear BASE MAPA\n"
                             "     vectorizar falhou MAPA PID\n"
-                            "     vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--mapa MAPA] [--origens REGRAS.json]\n"
+                            "     vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--mapa MAPA] [--origens REGRAS.json] [--artista A --album B --titulo T]\n"
                             "     vectorizar importar BASE lista.tsv saída\n"
                             "     vectorizar [--modelo M.mlmodelc] [--cpu] [--loja] lista.tsv saída\n"
                             "     vectorizar --excerto segundos ficheiro pcm.f32\n"

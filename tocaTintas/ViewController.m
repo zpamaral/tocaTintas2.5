@@ -406,6 +406,7 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, assign) BOOL estacaoAPreparar;    // à espera da base, do catálogo ou do vectorizar
 @property (nonatomic, strong) NSTask *assinaturasTask;
 @property (nonatomic, strong) NSURL *sementeDoMusicaACabeca;   // a linha «musica:» da semente, quando a estação nasce do excerto dela
+@property (nonatomic, copy) NSArray<NSString *> *sementeDoExcerto;   // artista, álbum e título da faixa de que se tirou o excerto (para o vectorizar a reconhecer)
 @property (nonatomic) NSInteger caixaDesde;        // a primeira faixa da lista que a caixa das músicas mostra (0 fora de uma estação)
 @property (nonatomic, strong) ZPOrigens *janelaDasOrigens;   // Reprodução ▸ Origens…
 @property (nonatomic, strong) NSTask *mapearTask;   // o «vectorizar mapear» a correr
@@ -5123,6 +5124,10 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
                     // catálogo que lá não esteja não tem como se pedir outra vez.
                     self.sementeDoMusicaACabeca = daBiblioteca
                         ? ZPURLDaLinha([NSString stringWithFormat:@"musica:%@\t%@ — %@", pid, artista, titulo]) : nil;
+                    // O excerto não diz quem é: sem isto, a versão da mesma canção
+                    // na biblioteca do Música vinha logo a seguir, e a estação
+                    // repetia a semente.
+                    self.sementeDoExcerto = @[nfc(artista), nfc(album), nfc(titulo)];
                     [self correrEstacaoCom:excerto.path nome:nome manterSemente:NO apagar:excerto];
                 }];
             };
@@ -5177,6 +5182,8 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
     void (^limpar)(void) = ^{ if (apagar) [[NSFileManager defaultManager] removeItemAtURL:apagar error:NULL]; };
     NSURL *aCabeca = self.sementeDoMusicaACabeca;
     self.sementeDoMusicaACabeca = nil;
+    NSArray<NSString *> *quemE = self.sementeDoExcerto;
+    self.sementeDoExcerto = nil;
     NSURL *vectorizar = ZPVectorizar();
     NSString *base = [[self loadSongsDirectoryPath] stringByAppendingPathComponent:@".fonoteca.sqlite"];
     if (!vectorizar || ![[NSFileManager defaultManager] fileExistsAtPath:base]) {
@@ -5198,6 +5205,9 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
     NSMutableArray<NSString *> *argumentos = [@[@"estacao", base, semente, @"--info", info] mutableCopy];
     [argumentos addObjectsFromArray:ZPArgumentosDasOrigens()];
     if ([[NSFileManager defaultManager] fileExistsAtPath:mapa]) [argumentos addObjectsFromArray:@[@"--mapa", mapa]];
+    if (quemE.count == 3 && quemE[2].length) {
+        [argumentos addObjectsFromArray:@[@"--artista", quemE[0], @"--album", quemE[1], @"--titulo", quemE[2]]];
+    }
     // O que se fez na janela «A seguir» das outras vezes com esta semente.
     NSDictionary<NSString *, NSArray<NSString *> *> *lembrado = apagar ? nil : ZPGestosDasEstacoes()[semente];
     for (NSString *chave in lembrado[@"promovidas"]) [argumentos addObjectsFromArray:@[@"--rumo", chave]];
