@@ -41,15 +41,18 @@ typedef struct {
 } ZPGravacao;
 
 // Um pedaço de amostras corrigidas (uma rampa desfeita), lido por cima das do
-// ficheiro. O ficheiro, mapeado, nunca se altera.
+// ficheiro. O ficheiro, mapeado, nunca se altera. Uma rampa que não se
+// conseguiu desfazer também fica aqui, sem valores: lê-se como está, mas o
+// veredicto da grelha não a conta (como o vigia da gravação).
 typedef struct {
     long long inicio, n;
-    float *valores;   // 2n
+    float *valores;   // 2n, ou NULL se a rampa ficou como está
 } ZPCorreccao;
 
 static void ZPLer(const ZPGravacao *g, const ZPCorreccao *cs, int nc, long long inicio, long long n, float *destino) {
     memcpy(destino, g->x + 2 * inicio, (size_t)(2 * n) * sizeof(float));
     for (int k = 0; k < nc; ++k) {
+        if (!cs[k].valores) continue;
         long long a = MAX(inicio, cs[k].inicio), b = MIN(inicio + n, cs[k].inicio + cs[k].n);
         if (a < b) {
             memcpy(destino + 2 * (a - inicio), cs[k].valores + 2 * (a - cs[k].inicio),
@@ -124,7 +127,13 @@ static inline double ZPPolinomio(const double *coef, int grau, double t) {
 // NULL; em `erroMax` o erro da melhor tentativa, ou −1 se nenhuma chegou a
 // medir. Sem infinitos: o projecto compila com matemática rápida, e com ela o
 // compilador supõe que não os há.
-static float *ZPDesfazerRampa(const float *r, long long n, double *erroMax, int *bits) {
+//
+// Se o polinómio falha, segue-se o ganho (ZPSeguirRampa): é o caso dos masters
+// de 24 bits, que têm poucas amostras pequenas. `umNoFim`: o ganho chega a 1
+// na última trama (rampa de entrada) e não na primeira (rampa de saída).
+static float *ZPSeguirRampa(const float *r, long long n, BOOL umNoFim, double U, double *erroMax);
+
+static float *ZPDesfazerRampa(const float *r, long long n, BOOL umNoFim, double *erroMax, int *bits) {
     static const double unidades[2] = { 32768.0, 8388608.0 };
     static const int bitsDe[2] = { 16, 24 };
     double *ts = malloc(sizeof(double) * (size_t)(2 * n));
@@ -176,6 +185,109 @@ static float *ZPDesfazerRampa(const float *r, long long n, double *erroMax, int 
     }
     free(ts);
     free(gs);
+    if (!saida) {
+        double erro = -1.0;
+        saida = ZPSeguirRampa(r, n, umNoFim, 8388608.0, &erro);
+        if (saida) *bits = 24;
+        if (erro >= 0.0) *erroMax = *erroMax < 0.0 ? erro : MIN(*erroMax, erro);
+    }
+    return saida;
+}
+
+// Seguir o ganho, de onde a rampa chega a 1 para o outro lado, em janelas de
+// 16 tramas. Em cada uma procura-se o ganho e a inclinação que põem as
+// amostras da janela na grelha, perto do que as janelas anteriores fazem
+// prever (uma parábola pelas últimas oito), com a curvatura dessa previsão. O
+// polinómio de ZPDesfazerRampa mede o ganho só nas amostras de 1 a 4 degraus, e
+// num master de 24 bits são poucas: 25 em 1022 tramas no «All for One» dos
+// Stone Roses (2026-11-16), com amostras de até 1471 degraus, que pedem o
+// ganho a uns 3e-5. Aí, seguido assim: de 0,834 a 1 em 1022 tramas, com erro
+// máximo de 0,0044 LSB. As amostras de até 2 degraus não entram na procura
+// (cabem em qualquer ganho), mas entram na verificação final, que é a mesma: todas
+// abaixo de kZPErroMaximoDaRampa.
+#define kZPJanelaDoSeguimento 16LL
+
+static float *ZPSeguirRampa(const float *r, long long n, BOOL umNoFim, double U, double *erroMax) {
+    const long long W = kZPJanelaDoSeguimento;
+    long long janelas = (n + W - 1) / W;
+    double *pk = malloc(sizeof(double) * (size_t)(janelas + 2));
+    double *pg = malloc(sizeof(double) * (size_t)(janelas + 2));
+    double *ganho = malloc(sizeof(double) * (size_t)n);
+    double xs[2 * kZPJanelaDoSeguimento], us[2 * kZPJanelaDoSeguimento];
+    // j = 0 é a trama junto à música, onde o ganho já é 1; para trás dela, 1.
+    long np = 0;
+    pk[np] = -12.0; pg[np++] = 1.0;
+    pk[np] = -4.0;  pg[np++] = 1.0;
+    BOOL valido = YES;
+    for (long long w0 = 0; w0 < n && valido; w0 += W) {
+        long long w1 = MIN(n, w0 + W);
+        double meio = 0.5 * (double)(w0 + w1 - 1);
+
+        long q0 = MAX(0, np - 8), m = np - q0;
+        double t[8], y[8], coef[3] = { 0.0, 0.0, 0.0 };
+        for (long i = 0; i < m; ++i) { t[i] = (pk[q0 + i] - meio) / (double)W; y[i] = pg[q0 + i]; }
+        int grau = m >= 3 ? 2 : 1;
+        if (!ZPAjustarPolinomio(t, y, m, grau, coef)) { valido = NO; break; }
+        double pa = coef[0], pb = coef[1] / (double)W, pc = grau == 2 ? coef[2] / (double)(W * W) : 0.0;
+
+        int ns = 0;
+        for (long long j = w0; j < w1; ++j) {
+            long long i = umNoFim ? n - 1 - j : j;
+            for (int c = 0; c < 2; ++c) {
+                double v = (double)r[2*i+c] * U;
+                if (fabs(v) <= 2.0) continue;
+                xs[ns] = v;
+                us[ns] = (double)j - meio;
+                ++ns;
+            }
+        }
+        double ma = pa, mb = pb;
+        if (ns > 0) {
+            double alcance = MAX(2e-4, fabs(pb) * (double)W * 0.5);
+            double largura = fabs(pb) + 2e-6;
+            double melhor = 1e9;
+            for (int ib = 0; ib <= 120; ++ib) {
+                double b = pb - 0.5 * largura + ib * largura / 120.0;
+                for (int ia = 0; ia <= 2000; ++ia) {
+                    double a = pa - alcance + ia * alcance / 1000.0;
+                    double pior = 0.0;
+                    for (int s = 0; s < ns && pior < melhor; ++s) {
+                        double q = xs[s] / (a + b * us[s] + pc * us[s] * us[s]);
+                        pior = MAX(pior, fabs(q - rint(q)));
+                    }
+                    if (pior < melhor) { melhor = pior; ma = a; mb = b; }
+                }
+            }
+        }
+        for (long long j = w0; j < w1; ++j) {
+            double u = (double)j - meio;
+            ganho[j] = ma + mb * u + pc * u * u;
+            if (ganho[j] < 0.05 || ganho[j] > 1.05) valido = NO;
+        }
+        pk[np] = meio; pg[np++] = ma;
+    }
+
+    float *saida = NULL;
+    if (valido) {
+        float *c = malloc(sizeof(float) * (size_t)(2 * n));
+        double pior = 0.0;
+        for (long long j = 0; j < n; ++j) {
+            long long i = umNoFim ? n - 1 - j : j;
+            for (int k = 0; k < 2; ++k) {
+                double v = r[2*i+k];
+                if (v == 0.0) { c[2*i+k] = 0.0f; continue; }
+                double q = v * U / ganho[j];
+                pior = MAX(pior, fabs(q - rint(q)));
+                c[2*i+k] = (float)(rint(q) / U);
+            }
+        }
+        *erroMax = pior;
+        if (pior < kZPErroMaximoDaRampa) saida = c;
+        else free(c);
+    }
+    free(pk);
+    free(pg);
+    free(ganho);
     return saida;
 }
 
@@ -207,14 +319,14 @@ static int ZPProcurarRampas(const ZPGravacao *g, NSArray<NSArray<NSNumber *> *> 
 
             double erro = -1.0;
             int bits = 0;
-            float *c = ZPDesfazerRampa(g->x + 2 * r0, r1 - r0, &erro, &bits);
+            float *c = ZPDesfazerRampa(g->x + 2 * r0, r1 - r0, lado == 0, &erro, &bits);
             NSString *qual = lado == 0 ? @"entrada" : @"saída";
+            if (nc == capacidade) {
+                capacidade *= 2;
+                cs = realloc(cs, sizeof(ZPCorreccao) * (size_t)capacidade);
+            }
+            cs[nc++] = (ZPCorreccao){ r0, r1 - r0, c };   // sem valores, se ficou como está
             if (c) {
-                if (nc == capacidade) {
-                    capacidade *= 2;
-                    cs = realloc(cs, sizeof(ZPCorreccao) * (size_t)capacidade);
-                }
-                cs[nc++] = (ZPCorreccao){ r0, r1 - r0, c };
                 [notas addObject:[NSString stringWithFormat:@"Rampa de %@ aos %@ (%lld tramas): desfeita na grelha de %d bits, erro máximo %.5f LSB.",
                                   qual, ZPTempo(r0, g->taxa), r1 - r0, bits, erro]];
             } else {
@@ -1099,18 +1211,31 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
     for (NSMutableDictionary *f in faixas) {
         if (f[@"falta"]) continue;
         long long a = [f[@"inicio"] longLongValue], b = [f[@"fim"] longLongValue];
-        long long fora16 = 0, fora24 = 0;
+        // As rampas que ficaram como estão não contam para o veredicto, como
+        // no vigia da gravação: contam-se à parte, para o relatório.
+        long long fora16 = 0, fora24 = 0, naRampa = 0;
+        int k = 0;
         for (long long p = a; p < b; p += pedaco) {
             long long n = MIN(pedaco, b - p);
             ZPLer(&g, cs, nc, p, n, buf);
             for (long long i = 0; i < n; ++i) {
-                if (ZPForaDaGrelha(buf[2*i], 32768.0f) || ZPForaDaGrelha(buf[2*i+1], 32768.0f)) ++fora16;
-                if (ZPForaDaGrelha(buf[2*i], 8388608.0f) || ZPForaDaGrelha(buf[2*i+1], 8388608.0f)) ++fora24;
+                BOOL f16 = ZPForaDaGrelha(buf[2*i], 32768.0f) || ZPForaDaGrelha(buf[2*i+1], 32768.0f);
+                BOOL f24 = ZPForaDaGrelha(buf[2*i], 8388608.0f) || ZPForaDaGrelha(buf[2*i+1], 8388608.0f);
+                if (!f16 && !f24) continue;
+                long long t = p + i;
+                BOOL emRampa = NO;
+                for (k = 0; k < nc && !emRampa; ++k) {
+                    emRampa = !cs[k].valores && t >= cs[k].inicio && t < cs[k].inicio + cs[k].n;
+                }
+                if (emRampa) { if (f24) ++naRampa; continue; }
+                if (f16) ++fora16;
+                if (f24) ++fora24;
             }
         }
         double pico = 0.0;
         NSData *blocos = ZPBlocosDeEnergia(&g, cs, nc, a, b, &pico);
-        [f addEntriesFromDictionary:@{ @"fora16": @(fora16), @"fora24": @(fora24), @"pico": @(pico), @"blocos": blocos }];
+        [f addEntriesFromDictionary:@{ @"fora16": @(fora16), @"fora24": @(fora24), @"naRampa": @(naRampa),
+                                       @"pico": @(pico), @"blocos": blocos }];
     }
     free(buf);
 
@@ -1138,12 +1263,13 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
             continue;
         }
 
-        long long fora16 = 0, fora24 = 0;
+        long long fora16 = 0, fora24 = 0, naRampa = 0;
         NSMutableData *blocosDoAlbum = [NSMutableData data];
         double picoDoAlbum = 0.0;
         for (NSMutableDictionary *f in inteiras) {
             fora16 += [f[@"fora16"] longLongValue];
             fora24 += [f[@"fora24"] longLongValue];
+            naRampa += [f[@"naRampa"] longLongValue];
             [blocosDoAlbum appendData:f[@"blocos"]];
             picoDoAlbum = MAX(picoDoAlbum, [f[@"pico"] doubleValue]);
         }
@@ -1211,7 +1337,9 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
             }
         }
         [rel addObject:[NSString stringWithFormat:@"%u bits, %@. ReplayGain do álbum %+.2f dB, pico verdadeiro %.6f.%@", bits,
-                        exacto ? @"bit-exacto" : [NSString stringWithFormat:@"NÃO bit-exacto (%lld tramas fora da grelha de 24 bits, arredondadas)", fora24],
+                        !exacto ? [NSString stringWithFormat:@"NÃO bit-exacto (%lld tramas fora da grelha de 24 bits, arredondadas)", fora24]
+                        : naRampa ? [NSString stringWithFormat:@"bit-exacto fora das rampas que ficaram como estão (%lld tramas, arredondadas)", naRampa]
+                        : @"bit-exacto",
                         ganhoDoAlbum, picoDoAlbum, notaDaCapa]];
 
         NSUInteger escritas = 0;
@@ -1298,6 +1426,9 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
             NSString *grelha = [f[@"fora16"] longLongValue] == 0 ? @"16 bits exactos"
                              : [f[@"fora24"] longLongValue] == 0 ? @"24 bits exactos"
                              : [NSString stringWithFormat:@"%@ tramas fora da grelha", f[@"fora24"]];
+            if ([f[@"naRampa"] longLongValue] > 0) {
+                grelha = [grelha stringByAppendingFormat:@" (mais %@ numa rampa que ficou como está)", f[@"naRampa"]];
+            }
             [rel addObject:[NSString stringWithFormat:@"  %@  %@ a %@ (%@)  %@; %@; %+.2f dB%@",
                             [caminho substringFromIndex:pasta.path.length + 1], ZPTempo(ini, g.taxa), ZPTempo(fim, g.taxa), ZPTempo(fim - ini, g.taxa),
                             f[@"como"], grelha, ganho, bem ? @"" : [NSString stringWithFormat:@"  — FALHOU: %@", falha]]];
