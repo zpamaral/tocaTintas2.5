@@ -44,12 +44,12 @@ SOFTWARE.
 /// Aqui esteve um `airPlayStreamer` próprio, criado com `[[ZPAirPlayStreamer
 /// alloc] init]` e alimentado com o ganho desta faixa. Não servia para nada, por
 /// duas razões de uma vez: não era o streamer que estava a transmitir — esse é o
-/// do ViewController —, e como a classe não tem `-init`, só
+/// do ZPPrincipal —, e como a classe não tem `-init`, só
 /// `-initWithIPAddress:port:identificador:replayGainValue:`, o objecto saía meio construído,
 /// sem tampão nem engine. O resultado é que uma faixa Opus tocava do princípio
 /// ao fim com o ganho que a faixa anterior tinha deixado.
 ///
-/// Agora quem empurra é o ViewController, pelo -primeReplayGainForTrack:, e
+/// Agora quem empurra é o ZPPrincipal, pelo -primeReplayGainForTrack:, e
 /// antes de a faixa começar. Isto fica só como leitura, para quem a quiser.
 ///
 /// Um pico a zero significa «desconhecido», e os valores de álbum a zero contam

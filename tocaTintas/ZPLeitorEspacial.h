@@ -9,7 +9,7 @@
 //  por omissão para áudio só espacializa o multicanal. O AVAudioPlayer e a
 //  AudioQueue não o têm (confirmado com um protótipo a 2026-11-06).
 //
-//  É subclasse do AVAudioPlayer de propósito: o ViewController continua a
+//  É subclasse do AVAudioPlayer de propósito: o ZPPrincipal continua a
 //  falar com «um AVAudioPlayer» e só a criação muda. Substitui o que o
 //  tocaTintas usa — play, pause, stop, isPlaying, currentTime (ler e escrever,
 //  para o salto de silêncios) — e avisa o delegate no fim. A duração e o resto

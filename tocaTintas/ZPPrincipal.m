@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 //
-//  ViewController.m
+//  ZPPrincipal.m
 //  tocaTintas
 //
 //  Created by Zé Pedro do Amaral on 26/08/2026.
@@ -44,7 +44,7 @@ SOFTWARE.
 #import <QuartzCore/QuartzCore.h>   // cantos arredondados no vidro da lista
 #import <CoreServices/CoreServices.h>   // FSEvents, para vigiar a pasta de músicas
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
-#import "ViewController.h"   // Objective-C header
+#import "ZPPrincipal.h"   // Objective-C header
 #import "M3UPlaylist.h"
 #import "ZPOpusDecoder.h"   // Class for Ogg Opus metadata extraction and decoding
 #import <CoreAudio/CoreAudio.h>
@@ -271,7 +271,7 @@ static WavpackStreamReader memoryReader = {
     get_length,
     can_seek
 };
-@interface ViewController () <AVAudioPlayerDelegate, UNUserNotificationCenterDelegate, NSMenuItemValidation, NSMenuDelegate, ZPFonteDaEstacao>
+@interface ZPPrincipal () <AVAudioPlayerDelegate, UNUserNotificationCenterDelegate, NSMenuItemValidation, NSMenuDelegate, ZPFonteDaEstacao>
 
 @property (nonatomic, strong) NSTextField *playCountLabel;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *trackPlayCounts;   // chave da música → reproduções
@@ -1345,7 +1345,7 @@ static NSString *ZPChaveDeContagemDoCD(NSString *cddb, NSInteger numero) {
 }
 
 
-@implementation ViewController
+@implementation ZPPrincipal
 
 // Structure to hold the audio playback state
 typedef struct {
@@ -1360,7 +1360,7 @@ typedef struct {
     UInt32 bufferSize;
     BOOL isPlaying;
     int numChannels;  // Store the number of channels
-    __unsafe_unretained ViewController *client_data;
+    __unsafe_unretained ZPPrincipal *client_data;
     double totalDuration;  // Track the duration of the current track
     double sampleRate;  // Add sampleRate to track the sample rate of the Opus file
     BOOL didApplyFadeIn;
@@ -3897,7 +3897,7 @@ static const NSUInteger ZPTentativasDaFrequencia = 20;   // × 0,5 s
 - (void)viewDidAppear {
     [super viewDidAppear];
 
-    // Log the current responder chain to check if the ViewController is in the chain
+    // Log the current responder chain to check if the ZPPrincipal is in the chain
     NSResponder *responder = [self.view.window firstResponder];
     while (responder) {
         #ifdef DEBUG
@@ -4016,7 +4016,7 @@ static const NSUInteger ZPTentativasDaFrequencia = 20;   // × 0,5 s
     // Invalidate the refresh timer to stop it from firing after the view controller is deallocated
     //[self.refreshTimer invalidate];
     
-    // Remove any observers added by this instance of ViewController
+    // Remove any observers added by this instance of ZPPrincipal
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
@@ -7278,7 +7278,7 @@ void flac_error_callback(const FLAC__StreamDecoder *decoder,
 }
 
 // Helper function to print the VORBIS comment (adapted for Objective-C)
-NSString *print_vorbis_comment(const FLAC__StreamMetadata_VorbisComment_Entry *entry, ViewController *self) {
+NSString *print_vorbis_comment(const FLAC__StreamMetadata_VorbisComment_Entry *entry, ZPPrincipal *self) {
     NSString *entry_str = [[NSString alloc] initWithBytes:entry->entry
                                                    length:entry->length
                                                  encoding:NSUTF8StringEncoding];
@@ -7397,7 +7397,7 @@ NSString *print_vorbis_comment(const FLAC__StreamMetadata_VorbisComment_Entry *e
 void flac_metadata_callback(const FLAC__StreamDecoder *decoder,
                                const FLAC__StreamMetadata *metadata,
                                void *client_data) {
-    ViewController *self = (__bridge ViewController *)client_data;
+    ZPPrincipal *self = (__bridge ZPPrincipal *)client_data;
 
     // Log the type of metadata received
     #ifdef DEBUG
@@ -7969,7 +7969,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
             }
 
             /* ───── fade-in só no 1.º buffer ───── */
-            ViewController *vc = (ViewController *)playbackState->client_data;
+            ZPPrincipal *vc = (ZPPrincipal *)playbackState->client_data;
             if (!playbackState->didApplyFadeIn &&
                 [vc respondsToSelector:@selector(applyFadeInToAudioBuffer:totalSamples:numChannels:sampleRate:)])
             {
@@ -8024,7 +8024,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
             gWvKeptData = nil;
 
             // Handle repeat or transition to next song
-            ViewController *viewController = playbackState->client_data;
+            ZPPrincipal *viewController = playbackState->client_data;
             if (viewController.isRepeatModeActive) {
                 #ifdef DEBUG
                 NSLog(@"Repeat mode is active. Restarting the current WAVPack track.");
@@ -8071,7 +8071,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
                 }
             }
 
-            ViewController *vc = (ViewController *)playbackState->client_data;
+            ZPPrincipal *vc = (ZPPrincipal *)playbackState->client_data;
             if (!playbackState->didApplyFadeIn &&
                 [vc respondsToSelector:@selector(applyFadeInToAudioBuffer:totalSamples:numChannels:sampleRate:)])
             {
@@ -8110,7 +8110,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
                 playbackState->sampleBuffer = NULL;
             }
 
-            ViewController *viewController = playbackState->client_data;
+            ZPPrincipal *viewController = playbackState->client_data;
             if (viewController.isRepeatModeActive) {
                 [viewController cleanupCoreAudioPlayback];
                 [viewController playApe:viewController.audioFiles[viewController.currentTrackIndex]];
@@ -8165,7 +8165,7 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
                 playbackState->opusFile = NULL;
             }
 
-            ViewController *viewController = playbackState->client_data;
+            ZPPrincipal *viewController = playbackState->client_data;
             if (viewController.isRepeatModeActive) {
                 #ifdef DEBUG
                 NSLog(@"Repeat mode is active. Restarting the current Opus track.");
@@ -10284,7 +10284,7 @@ static void ZPSongsDirectoryEventsCallback(ConstFSEventStreamRef streamRef,
                                            void *eventPaths,
                                            const FSEventStreamEventFlags eventFlags[],
                                            const FSEventStreamEventId eventIds[]) {
-    ViewController *controller = (__bridge ViewController *)clientCallBackInfo;
+    ZPPrincipal *controller = (__bridge ZPPrincipal *)clientCallBackInfo;
     if (!controller || numEvents == 0) {
         return;
     }
@@ -11324,7 +11324,7 @@ didReceiveNotificationResponse:(UNNotificationResponse *)resposta
     [self extractAndDisplayMetadataFromURL:trackURL];  // Extract and display metadata
 
     // Aqui estavam quatro zeros. Punham os campos a zero DEPOIS de a extracção
-    // os ter lido, deixando o streamer com o ganho certo e o ViewController com
+    // os ter lido, deixando o streamer com o ganho certo e o ZPPrincipal com
     // zero — e o primeiro push que viesse por outra via (mudar a política de
     // normalização nas preferências, ver -setupBs2bHeadphoneMonitoring) mandava
     // 0 dB e a normalização desta faixa desaparecia sem aviso. Quem repõe os
@@ -13107,7 +13107,7 @@ static NSString * const kZPAudicaoDoCatalogoKey = @"ZPAudicaoDoCatalogo";
 // O dicionário está no tocaTintas.sdef. Os comandos chegam pelo
 // ZPComandoAppleScript (no fim deste ficheiro) e fazem exactamente o que os
 // botões fazem, pelos mesmos métodos; as propriedades da aplicação lêem-se e
-// escrevem-se aqui, porque o ViewController é o delegado da NSApplication.
+// escrevem-se aqui, porque o ZPPrincipal é o delegado da NSApplication.
 // Tudo corre no thread principal, como os cliques.
 
 static NSSet<NSString *> *ZPChavesAppleScript(void) {
@@ -13813,15 +13813,15 @@ static ZPReplayGainLido ZPLerReplayGain(NSURL *url, NSData *dados) {
 #pragma mark - Comandos AppleScript
 
 // A classe que o tocaTintas.sdef dá a todos os comandos. Não faz nada sozinha:
-// entrega o nome do comando ao ViewController, que o executa como um clique.
+// entrega o nome do comando ao ZPPrincipal, que o executa como um clique.
 @interface ZPComandoAppleScript : NSScriptCommand
 @end
 
 @implementation ZPComandoAppleScript
 
 - (id)performDefaultImplementation {
-    ViewController *controlador = (ViewController *)NSApp.delegate;
-    if (![controlador isKindOfClass:[ViewController class]]) {
+    ZPPrincipal *controlador = (ZPPrincipal *)NSApp.delegate;
+    if (![controlador isKindOfClass:[ZPPrincipal class]]) {
         self.scriptErrorNumber = errAEEventNotHandled;
         return nil;
     }

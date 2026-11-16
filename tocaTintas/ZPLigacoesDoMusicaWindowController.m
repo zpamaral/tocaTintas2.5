@@ -86,7 +86,7 @@ static ZPLMParecer ZPLMParecerDe(NSDictionary *caso, NSDictionary *candidata) {
 
 #pragma mark - SQLite
 
-// Os mesmos três passos que o ViewController usa com a base, aqui à parte: esta
+// Os mesmos três passos que o ZPPrincipal usa com a base, aqui à parte: esta
 // janela abre a sua ligação, só enquanto lê ou grava.
 static BOOL ZPLMPreparar(sqlite3 *db, const char *sql, NSArray *args, sqlite3_stmt **st) {
     if (sqlite3_prepare_v2(db, sql, -1, st, NULL) != SQLITE_OK) {

@@ -3,7 +3,7 @@
 <!--
   Dicionário AppleScript do tocaTintas. Os comandos fazem o mesmo que os botões
   da janela; quem os executa é o ZPComandoAppleScript, e as propriedades lêem-se
-  e escrevem-se no ViewController (ver «AppleScript» no ViewController.m).
+  e escrevem-se no ZPPrincipal (ver «AppleScript» no ZPPrincipal.m).
   Os códigos de quatro letras levam maiúsculas: os só de minúsculas são da Apple.
 -->
 <dictionary title="tocaTintas" xmlns:xi="http://www.w3.org/2001/XInclude">

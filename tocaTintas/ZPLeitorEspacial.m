@@ -308,7 +308,7 @@ static SInt64 ZPTamanhoMemoria(void *dados) {
         _arrancou = YES;
         // Meio segundo na fila antes de o relógio andar: com o relógio a andar e
         // a fila vazia, os primeiros blocos chegavam já atrasados. O início pode
-        // não ser zero: a troca de motor a meio da faixa (ver o ViewController,
+        // não ser zero: a troca de motor a meio da faixa (ver o ZPPrincipal,
         // -acertarMotorASaida) põe a posição antes de tocar.
         __block SInt64 inicio = 0;
         dispatch_sync(self.fila, ^{

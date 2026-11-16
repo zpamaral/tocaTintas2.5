@@ -190,7 +190,7 @@ SOFTWARE.
     dispatch_sync(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), decodeBlock);
 
     // O ganho fica guardado, e mais nada: quem o entrega ao streamer é o
-    // ViewController, no -primeReplayGainForTrack:, e fá-lo antes de a faixa
+    // ZPPrincipal, no -primeReplayGainForTrack:, e fá-lo antes de a faixa
     // arrancar. Daqui saía um push para um ZPAirPlayStreamer criado por esta
     // classe — que não era o que transmitia, e ainda por cima estava meio
     // construído por vir de um `-init` que a classe não tem. Uma faixa Opus

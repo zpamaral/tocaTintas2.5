@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 //
-//  ViewController.h
+//  ZPPrincipal.h
 //  tocaTintas
 //
 //  Created by Zé Pedro do Amaral on 26/08/2026.
@@ -32,7 +32,7 @@ SOFTWARE.
 #import "PreferencesWindowController.h"
 #import "ZPOpusDecoder.h"
 
-@interface ViewController : NSViewController <NSApplicationDelegate,NSComboBoxDelegate,NSComboBoxDataSource,NSWindowDelegate,NSTextFieldDelegate>
+@interface ZPPrincipal : NSViewController <NSApplicationDelegate,NSComboBoxDelegate,NSComboBoxDataSource,NSWindowDelegate,NSTextFieldDelegate>
 @property (nonatomic, assign) BOOL isShuffleModeActive;
 @property (nonatomic, strong, readonly) ZPOpusDecoder *opusDecoder;
 @property (strong) PreferencesWindowController *preferencesWindowController;

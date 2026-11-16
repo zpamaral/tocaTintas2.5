@@ -5,9 +5,9 @@
 //  O «A tocar» do sistema (MPNowPlayingInfoCenter) e os comandos que chegam
 //  pelo MPRemoteCommandCenter: AirPods, teclas ⏯ ⏭ ⏮, Centro de Controlo.
 //
-//  À parte do ViewController de propósito: os cabeçalhos da MediaPlayer
+//  À parte do ZPPrincipal de propósito: os cabeçalhos da MediaPlayer
 //  declaram -objectForKeyedSubscript: na MPMediaEntity como indisponível no
-//  macOS, e, vistos pelo ViewController, cada subscrito num `id` passava a
+//  macOS, e, vistos pelo ZPPrincipal, cada subscrito num `id` passava a
 //  escolher essa declaração e a dar erro (12, a 2026-11-06).
 //
 

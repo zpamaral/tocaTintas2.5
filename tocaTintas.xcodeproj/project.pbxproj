@@ -9,7 +9,7 @@
 /* Begin PBXBuildFile section */
 		1F04EB2E2E5BBA9500323023 /* audio_stuff_info in Resources */ = {isa = PBXBuildFile; fileRef = 1F04EB2D2E5BBA9500323023 /* audio_stuff_info */; };
 		1F10D08C308A484A005ADBA1 /* tocaTintas.sdef in Resources */ = {isa = PBXBuildFile; fileRef = 1F10D08B308A484A005ADBA1 /* tocaTintas.sdef */; };
-		1F12F2AA2C7C85480064C694 /* ViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F12F2A92C7C85480064C694 /* ViewController.m */; };
+		1F12F2AA2C7C85480064C694 /* ZPPrincipal.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F12F2A92C7C85480064C694 /* ZPPrincipal.m */; };
 		1F12F2AC2C7C854C0064C694 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1F12F2AB2C7C854C0064C694 /* Assets.xcassets */; };
 		1F12F2AF2C7C854C0064C694 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 1F12F2AD2C7C854C0064C694 /* Main.storyboard */; };
 		1F12F2B12C7C854C0064C694 /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 1F12F2B02C7C854C0064C694 /* main.m */; };
@@ -115,8 +115,8 @@
 		1F04EB2D2E5BBA9500323023 /* audio_stuff_info */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = audio_stuff_info; path = /Users/amaral/Applications/audio_stuff_info; sourceTree = "<absolute>"; };
 		1F10D08B308A484A005ADBA1 /* tocaTintas.sdef */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = tocaTintas.sdef; sourceTree = "<group>"; };
 		1F12F2A22C7C85480064C694 /* tocaTintas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = tocaTintas.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		1F12F2A82C7C85480064C694 /* ViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ViewController.h; sourceTree = "<group>"; };
-		1F12F2A92C7C85480064C694 /* ViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ViewController.m; sourceTree = "<group>"; };
+		1F12F2A82C7C85480064C694 /* ZPPrincipal.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZPPrincipal.h; sourceTree = "<group>"; };
+		1F12F2A92C7C85480064C694 /* ZPPrincipal.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZPPrincipal.m; sourceTree = "<group>"; };
 		1F12F2AB2C7C854C0064C694 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		1F12F2AE2C7C854C0064C694 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
 		1F12F2B02C7C854C0064C694 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
@@ -288,8 +288,8 @@
 			isa = PBXGroup;
 			children = (
 				1F12F2B82C7C86D60064C694 /* Property List.plist */,
-				1F12F2A82C7C85480064C694 /* ViewController.h */,
-				1F12F2A92C7C85480064C694 /* ViewController.m */,
+				1F12F2A82C7C85480064C694 /* ZPPrincipal.h */,
+				1F12F2A92C7C85480064C694 /* ZPPrincipal.m */,
 				1F26DC4B30A9FBC9008B82F3 /* ZPOrigens.h */,
 				1F26DC4C30A9FBC9008B82F3 /* ZPOrigens.m */,
 				1F26DC4830A8DC20008B82F3 /* ZPDescobertas.h */,
@@ -645,7 +645,7 @@
 				1FA3F84B30949C2000ACF01D /* ZPPosGravacao.m in Sources */,
 				1F2E2778309DD440001B0268 /* ZPLeitorEspacial.m in Sources */,
 				1F26DC4D30A9FBC9008B82F3 /* ZPOrigens.m in Sources */,
-				1F12F2AA2C7C85480064C694 /* ViewController.m in Sources */,
+				1F12F2AA2C7C85480064C694 /* ZPPrincipal.m in Sources */,
 				1F12F2B12C7C854C0064C694 /* main.m in Sources */,
 				1F7D75232C963F600046E0AC /* ZPOpusDecoder.m in Sources */,
 				1FBE64BD2CE37FD90092C6FA /* ZPAirPlay.m in Sources */,

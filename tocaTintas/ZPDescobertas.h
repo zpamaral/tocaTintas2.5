@@ -10,7 +10,7 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// Quem sabe da estação que está a tocar (o ViewController). A chave de uma
+/// Quem sabe da estação que está a tocar (o ZPPrincipal). A chave de uma
 /// faixa é o caminho do ficheiro ou «musica:<persistent ID>».
 @protocol ZPFonteDaEstacao <NSObject>
 /// As faixas alinhadas para tocar depois da que se ouve, por ordem; cada uma
