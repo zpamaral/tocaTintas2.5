@@ -2706,42 +2706,42 @@ static const NSUInteger ZPTentativasDaFrequencia = 20;   // × 0,5 s
     }];
 }
 
+// O cava desta aplicação, e só ele. O padrão antigo («cava» em qualquer sítio
+// da linha de comando) apanhava também outros processos, como uma shell com
+// «cava» num argumento ou um cava compilado à mão a partir da fonte.
+static NSString *ZPPadraoDoCava(void) {
+    NSString *caminho = [[NSBundle mainBundle] pathForResource:@"cava" ofType:@""];
+    return caminho.length ? [@"^" stringByAppendingString:caminho] : @"^cava( |$)";
+}
+
+/// Corre o pgrep ou o pkill com o padrão do cava; devolve o código de saída
+/// (no pgrep, 0 é «há pelo menos um»).
+static int ZPPgrepDoCava(NSString *programa, NSArray<NSString *> *antes) {
+    NSTask *t = [[NSTask alloc] init];
+    t.executableURL = [NSURL fileURLWithPath:programa];
+    t.arguments = [antes arrayByAddingObjectsFromArray:@[@"-f", ZPPadraoDoCava()]];
+    t.standardOutput = [NSFileHandle fileHandleWithNullDevice];
+    t.standardError = [NSFileHandle fileHandleWithNullDevice];
+    if (![t launchAndReturnError:NULL]) return -1;
+    [t waitUntilExit];
+    return t.terminationStatus;
+}
+
+static BOOL ZPHaCava(void) { return ZPPgrepDoCava(@"/usr/bin/pgrep", @[]) == 0; }
+
 - (void)manageCava {
-    // Step 1: Terminate any extraneous instances of cava
-    #ifdef DEBUG
-    NSLog(@"Terminating any existing cava instances…");
-    #endif
-    NSString *killCommand = @"/usr/bin/pkill -f cava";
-    system([killCommand UTF8String]);
-
-    // Step 2: Check if cava is already running
-    #ifdef DEBUG
-    NSLog(@"Checking if cava is running…");
-    #endif
-    NSString *checkCommand = @"/usr/bin/pgrep -f cava";
-    FILE *pipe = popen([checkCommand UTF8String], "r");
-    if (!pipe) {
-        #ifdef DEBUG
-        NSLog(@"Failed to check cava status.");
-        #endif
-        return;
+    // Os cava de execuções anteriores (o Xcode pára a app com SIGKILL, e o cava
+    // fica) saem, e lança-se sempre um novo. Antes, o pgrep corria logo a
+    // seguir ao pkill, ainda via o antigo a morrer, concluía «já está a
+    // correr» e não lançava nenhum: o histograma ficava vazio até à primeira
+    // verificação de saúde, 30 s depois (visto a 2026-11-16: app às 09:12:07,
+    // cava às 09:12:38).
+    if (ZPHaCava()) {
+        ZPPgrepDoCava(@"/usr/bin/pkill", @[]);
+        for (int i = 0; i < 20 && ZPHaCava(); ++i) [NSThread sleepForTimeInterval:0.05];
+        if (ZPHaCava()) ZPPgrepDoCava(@"/usr/bin/pkill", @[@"-9"]);
     }
-    char buffer[128]; // This buffer is outside the block
-    BOOL isRunning = fgets(buffer, sizeof(buffer), pipe) != NULL;
-    pclose(pipe);
-
-    if (isRunning) {
-        #ifdef DEBUG
-        NSLog(@"Cava is already running.");
-        #endif
-        // Proceed to set up health check timer
-    } else {
-        // Step 3: Start cava
-        #ifdef DEBUG
-        NSLog(@"Cava is not running. Starting it…");
-        #endif
-        [self startCava];
-    }
+    [self startCava];
 
     // Step 4: Set up periodic health checks
     #ifdef DEBUG
@@ -2755,23 +2755,14 @@ static const NSUInteger ZPTentativasDaFrequencia = 20;   // × 0,5 s
     healthCheckTimer = [NSTimer scheduledTimerWithTimeInterval:30.0
                                                         repeats:YES
                                                           block:^(NSTimer * _Nonnull timer) {
-        // O popen faz fork+exec: corrido no thread principal, bloqueia o runloop
+        // O pgrep faz fork+exec: corrido no thread principal, bloqueia o runloop
         // uns milissegundos de 30 em 30 segundos, o que se vê como um solavanco
         // periódico no histograma. Vai para uma fila de fundo.
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             #ifdef DEBUG
             NSLog(@"Performing health check for cava…");
             #endif
-            char healthBuffer[128];
-            FILE *innerPipe = popen([checkCommand UTF8String], "r");
-            if (!innerPipe) {
-                #ifdef DEBUG
-                NSLog(@"Failed to check cava status during health check.");
-                #endif
-                return;
-            }
-            BOOL isRunning = fgets(healthBuffer, sizeof(healthBuffer), innerPipe) != NULL;
-            pclose(innerPipe);
+            BOOL isRunning = ZPHaCava();
 
             if (!isRunning) {
                 #ifdef DEBUG
