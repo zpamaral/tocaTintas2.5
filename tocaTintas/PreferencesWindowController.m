@@ -138,6 +138,42 @@ BOOL ZPRecordStopsAtAlbumEnd(void) {
     return !guardado || guardado.boolValue;
 }
 
+// As preferências da estação. Cada régua guarda o seu número; o que não
+// estiver guardado vale o que o vectorizar usa por omissão. Lidas a cada
+// estação que se cria ou prolonga, por isso uma mudança vale para a próxima.
+NSString * const kStationSeedArtistShareDefaultsKey = @"stationSeedArtistShare";
+NSString * const kStationListsAnchorDefaultsKey     = @"stationListsAnchor";
+NSString * const kStationListenersAnchorDefaultsKey = @"stationListenersAnchor";
+NSString * const kStationWavesDefaultsKey           = @"stationWaves";
+
+typedef struct { NSString * const *chave; NSString *opcao; double minimo, maximo, omissao, passo; } ZPReguaDaEstacao;
+static const ZPReguaDaEstacao kReguasDaEstacao[] = {
+    { &kStationSeedArtistShareDefaultsKey, @"--da-semente",        0.0, 0.4,  0.2,  0.05 },
+    { &kStationListsAnchorDefaultsKey,     @"--ancora-das-listas", 0.0, 0.08, 0.03, 0.01 },
+    { &kStationListenersAnchorDefaultsKey, @"--ancora",            0.0, 0.15, 0.08, 0.01 },
+    { &kStationWavesDefaultsKey,           @"--ondas",             1.0, 10.0, 5.0,  1.0  },
+};
+static const NSUInteger kNumReguasDaEstacao = sizeof(kReguasDaEstacao) / sizeof(kReguasDaEstacao[0]);
+
+static double ZPValorDaRegua(NSUInteger i) {
+    const ZPReguaDaEstacao *r = &kReguasDaEstacao[i];
+    NSNumber *guardado = [[NSUserDefaults standardUserDefaults] objectForKey:*r->chave];
+    double v = [guardado isKindOfClass:[NSNumber class]] ? guardado.doubleValue : r->omissao;
+    return MIN(MAX(v, r->minimo), r->maximo);
+}
+
+NSArray<NSString *> *ZPStationArguments(void) {
+    NSMutableArray<NSString *> *a = [NSMutableArray array];
+    NSLocale *posix = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];   // ponto decimal, que é o que o vectorizar lê
+    for (NSUInteger i = 0; i < kNumReguasDaEstacao; ++i) {
+        double v = ZPValorDaRegua(i);
+        [a addObject:kReguasDaEstacao[i].opcao];
+        [a addObject:kReguasDaEstacao[i].passo >= 1.0 ? [NSString stringWithFormat:@"%ld", lround(v)]
+                                                      : [[NSString alloc] initWithFormat:@"%.3f" locale:posix, v]];
+    }
+    return a;
+}
+
 NSString * const kBS2BEqDefaultsKey        = @"bs2bEq";
 NSString * const kBS2BEqChangedNotification = @"BS2BEqChanged";
 
@@ -232,6 +268,7 @@ NSString *ZPCurrentBS2BProfile(void) {
 @property (strong, nonatomic) NSPopUpButton *cdOrdemPopUp;
 @property (strong, nonatomic) NSTextField *gnudbEmailCampo;
 @property (strong, nonatomic) NSPopUpButton *gravacaoFontePopUp;
+@property (strong, nonatomic) NSArray<NSSlider *> *reguasDaEstacao;
 @property (strong, nonatomic) ZPAirPlay *descobertaEmparelhamento;
 @property (strong, nonatomic) NSPopUpButton *emparelharPopUp;
 @property (strong, nonatomic) NSTextField *emparelharEstado;
@@ -312,6 +349,11 @@ NSString *ZPCurrentBS2BProfile(void) {
     itemGravacao.label = NSLocalizedString(@"prefs_tab_recording", @"Título do separador da gravação");
     itemGravacao.view = [self criarVistaGravacao];
     [separadores addTabViewItem:itemGravacao];
+
+    NSTabViewItem *itemEstacao = [[NSTabViewItem alloc] initWithIdentifier:@"estacao"];
+    itemEstacao.label = NSLocalizedString(@"prefs_tab_station", @"Título do separador da estação");
+    itemEstacao.view = [self criarVistaEstacao];
+    [separadores addTabViewItem:itemEstacao];
 
     NSTabViewItem *itemEmparelhar = [[NSTabViewItem alloc] initWithIdentifier:@"emparelhar"];
     itemEmparelhar.label = NSLocalizedString(@"prefs_tab_pairing", @"Título do separador do emparelhamento AirPlay");
@@ -820,6 +862,73 @@ NSString *ZPCurrentBS2BProfile(void) {
 - (void)pararNoFimDoAlbumMudou:(NSButton *)sender {
     [[NSUserDefaults standardUserDefaults] setBool:(sender.state == NSControlStateValueOn)
                                             forKey:kRecordStopAtAlbumEndDefaultsKey];
+}
+
+#pragma mark - Estação
+
+// Quatro réguas, uma por preferência, cada uma com o valor à direita e uma
+// linha pequena a dizer o que faz. «Repor» volta aos valores por omissão.
+- (NSView *)criarVistaEstacao {
+    const CGFloat A = 390, margem = 20, largura = 440;
+    NSView *vista = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 480, A)];
+    CGFloat topo = A - margem;
+    NSTextField *t = [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 60, largura, 60)
+                                texto:NSLocalizedString(@"prefs_station_explanation", @"O que estas preferências mudam")
+                              pequena:NO];
+    topo = NSMinY(t.frame) - 14;
+    NSArray<NSString *> *titulos = @[@"prefs_station_seed", @"prefs_station_lists", @"prefs_station_listeners", @"prefs_station_waves"];
+    NSArray<NSString *> *notas = @[@"prefs_station_seed_note", @"prefs_station_lists_note", @"prefs_station_listeners_note", @"prefs_station_waves_note"];
+    NSMutableArray<NSSlider *> *reguas = [NSMutableArray array];
+    for (NSUInteger i = 0; i < kNumReguasDaEstacao; ++i) {
+        const ZPReguaDaEstacao *r = &kReguasDaEstacao[i];
+        [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 17, 200, 17) texto:NSLocalizedString(titulos[i], @"Régua da estação") pequena:NO];
+        NSSlider *s = [NSSlider sliderWithValue:ZPValorDaRegua(i) minValue:r->minimo maxValue:r->maximo target:self action:@selector(reguaDaEstacaoMudou:)];
+        s.frame = NSMakeRect(margem + 200, topo - 20, 180, 20);
+        s.numberOfTickMarks = (NSInteger)lround((r->maximo - r->minimo) / r->passo) + 1;
+        s.allowsTickMarkValuesOnly = YES;
+        s.tag = (NSInteger)i;
+        [vista addSubview:s];
+        [reguas addObject:s];
+        NSTextField *v = [self etiquetaEm:vista moldura:NSMakeRect(margem + 390, topo - 17, 50, 17) texto:@"" pequena:NO];
+        v.alignment = NSTextAlignmentRight;
+        v.tag = 1000 + (NSInteger)i;
+        [self mostrarValorDaRegua:s];
+        topo -= 24;
+        NSTextField *n = [self etiquetaEm:vista moldura:NSMakeRect(margem, topo - 30, largura, 30) texto:NSLocalizedString(notas[i], @"O que faz a régua") pequena:YES];
+        topo = NSMinY(n.frame) - 12;
+    }
+    NSButton *repor = [NSButton buttonWithTitle:NSLocalizedString(@"prefs_station_reset", @"Repor") target:self action:@selector(reporEstacao:)];
+    [repor sizeToFit];
+    repor.frame = NSMakeRect(margem + largura - NSWidth(repor.frame) + 6, MAX(topo - 32, 8), NSWidth(repor.frame), 32);
+    [vista addSubview:repor];
+    self.reguasDaEstacao = reguas;
+    return vista;
+}
+
+- (void)mostrarValorDaRegua:(NSSlider *)s {
+    NSTextField *v = [s.superview viewWithTag:1000 + s.tag];
+    double x = s.doubleValue;
+    NSNumberFormatter *f = [[NSNumberFormatter alloc] init];
+    if (s.tag == 0) { f.numberStyle = NSNumberFormatterPercentStyle; }
+    else if (kReguasDaEstacao[s.tag].passo >= 1.0) { f.numberStyle = NSNumberFormatterDecimalStyle; f.maximumFractionDigits = 0; }
+    else { f.numberStyle = NSNumberFormatterDecimalStyle; f.minimumFractionDigits = 2; f.maximumFractionDigits = 2; }
+    v.stringValue = [f stringFromNumber:@(x)] ?: @"";
+}
+
+- (void)reguaDaEstacaoMudou:(NSSlider *)s {
+    const ZPReguaDaEstacao *r = &kReguasDaEstacao[s.tag];
+    double x = round(s.doubleValue / r->passo) * r->passo;
+    [[NSUserDefaults standardUserDefaults] setDouble:x forKey:*r->chave];
+    [self mostrarValorDaRegua:s];
+}
+
+- (void)reporEstacao:(id)sender {
+    NSArray<NSSlider *> *reguas = self.reguasDaEstacao;
+    for (NSUInteger i = 0; i < kNumReguasDaEstacao; ++i) {
+        [[NSUserDefaults standardUserDefaults] removeObjectForKey:*kReguasDaEstacao[i].chave];
+        reguas[i].doubleValue = kReguasDaEstacao[i].omissao;
+        [self mostrarValorDaRegua:reguas[i]];
+    }
 }
 
 #pragma mark - Emparelhamento AirPlay

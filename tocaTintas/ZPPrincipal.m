@@ -5195,6 +5195,7 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
                       [NSString stringWithFormat:@"tocaTintas-estacao-%@.tsv", NSUUID.UUID.UUIDString]];
     NSMutableArray<NSString *> *argumentos = [@[@"estacao", base, semente, @"--info", info] mutableCopy];
     [argumentos addObjectsFromArray:ZPArgumentosDasOrigens()];
+    [argumentos addObjectsFromArray:ZPStationArguments()];   // Definições ▸ Estação
     if ([[NSFileManager defaultManager] fileExistsAtPath:mapa]) [argumentos addObjectsFromArray:@[@"--mapa", mapa]];
     if (quemE.count == 3 && quemE[2].length) {
         [argumentos addObjectsFromArray:@[@"--artista", quemE[0], @"--album", quemE[1], @"--titulo", quemE[2]]];
@@ -5332,6 +5333,7 @@ static NSDictionary<NSString *, NSDictionary<NSString *, NSArray<NSString *> *> 
     [[jaLa.array componentsJoinedByString:@"\n"] writeToFile:sem atomically:YES encoding:NSUTF8StringEncoding error:NULL];
     NSMutableArray<NSString *> *argumentos = [@[@"estacao", base, semente, @"-n", @"26", @"--sem", sem, @"--info", info] mutableCopy];
     [argumentos addObjectsFromArray:ZPArgumentosDasOrigens()];
+    [argumentos addObjectsFromArray:ZPStationArguments()];   // Definições ▸ Estação
     for (NSString *chave in self.estacaoPromovidas) [argumentos addObjectsFromArray:@[@"--rumo", chave]];
     for (NSString *chave in self.estacaoRejeitadas) [argumentos addObjectsFromArray:@[@"--longe", chave]];
     if ([[NSFileManager defaultManager] fileExistsAtPath:mapa]) [argumentos addObjectsFromArray:@[@"--mapa", mapa]];

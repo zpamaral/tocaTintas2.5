@@ -101,6 +101,16 @@ NSString *ZPCurrentRecordSource(void);
 extern NSString * const kRecordStopAtAlbumEndDefaultsKey;
 BOOL ZPRecordStopsAtAlbumEnd(void);
 
+/// Preferências da estação (separador «Estação»), lidas a cada estação que se
+/// cria ou prolonga. Ausentes valem o que o vectorizar usa por omissão.
+extern NSString * const kStationSeedArtistShareDefaultsKey;   // parte do artista da semente, 0–0,4 (0,2)
+extern NSString * const kStationListsAnchorDefaultsKey;       // peso das listas M3U8, 0–0,08 (0,03)
+extern NSString * const kStationListenersAnchorDefaultsKey;   // peso dos vizinhos de ouvintes (ListenBrainz), 0–0,15 (0,08)
+extern NSString * const kStationWavesDefaultsKey;             // regressos à semente (ondas), 1–10 (5)
+
+/// Os argumentos que estas preferências dão ao «vectorizar estacao».
+NSArray<NSString *> *ZPStationArguments(void);
+
 @interface PreferencesWindowController : NSWindowController
 
 @property (weak) IBOutlet NSButton *saveButton; // Button for saving
@@ -111,7 +121,7 @@ BOOL ZPRecordStopsAtAlbumEnd(void);
 - (void)reloadDirectoryPath; // Method to reload the directory path from user defaults
 
 /// Mostra a janela já no separador com este identificador («musica», «dsp»,
-/// «eq», «airplay», «cd», «gravacao», «emparelhar»).
+/// «eq», «airplay», «cd», «gravacao», «estacao», «emparelhar»).
 - (void)mostrarSeparador:(NSString *)identificador;
 
 @end

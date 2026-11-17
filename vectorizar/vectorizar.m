@@ -26,7 +26,7 @@
 //    vectorizar esquecer MAPA ID
 //        Calcula as assinaturas que faltam: músicas novas, ou cujo ficheiro
 //        preferido mudou de áudio.
-//    vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--mapa MAPA] [--artista A --album B --titulo T]
+//    vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--da-semente 0.2] [--ancora-das-listas 0.03] [--listas PASTA] [--mapa MAPA] [--artista A --album B --titulo T]
 //        Escreve os caminhos da estação, um por linha, com a semente à cabeça e
 //        os vizinhos por ordem de semelhança. Se a semente ainda não tiver
 //        assinatura, calcula-a (e guarda-a, se a música for da fonoteca).
@@ -705,6 +705,59 @@ static NSString *gInfo;                      // --info: onde escrever, para cada
 static NSString *gSementeArtista, *gSementeAlbum, *gSementeTitulo;   // --artista/--album/--titulo no estacao: quem é uma semente que não está na base nem no mapa (o excerto da loja de uma faixa do catálogo)
 static NSString *gOrigens;                   // --origens: o ficheiro das regras de origem (ver «Origens»)
 static NSUInteger gOndas = 5;   // --ondas: em quantas voltas à semente se reparte a estação (1 = por ordem de semelhança)
+static float gDaSemente = 0.2f;        // --da-semente: que parte da estação é do artista da semente (0 = conta como os outros, até --por-artista)
+static float gAncoraDasListas = 0.03f; // --ancora-das-listas: quanto sobe uma faixa que partilhe com a semente a lista mais estreita (0 = nada)
+static NSString *gListas;              // --listas: a pasta das M3U8 (omissão: «Listas», ao lado da base)
+
+// A âncora das listas: as M3U8 de quem ouve dizem o que ele junta, e isso o
+// som não sabe. Uma faixa que partilhe uma lista com a semente sobe na
+// semelhança, tanto mais quanto mais estreita for a lista (Shoegazing (curta)
+// diz mais do que Portuguesa): bónus = a × log(n/tamanho) / log(n/10), entre 0
+// e 1, e conta a lista mais estreita das que partilham. Ficam de fora as
+// «Claude …», as estações gravadas e as de menos de cinco artistas. Lêem-se a
+// cada estação: uma lista mudada conta logo. Ensaio de 2026-11-17: com 0,03,
+// mais vizinhas da escolha de quem ouve e um pouco menos de descoberta.
+static float *ZPBonusDasListas(NSArray<NSArray<NSString *> *> *faixas, NSInteger iSemente, NSString *base) {
+    if (gAncoraDasListas <= 0 || iSemente < 0) return NULL;
+    NSUInteger n = faixas.count;
+    NSString *pasta = gListas.length ? gListas.stringByStandardizingPath
+                                     : [base.stringByStandardizingPath.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"Listas"];
+    NSArray<NSString *> *nomes = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:pasta error:NULL];
+    if (!nomes.count) return NULL;
+    // Cada linha de uma M3U8 é um caminho ou «musica:PID».
+    NSMutableDictionary<NSString *, NSNumber *> *indice = [NSMutableDictionary dictionaryWithCapacity:n];
+    for (NSUInteger i = 0; i < n; ++i) {
+        NSString *chave = [faixas[i][0] hasPrefix:@"musica:"] ? faixas[i][0] : faixas[i][4].precomposedStringWithCanonicalMapping;
+        indice[chave] = @(i);
+    }
+    float *bonus = NULL;
+    NSMutableArray<NSString *> *daSemente = [NSMutableArray array];
+    for (NSString *ficheiro in [nomes sortedArrayUsingSelector:@selector(compare:)]) {
+        if (![ficheiro.pathExtension.lowercaseString isEqualToString:@"m3u8"]) continue;
+        NSString *nome = ficheiro.stringByDeletingPathExtension.precomposedStringWithCanonicalMapping;
+        if ([nome hasPrefix:@"Claude"] || [nome hasPrefix:@"Estação"]) continue;
+        NSString *texto = [NSString stringWithContentsOfFile:[pasta stringByAppendingPathComponent:ficheiro] encoding:NSUTF8StringEncoding error:NULL];
+        if (!texto) continue;
+        NSMutableIndexSet *membros = [NSMutableIndexSet indexSet];
+        NSMutableSet<NSString *> *artistas = [NSMutableSet set];
+        for (NSString *linha in [texto componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
+            NSString *l = [linha stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet].precomposedStringWithCanonicalMapping;
+            if (!l.length || [l hasPrefix:@"#"]) continue;
+            NSNumber *i = indice[[l componentsSeparatedByString:@"\t"].firstObject];
+            if (!i) continue;
+            [membros addIndex:i.unsignedIntegerValue];
+            [artistas addObject:ZPChaveDoArtista(faixas[i.unsignedIntegerValue][1], faixas[i.unsignedIntegerValue][2])];
+        }
+        if (![membros containsIndex:(NSUInteger)iSemente] || artistas.count < 5 || membros.count < 10) continue;
+        float espec = (float)(log((double)n / membros.count) / log((double)n / 10.0));
+        float b = gAncoraDasListas * MIN(MAX(espec, 0.0f), 1.0f);
+        if (!bonus) bonus = calloc(n, sizeof(float));
+        [membros enumerateIndexesUsingBlock:^(NSUInteger i, BOOL *parar) { if (b > bonus[i]) bonus[i] = b; }];
+        [daSemente addObject:[NSString stringWithFormat:@"%@ (%lu, +%.3f)", nome, (unsigned long)membros.count, b]];
+    }
+    if (daSemente.count) fprintf(stderr, "listas: a semente está em %s\n", [daSemente componentsJoinedByString:@", "].UTF8String);
+    return bonus;
+}
 
 #pragma mark Origens
 
@@ -1037,6 +1090,14 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     }
     sqlite3_close(mapa);
 
+    // A âncora das listas (ver ZPBonusDasListas).
+    NSInteger iSemente = -1;
+    for (NSUInteger i = 0; i < n; ++i) {
+        NSArray<NSString *> *f = faixas[i];
+        if ((musica && [f[0] isEqualToString:musica]) || [f[4] isEqualToString:caminhoDaSemente] || [f[0] isEqualToString:caminhoDaSemente]) { iSemente = (NSInteger)i; break; }
+    }
+    float *bonusDasListas = ZPBonusDasListas(faixas, iSemente, base);
+
     // O rumo: o que quem ouve fez na janela «A seguir». As faixas que puxou
     // para cima (--rumo) aproximam o alvo de si, as que desmarcou (--longe)
     // afastam-no, estas com metade do peso: afastar do som de uma faixa leva
@@ -1088,7 +1149,10 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
         ordem[i] = i;
         // Uma faixa de um artista vizinho sobe na ordem, tanto mais quanto mais vizinho.
         if (vizinhos.count) semelhanca[i] += gAncora * [vizinhos[ZPChaveDoArtista(faixas[i][1], faixas[i][2])] floatValue];
+        // E uma que partilhe uma lista com a semente, tanto mais quanto mais estreita a lista.
+        if (bonusDasListas) semelhanca[i] += bonusDasListas[i];
     }
+    free(bonusDasListas);
     vDSP_vsorti(semelhanca, ordem, NULL, n, -1);
 
     // A semente vai à cabeça e conta para as regras. Se for da fonoteca, sabe-se
@@ -1096,12 +1160,14 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     NSMutableSet<NSString *> *titulos = [NSMutableSet set];
     NSCountedSet<NSString *> *artistas = [NSCountedSet set], *albuns = [NSCountedSet set];
     BOOL sementeConhecida = NO;
+    NSString *artistaDaSemente = nil;
     for (NSArray<NSString *> *f in faixas) {
         if ((musica && [f[0] isEqualToString:musica]) || [f[4] isEqualToString:caminhoDaSemente] || [f[0] isEqualToString:caminhoDaSemente]) {
             if (sementeDoMusica) caminhoDaSemente = f[4];   // com o nome, para quem lê a lista
             NSString *chave = ZPChaveDoTitulo(f[3]);
             if (chave.length) [titulos addObject:chave];
-            [artistas addObject:ZPChaveDoArtista(f[1], f[2])];
+            artistaDaSemente = ZPChaveDoArtista(f[1], f[2]);
+            [artistas addObject:artistaDaSemente];
             [albuns addObject:[NSString stringWithFormat:@"%@|%@", f[1], f[2]]];
             sementeConhecida = YES;
             break;
@@ -1116,12 +1182,19 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
         if (chave.length) [titulos addObject:chave];
         if (gSementeArtista.length) {
             NSString *album = gSementeAlbum ?: @"";
-            [artistas addObject:ZPChaveDoArtista(gSementeArtista, album)];
+            artistaDaSemente = ZPChaveDoArtista(gSementeArtista, album);
+            [artistas addObject:artistaDaSemente];
             [albuns addObject:[NSString stringWithFormat:@"%@|%@", gSementeArtista, album]];
         }
     }
     printf("%s\n", caminhoDaSemente.UTF8String);
     NSMutableArray<NSString *> *porOrdem = [NSMutableArray array];   // as escolhidas, da mais parecida à menos
+    // O artista da semente tem quota própria (--da-semente): começar nos Beach
+    // Fossils e quase não os ouvir era estranho (2026-11-17). As faixas dele
+    // são as mais parecidas com a semente, até 3 por álbum, e espalham-se pela
+    // estação em vez de virem juntas. Com 0, conta como os outros.
+    NSUInteger quotaDaSemente = artistaDaSemente.length ? (NSUInteger)lroundf(quantas * gDaSemente) : 0;
+    NSMutableArray<NSString *> *doArtistaDaSemente = [NSMutableArray array];
     NSMutableString *info = [NSMutableString string];
     NSUInteger escolhidas = 1;
     for (NSUInteger k = 0; k < n && escolhidas < quantas; ++k) {
@@ -1134,12 +1207,18 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
         if (chave.length && [titulos containsObject:chave]) continue;          // outra versão da mesma canção
         NSString *artista = ZPChaveDoArtista(f[1], f[2]);
         NSString *album = [NSString stringWithFormat:@"%@|%@", f[1], f[2]];
-        if ([artistas countForObject:artista] >= porArtista) continue;
-        if ([albuns countForObject:album] >= porAlbum) continue;
+        BOOL daSemente = quotaDaSemente && [artista isEqualToString:artistaDaSemente];
+        if (daSemente) {
+            if (doArtistaDaSemente.count >= quotaDaSemente) continue;
+            if ([albuns countForObject:album] >= MAX(porAlbum, 3)) continue;
+        } else {
+            if ([artistas countForObject:artista] >= porArtista) continue;
+            if ([albuns countForObject:album] >= porAlbum) continue;
+        }
         if (chave.length) [titulos addObject:chave];
         [artistas addObject:artista];
         [albuns addObject:album];
-        [porOrdem addObject:f[4]];
+        [(daSemente ? doArtistaDaSemente : porOrdem) addObject:f[4]];
         // A chave é o que a linha tem antes da tabulação: o caminho ou «musica:PID».
         [info appendFormat:@"%@\t%@\t%@\t%@\t%.3f\n", [f[4] componentsSeparatedByString:@"\t"].firstObject, f[1], f[3], f[2], semelhanca[ordem[k]]];
         ++escolhidas;
@@ -1150,9 +1229,17 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     // Com cinco ondas, a primeira leva a 1.ª, a 6.ª, a 11.ª… mais parecidas, a
     // segunda a 2.ª, a 7.ª, a 12.ª…
     NSUInteger ondas = MAX(MIN(gOndas, porOrdem.count), (NSUInteger)1);
+    NSMutableArray<NSString *> *saida = [NSMutableArray arrayWithCapacity:porOrdem.count + doArtistaDaSemente.count];
     for (NSUInteger onda = 0; onda < ondas; ++onda) {
-        for (NSUInteger k = onda; k < porOrdem.count; k += ondas) printf("%s\n", porOrdem[k].UTF8String);
+        for (NSUInteger k = onda; k < porOrdem.count; k += ondas) [saida addObject:porOrdem[k]];
     }
+    // As do artista da semente, a intervalos iguais (a primeira a meio do primeiro intervalo).
+    NSUInteger total = saida.count + doArtistaDaSemente.count;
+    for (NSUInteger k = 0; k < doArtistaDaSemente.count; ++k) {
+        NSUInteger lugar = MIN((NSUInteger)((k + 0.5) * total / doArtistaDaSemente.count), saida.count);
+        [saida insertObject:doArtistaDaSemente[k] atIndex:lugar];
+    }
+    for (NSString *linha in saida) printf("%s\n", linha.UTF8String);
     if (gInfo.length) [info writeToFile:gInfo atomically:YES encoding:NSUTF8StringEncoding error:NULL];
     free(semelhanca);
     free(ordem);
@@ -2115,8 +2202,14 @@ int main(int argc, const char *argv[]) {
                 else if ([a isEqualToString:@"--longe"]) { if (!gLonges) gLonges = [NSMutableArray array]; [gLonges addObject:args[i + 1]]; }
                 else if ([a isEqualToString:@"--sem"]) gSem = args[i + 1]; else gInfo = args[i + 1];
                 [args removeObjectsInRange:NSMakeRange(i, 2)];
-            } else if ([a isEqualToString:@"--ancora"] && i + 1 < args.count) {
-                gAncora = MAX(args[i + 1].floatValue, 0.0f);
+            } else if ([@[@"--ancora", @"--ancora-das-listas", @"--da-semente"] containsObject:a] && i + 1 < args.count) {
+                float v = MAX(args[i + 1].floatValue, 0.0f);
+                if ([a isEqualToString:@"--ancora"]) gAncora = v;
+                else if ([a isEqualToString:@"--ancora-das-listas"]) gAncoraDasListas = v;
+                else gDaSemente = MIN(v, 0.5f);
+                [args removeObjectsInRange:NSMakeRange(i, 2)];
+            } else if ([a isEqualToString:@"--listas"] && i + 1 < args.count) {
+                gListas = args[i + 1];
                 [args removeObjectsInRange:NSMakeRange(i, 2)];
             } else if ([@[@"-n", @"--por-artista", @"--por-album", @"--ondas"] containsObject:a] && i + 1 < args.count) {
                 NSUInteger v = (NSUInteger)MAX(args[i + 1].integerValue, 1);
@@ -2164,7 +2257,7 @@ int main(int argc, const char *argv[]) {
                             "     vectorizar esquecer MAPA ID\n"
                             "     vectorizar mapear BASE MAPA\n"
                             "     vectorizar falhou MAPA PID\n"
-                            "     vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--mapa MAPA] [--origens REGRAS.json] [--artista A --album B --titulo T]\n"
+                            "     vectorizar estacao BASE (caminho | uuid | musica:PID) [-n 50] [--por-artista 3] [--por-album 2] [--da-semente 0.2] [--ancora-das-listas 0.03] [--listas PASTA] [--mapa MAPA] [--origens REGRAS.json] [--artista A --album B --titulo T]\n"
                             "     vectorizar importar BASE lista.tsv saída\n"
                             "     vectorizar [--modelo M.mlmodelc] [--cpu] [--loja] lista.tsv saída\n"
                             "     vectorizar --excerto segundos ficheiro pcm.f32\n"
