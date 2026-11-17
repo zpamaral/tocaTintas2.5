@@ -908,9 +908,10 @@ NSString *ZPCurrentBS2BProfile(void) {
 - (void)mostrarValorDaRegua:(NSSlider *)s {
     NSTextField *v = [s.superview viewWithTag:1000 + s.tag];
     double x = s.doubleValue;
+    // A percentagem sem espaço («20%»): o símbolo de uma unidade cola-se ao número.
+    if (s.tag == 0) { v.stringValue = [NSString stringWithFormat:@"%ld%%", lround(x * 100)]; return; }
     NSNumberFormatter *f = [[NSNumberFormatter alloc] init];
-    if (s.tag == 0) { f.numberStyle = NSNumberFormatterPercentStyle; }
-    else if (kReguasDaEstacao[s.tag].passo >= 1.0) { f.numberStyle = NSNumberFormatterDecimalStyle; f.maximumFractionDigits = 0; }
+    if (kReguasDaEstacao[s.tag].passo >= 1.0) { f.numberStyle = NSNumberFormatterDecimalStyle; f.maximumFractionDigits = 0; }
     else { f.numberStyle = NSNumberFormatterDecimalStyle; f.minimumFractionDigits = 2; f.maximumFractionDigits = 2; }
     v.stringValue = [f stringFromNumber:@(x)] ?: @"";
 }

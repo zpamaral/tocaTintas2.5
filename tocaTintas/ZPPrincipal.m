@@ -3204,7 +3204,7 @@ static BOOL ZPHaCava(void) { return ZPPgrepDoCava(@"/usr/bin/pgrep", @[]) == 0; 
     if (!comAuscultadores) {
         nomeSimbolo = @"headphones";
         cor  = [NSColor secondaryLabelColor];
-        dica = @"Sem auscultadores na cavilha. O filtro só se liga com eles.";
+        dica = @"Sem auriculares na cavilha. O filtro só se liga com eles.";
     } else if (processar) {
         nomeSimbolo = @"headphones.circle.fill";
         cor  = [NSColor controlAccentColor];
