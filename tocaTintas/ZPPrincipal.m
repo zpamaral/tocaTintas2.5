@@ -5633,7 +5633,7 @@ static NSMutableDictionary<NSString *, NSArray<NSString *> *> *ZPLerInfoDaEstaca
     [log writeData:[cabecalho dataUsingEncoding:NSUTF8StringEncoding]];
     NSTask *task = [[NSTask alloc] init];
     task.executableURL = vectorizar;
-    task.arguments = @[@"refinar", base, @"--minutos", @"25"];
+    task.arguments = @[@"refinar", base, @"--minutos", @"25", @"--limpar"];
     task.standardInput = [NSFileHandle fileHandleWithNullDevice];
     task.standardOutput = log ?: [NSFileHandle fileHandleWithNullDevice];
     task.standardError = log ?: [NSFileHandle fileHandleWithNullDevice];

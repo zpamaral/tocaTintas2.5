@@ -2,7 +2,7 @@
 //  vectorizar.m
 //
 //  Um vector de 512 números por faixa, pelo codificador de áudio do CLAP
-//  (laion/larger_clap_general) convertido para Core ML, a correr no Neural
+//  (o de música do LAION, music_audioset_epoch_15_esc_90.14) convertido para Core ML, a correr no Neural
 //  Engine. Faz o mesmo que o analisar.py, sem Python nem PyTorch:
 //
 //    - três excertos de 10 s, aos 25, 50 e 75 % da faixa (um só, no início, se
@@ -19,7 +19,8 @@
 //
 //  Uso:
 //    vectorizar actualizar BASE
-//    vectorizar refinar BASE [--minutos N]
+//    vectorizar refinar BASE [--minutos N] [--limpar]
+//    vectorizar reassinar MAPA [--minutos N]
 //    vectorizar associar BASE MAPA --artista A [--titulo T] [--semente S] [-n 24]
 //    vectorizar descobertas MAPA [BASE [--semente S]] [-n 50]
 //    vectorizar esquecer MAPA ID
@@ -64,12 +65,15 @@
 
 // O nome com que as assinaturas ficam na base: o modelo e a maneira de tirar
 // os excertos. Mudando um ou outra, muda o nome, e as antigas não se misturam.
-static const char * const kModelo = "larger_clap_general/3x10s";
+// Desde 2026-11-17, o modelo de música do LAION (music_audioset_epoch_15_esc_90.14),
+// convertido por nós: o «laion/larger_clap_music» do Hugging Face tem pesos
+// errados. Antes, «larger_clap_general/…».
+static const char * const kModelo = "larger_clap_music/3x10s";
 // A assinatura é um processo: primeiro o esboço, com três janelas, que serve
 // logo; depois, sem pressa, a fina, com quinze (modo «refinar»). Medido em 346
 // faixas: com 3 janelas só 6,4 das 10 vizinhas são as que 31 janelas dariam;
 // com 7 são 8,1 e com 15 são 9,1. Acima de 15 já não compensa a leitura.
-static const char * const kModeloFino = "larger_clap_general/15x10s";
+static const char * const kModeloFino = "larger_clap_music/15x10s";
 static int gJanelas = 3;
 
 enum {
@@ -535,6 +539,8 @@ static int ZPModoActualizar(NSString *base) {
 // processador e de disco, e cede a quem estiver a tocar. Primeiro as músicas
 // mais ouvidas. Cada assinatura é guardada mal fica pronta, por isso pode ser
 // interrompido em qualquer altura.
+static BOOL gLimpar = NO;   // --limpar no refinar: apagar as assinaturas de modelos antigos
+
 static int ZPModoRefinar(NSString *base, double minutos) {
     setpriority(PRIO_DARWIN_PROCESS, 0, PRIO_DARWIN_BG);
     sqlite3 *db = ZPAbrirBase(base);
@@ -555,6 +561,15 @@ static int ZPModoRefinar(NSString *base, double minutos) {
         [porFazer addObject:@[ZPTexto(s, 0), @(sqlite3_column_double(s, 1)), ZPTexto(s, 2), ZPTexto(s, 3)]];
     }
     sqlite3_finalize(s);
+    // Depois de uma mudança de modelo, as assinaturas antigas já não servem a
+    // ninguém. Só com --limpar, que a aplicação passa: quem corre o vectorizar
+    // novo à mão, com a aplicação antiga ainda a usar as antigas, não as perde.
+    if (gLimpar && sqlite3_prepare_v2(db, "DELETE FROM assinaturas WHERE modelo NOT IN (?, ?)", -1, &s, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(s, 1, kModelo, -1, SQLITE_STATIC);
+        sqlite3_bind_text(s, 2, kModeloFino, -1, SQLITE_STATIC);
+        if (sqlite3_step(s) == SQLITE_DONE && sqlite3_changes(db) > 0) printf("apagadas %d assinaturas de modelos antigos\n", sqlite3_changes(db));
+        sqlite3_finalize(s);
+    }
     if (porFazer.count == 0) { printf("nada por refinar\n"); sqlite3_close(db); return 0; }
 
     MLModel *modelo = ZPModeloQuandoPreciso();
@@ -666,7 +681,7 @@ static BOOL ZPPareceUUID(NSString *s) {
 // 30 s da loja. Entram na estação como «musica:<persistent ID>», que é o que o
 // Música sabe tocar. A semente também pode ser uma delas.
 static NSString *gMapa = nil;
-static const char * const kModeloDoExcerto = "larger_clap_general/excerto-3x10s";
+static const char * const kModeloDoExcerto = "larger_clap_music/excerto-3x10s";
 
 static sqlite3 *ZPAbrirMapa(void) {
     sqlite3 *mapa = NULL;
@@ -1339,8 +1354,10 @@ static BOOL ZPAlvoDaSemente(sqlite3 *db, sqlite3 *mapa, NSString *semente, float
     sqlite3_stmt *s = NULL;
     BOOL tem = NO;
     if ([semente hasPrefix:@"musica:"]) {
-        if (sqlite3_prepare_v2(mapa, "SELECT a.vector FROM assinaturas a JOIN faixas f ON f.id = a.faixa WHERE f.pid = ?", -1, &s, NULL) != SQLITE_OK) return NO;
+        if (sqlite3_prepare_v2(mapa, "SELECT a.vector FROM assinaturas a JOIN faixas f ON f.id = a.faixa WHERE f.pid = ? AND a.modelo = ?",
+                               -1, &s, NULL) != SQLITE_OK) return NO;
         sqlite3_bind_text(s, 1, [semente substringFromIndex:7].UTF8String, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(s, 2, kModeloDoExcerto, -1, SQLITE_STATIC);
     } else {
         const char *sql = ZPPareceUUID(semente)
             ? "SELECT vector FROM assinaturas WHERE musica = ?1 AND modelo IN (?2, ?3) ORDER BY modelo = ?3 DESC LIMIT 1"
@@ -1653,7 +1670,8 @@ static int ZPModoDescobertas(NSString *caminhoDoMapa, NSString *base, NSString *
         NSMutableArray<NSArray *> *linhas = [NSMutableArray array];
         if (sqlite3_prepare_v2(mapa, "SELECT f.id, a.vector, f.artista, f.titulo, f.album, f.endereco, f.semente, f.associacao"
                                      "  FROM faixas f JOIN assinaturas a ON a.faixa = f.id"
-                                     " WHERE f.origem = 'associacao' AND f.esquecida_em IS NULL", -1, &s, NULL) == SQLITE_OK) {
+                                     " WHERE f.origem = 'associacao' AND f.esquecida_em IS NULL AND a.modelo = ?", -1, &s, NULL) == SQLITE_OK) {
+            sqlite3_bind_text(s, 1, kModeloDoExcerto, -1, SQLITE_STATIC);
             while (sqlite3_step(s) == SQLITE_ROW) {
                 if (sqlite3_column_bytes(s, 1) != kBytesDaAssinatura) continue;
                 float um[kDimensao], semelhanca = 0;
@@ -1841,6 +1859,101 @@ static int ZPModoFalhou(NSString *caminhoDoMapa, NSString *pid) {
     return 0;
 }
 
+// Reassinar: as faixas do mapa cuja assinatura é de outro modelo (ou não têm
+// nenhuma) voltam a ser assinadas com o actual. O excerto não fica guardado,
+// por isso pede-se outra vez à loja: o endereço do excerto, pelo lookup em
+// lotes de 150 (loja pt, e a us para as que lá não estiverem), e depois o
+// excerto. No mapa há uma assinatura por faixa, e a nova substitui a velha.
+// Durante «minutos» no máximo (0: até ao fim); as que falharem ficam para a
+// próxima. Devolve quantas ficaram assinadas.
+static NSUInteger ZPReassinarMapa(sqlite3 *mapa, double minutos) {
+    NSMutableArray<NSArray *> *porFazer = [NSMutableArray array];   // id, loja
+    sqlite3_stmt *s = NULL;
+    if (sqlite3_prepare_v2(mapa, "SELECT f.id, f.loja FROM faixas f LEFT JOIN assinaturas a ON a.faixa = f.id"
+                                 " WHERE (a.faixa IS NULL OR a.modelo <> ?) AND f.loja IS NOT NULL AND f.esquecida_em IS NULL"
+                                 " ORDER BY f.origem = 'biblioteca' DESC, f.id", -1, &s, NULL) == SQLITE_OK) {
+        sqlite3_bind_text(s, 1, kModeloDoExcerto, -1, SQLITE_STATIC);
+        while (sqlite3_step(s) == SQLITE_ROW) [porFazer addObject:@[@(sqlite3_column_int64(s, 0)), @(sqlite3_column_int64(s, 1))]];
+    }
+    sqlite3_finalize(s);
+    if (porFazer.count == 0) return 0;
+    printf("reassinar: %lu faixas do mapa com assinatura de outro modelo\n", (unsigned long)porFazer.count);
+    fflush(stdout);
+
+    MLModel *modelo = nil;
+    ZPMel *melador = NULL;
+    ZPTempos tempos = {0};
+    double t0 = ZPAgora(), ultimoPedido = 0.0;
+    NSUInteger novas = 0, semExcerto = 0, semLoja = 0;
+    BOOL calada = NO, fimDoTempo = NO;
+    for (NSUInteger i = 0; i < porFazer.count && !calada && !fimDoTempo; i += 150) {
+        NSArray<NSArray *> *lote = [porFazer subarrayWithRange:NSMakeRange(i, MIN((NSUInteger)150, porFazer.count - i))];
+        NSMutableDictionary<NSNumber *, NSDictionary *> *achadas = [NSMutableDictionary dictionary];
+        for (NSString *pais in @[@"pt", @"us"]) {
+            NSMutableArray<NSString *> *ids = [NSMutableArray array];
+            for (NSArray *f in lote) if (!achadas[f[1]]) [ids addObject:[f[1] stringValue]];
+            if (ids.count == 0) break;
+            NSDictionary *r = nil;
+            for (int tentativa = 0; tentativa < 3 && !r; ++tentativa) {
+                double espera = 3.1 - (ZPAgora() - ultimoPedido);
+                if (espera > 0.0) [NSThread sleepForTimeInterval:espera];
+                ultimoPedido = ZPAgora();
+                r = ZPPedirJSON(@"https://itunes.apple.com/lookup",
+                                @{ @"id": [ids componentsJoinedByString:@","], @"country": pais, @"entity": @"song" });
+                if (![r isKindOfClass:[NSDictionary class]] || ![r[@"results"] isKindOfClass:[NSArray class]]) {
+                    r = nil;
+                    [NSThread sleepForTimeInterval:20.0 * (tentativa + 1)];
+                }
+            }
+            if (!r) { calada = YES; break; }
+            for (NSDictionary *x in r[@"results"]) {
+                if ([x isKindOfClass:[NSDictionary class]] && [x[@"trackId"] isKindOfClass:[NSNumber class]]
+                    && [x[@"previewUrl"] isKindOfClass:[NSString class]]) achadas[@([x[@"trackId"] longLongValue])] = x;
+            }
+        }
+        if (calada) break;
+        for (NSArray *f in lote) {
+            if (minutos > 0.0 && ZPAgora() - t0 > minutos * 60.0) { fimDoTempo = YES; break; }
+            @autoreleasepool {
+                NSDictionary *x = achadas[f[1]];
+                if (!x) { ++semLoja; continue; }
+                NSData *som = ZPPedir(x[@"previewUrl"], nil);
+                if (som.length < 10000) { ++semExcerto; continue; }
+                NSString *temporario = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                                        [NSString stringWithFormat:@"vectorizar-excerto-%@.m4a", NSUUID.UUID.UUIDString]];
+                [som writeToFile:temporario atomically:NO];
+                if (!modelo) { modelo = ZPModeloQuandoPreciso(); melador = ZPMelCriar(); }
+                gSementeSolta = YES;
+                float vector[kDimensao];
+                BOOL ok = modelo && ZPVectorDaFaixa(modelo, melador, temporario, 0.0, vector, &tempos);
+                [[NSFileManager defaultManager] removeItemAtPath:temporario error:NULL];
+                if (!ok) { ++semExcerto; continue; }
+                _Float16 meio[kDimensao];
+                for (int k = 0; k < kDimensao; ++k) meio[k] = (_Float16)vector[k];
+                if (ZPMapaExecutar(mapa, "INSERT OR REPLACE INTO assinaturas VALUES (?, ?, ?, ?)",
+                                   @[f[0], @(kModeloDoExcerto), [NSData dataWithBytes:meio length:sizeof(meio)], ZPAgoraISO()])) ++novas;
+            }
+        }
+        if (novas && (i / 150) % 10 == 0) {
+            printf("reassinar: %lu de %lu, %.0f s\n", (unsigned long)novas, (unsigned long)porFazer.count, ZPAgora() - t0);
+            fflush(stdout);
+        }
+    }
+    if (calada) printf("reassinar: a loja não responde; o resto fica para a próxima vez\n");
+    printf("reassinar: %lu reassinadas, %lu fora da loja, %lu sem excerto, %.0f s\n",
+           (unsigned long)novas, (unsigned long)semLoja, (unsigned long)semExcerto, ZPAgora() - t0);
+    fflush(stdout);
+    return novas;
+}
+
+static int ZPModoReassinar(NSString *caminhoDoMapa, double minutos) {
+    sqlite3 *mapa = ZPAbrirMapaParaEscrever(caminhoDoMapa);
+    if (!mapa) return 1;
+    ZPReassinarMapa(mapa, minutos);
+    sqlite3_close(mapa);
+    return 0;
+}
+
 static int ZPModoMapear(NSString *base, NSString *caminhoDoMapa) {
     sqlite3 *db = ZPAbrirBase(base);
     if (!db) return 1;
@@ -1848,6 +1961,7 @@ static int ZPModoMapear(NSString *base, NSString *caminhoDoMapa) {
     if (!mapa) { sqlite3_close(db); return 1; }
     ZPLerOMusica(mapa);
     ZPReconciliarMapa(db, mapa);   // as descobertas que entretanto foram para a biblioteca já têm assinatura
+    ZPReassinarMapa(mapa, 20.0);   // depois de uma mudança de modelo, 20 min de cada vez
     ZPMapaExecutar(mapa, "DELETE FROM tentativas WHERE pid IN (SELECT pid FROM faixas WHERE pid IS NOT NULL)", @[]);
 
     NSMutableSet<NSString *> *feitas = [NSMutableSet set];
@@ -1973,6 +2087,9 @@ int main(int argc, const char *argv[]) {
             } else if ([a isEqualToString:@"--cpu"]) {
                 soCPU = YES;
                 [args removeObjectAtIndex:i];
+            } else if ([a isEqualToString:@"--limpar"]) {
+                gLimpar = YES;
+                [args removeObjectAtIndex:i];
             } else if ([@[@"--artista", @"--titulo", @"--album", @"--semente"] containsObject:a] && i + 1 < args.count) {
                 if ([a isEqualToString:@"--artista"]) artista = args[i + 1];
                 else if ([a isEqualToString:@"--titulo"]) titulo = args[i + 1];
@@ -2028,6 +2145,7 @@ int main(int argc, const char *argv[]) {
             return ZPModoDescobertas(args[1], args.count == 3 ? args[2] : nil, semente, quantas);
         }
         if (args.count == 3 && [args[0] isEqualToString:@"mapear"]) return ZPModoMapear(args[1], args[2]);
+        if (args.count == 2 && [args[0] isEqualToString:@"reassinar"]) return ZPModoReassinar(args[1], minutos);
         if (args.count == 3 && [args[0] isEqualToString:@"falhou"]) return ZPModoFalhou(args[1], args[2]);
         if (args.count == 3 && [args[0] isEqualToString:@"esquecer"]) return ZPModoEsquecer(args[1], args[2]);
         if (args.count == 3 && [args[0] isEqualToString:@"estacao"]) {
@@ -2039,7 +2157,8 @@ int main(int argc, const char *argv[]) {
         if (args.count == 4 && [args[0] isEqualToString:@"importar"]) return ZPModoImportar(args[1], args[2], args[3]);
         if (args.count != 2) {
             fprintf(stderr, "uso: vectorizar actualizar BASE\n"
-                            "     vectorizar refinar BASE [--minutos N]\n"
+                            "     vectorizar refinar BASE [--minutos N] [--limpar]\n"
+                            "     vectorizar reassinar MAPA [--minutos N]\n"
                             "     vectorizar associar BASE MAPA --artista A [--titulo T] [--semente (caminho | uuid | musica:PID)] [-n 24]\n"
                             "     vectorizar descobertas MAPA [BASE [--semente S]] [-n 50]\n"
                             "     vectorizar esquecer MAPA ID\n"
