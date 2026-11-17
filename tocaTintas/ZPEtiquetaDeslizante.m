@@ -458,11 +458,17 @@ static const CGFloat kEsbatimento = 16.0;           // pt de esbatimento em cada
             [self.backgroundColor setFill];
             NSRectFill(sujo);
         }
+        // Parada, corta-se a meio com «…», como as outras (o símbolo fica à
+        // cabeça); a fita é que leva o texto inteiro.
         NSRect area = [self areaDoTexto];
+        NSMutableAttributedString *texto = [[self textoParaDesenhar] mutableCopy];
+        NSMutableParagraphStyle *paragrafo = [[NSMutableParagraphStyle alloc] init];
+        paragrafo.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        [texto addAttribute:NSParagraphStyleAttributeName value:paragrafo range:NSMakeRange(0, texto.length)];
         [NSGraphicsContext saveGraphicsState];
         NSRectClip(area);
-        [[self textoParaDesenhar] drawWithRect:NSMakeRect(NSMinX(area), NSMinY(area), self.larguraDoTexto + 1, NSHeight(area))
-                                       options:NSStringDrawingUsesLineFragmentOrigin context:nil];
+        [texto drawWithRect:NSMakeRect(NSMinX(area), NSMinY(area), MIN(self.larguraDoTexto + 1, NSWidth(area)), NSHeight(area))
+                    options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine context:nil];
         [NSGraphicsContext restoreGraphicsState];
     } else if (!self.emPassagem) {
         [super drawRect:sujo];

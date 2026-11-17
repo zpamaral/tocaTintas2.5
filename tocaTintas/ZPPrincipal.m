@@ -5017,10 +5017,12 @@ static NSURL *ZPVectorizar(void) {
 // Em modo estação o título leva à frente o sinal de estação do Música (o
 // ponto com ondas), como o «♫» das faixas do Música. É a etiqueta que o
 // desenha: o texto do título fica limpo para o aviso, o «A tocar», o
-// AppleScript e o nome da estação.
+// AppleScript e o nome da estação. Com o Música na janela, só a leva a faixa
+// que a estação lhe entregou («♫» e marca juntos); o que o Música toque por
+// conta própria não é da estação.
 - (void)actualizarMarcaDaEstacao {
     if (![self.titleLabel isKindOfClass:[ZPEtiquetaDeslizante class]]) return;
-    BOOL deve = !self.aMostrarOMusica && [self haEstacaoCorrente];
+    BOOL deve = [self haEstacaoCorrente] && (!self.aMostrarOMusica || self.pidDoMusicaDaLista != nil);
     ((ZPEtiquetaDeslizante *)self.titleLabel).simboloInicial = deve ? @"dot.radiowaves.right" : nil;
 }
 
@@ -12726,6 +12728,9 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
     if (faixaNova || tituloMudou) [self actualizarAPaginaDoMusica];
 
     self.aMostrarOMusica = YES;
+    // Também aqui: o título acima foi escrito ainda com aMostrarOMusica a NO, e
+    // a marca de uma faixa que o Música toca por conta própria ficava até à seguinte.
+    [self actualizarMarcaDaEstacao];
     self.musicaATocar = [m[@"estado"] isEqualToString:@"playing"];
     // Com o Música à vista, o ⏸️ é dele, e o verde também: pinta-se pelo
     // estado que o Música dá, venha a pausa do botão, do Música ou do teclado.
@@ -12802,7 +12807,7 @@ static BOOL ZPEDoCatalogo(NSDictionary *m) {
     NSString *mostrar = [self replaceSingleQuoteAndSmartQuotes:titulo];
     if ([self.titleLabel.stringValue isEqualToString:mostrar]) return NO;
     [self.titleLabel setStringValue:mostrar];
-    [self actualizarMarcaDaEstacao];   // com o Música na janela não há marca
+    [self actualizarMarcaDaEstacao];   // com o Música na janela, só se a faixa for da estação
     return YES;
 }
 
