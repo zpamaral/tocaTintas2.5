@@ -43,6 +43,7 @@ static NSString *ZPChaveDoArtistaDasOrigens(NSString *a) {
 @property (nonatomic, strong) NSArray<NSArray *> *linhasDoMusica;       // as do separador à vista
 @property (nonatomic, strong) NSArray<NSArray *> *linhasVisiveis;       // as que passam o filtro
 @property (nonatomic, strong) NSTableView *lista;                       // a tabela dos dois separadores do Música
+@property (nonatomic) BOOL aReporOrdem;                                 // a pôr a ordem lembrada do separador
 @property (nonatomic, strong) NSScrollView *rolLista;
 @property (nonatomic, strong) NSScrollView *rolSementes;
 @property (nonatomic, strong) NSScrollView *rolEtiquetas;
@@ -164,6 +165,10 @@ static NSString * const kZPOrdemDasEtiquetas = @"ZPOrigensOrdemDasEtiquetas";
                                           @[@"faixas", NSLocalizedString(@"origins_col_tracks", @"Faixas"), @50],
                                           @[@"origem", NSLocalizedString(@"origins_col_origin", @"Origem"), @200]]];
     self.lista.rowHeight = 24;
+    for (NSArray *c in @[@[@"nome", @YES], @[@"generoMusica", @YES], @[@"faixas", @NO], @[@"origem", @YES]]) {
+        [self.lista tableColumnWithIdentifier:c[0]].sortDescriptorPrototype =
+            [NSSortDescriptor sortDescriptorWithKey:c[0] ascending:[c[1] boolValue]];
+    }
     self.rolLista = [self rolar:self.lista];
     self.rolLista.hidden = YES;
 
@@ -391,6 +396,20 @@ static NSString *ZPPrimeiroArtista(NSString *a) {
     self.lista.tableColumns[0].title = self.lado.selectedSegment == ZPLadoArtistasDoMusica
         ? NSLocalizedString(@"origins_col_name", @"Artista") : NSLocalizedString(@"origins_col_music_genre", @"Género no Música");
     self.lista.tableColumns[1].hidden = self.lado.selectedSegment != ZPLadoArtistasDoMusica;
+    if (doMusica) {
+        // Cada separador do Música tem a sua ordem lembrada; à partida, os
+        // artistas por nome e os géneros pelas faixas.
+        BOOL artistas = self.lado.selectedSegment == ZPLadoArtistasDoMusica;
+        NSArray *lembrada = [[NSUserDefaults standardUserDefaults] arrayForKey:[self chaveDaOrdemDaLista]];
+        NSSortDescriptor *d = lembrada.count == 2 && [self.lista tableColumnWithIdentifier:lembrada[0]]
+                              && !(!artistas && [lembrada[0] isEqualToString:@"generoMusica"])
+            ? [NSSortDescriptor sortDescriptorWithKey:lembrada[0] ascending:[lembrada[1] boolValue]]
+            : artistas ? [NSSortDescriptor sortDescriptorWithKey:@"nome" ascending:YES]
+                       : [NSSortDescriptor sortDescriptorWithKey:@"faixas" ascending:NO];
+        self.aReporOrdem = YES;
+        self.lista.sortDescriptors = @[d];
+        self.aReporOrdem = NO;
+    }
     [self aplicarFiltro];
     [self refazerAsSementes:nil];
 }
@@ -471,6 +490,7 @@ static NSString *ZPPrimeiroArtista(NSString *a) {
             return [l[0] rangeOfString:f options:o].location != NSNotFound || [l[1] rangeOfString:f options:o].location != NSNotFound;
         }]];
     }
+    self.linhasVisiveis = [self ordenarLinhas:self.linhasVisiveis];
     [self.lista reloadData];
     NSArray<NSArray *> *generos = self.generos;
     if (f.length) {
@@ -499,10 +519,42 @@ static NSString *ZPPrimeiroArtista(NSString *a) {
     }];
 }
 
+- (NSString *)chaveDaOrdemDaLista {
+    return self.lado.selectedSegment == ZPLadoArtistasDoMusica ? @"ZPOrigensOrdemDosArtistasDoMusica" : @"ZPOrigensOrdemDosGenerosDoMusica";
+}
+
+// A origem que a linha mostra: a escolhida à mão, senão a automática.
+- (NSString *)origemMostradaDe:(NSArray *)l {
+    NSDictionary *d = self.lado.selectedSegment == ZPLadoArtistasDoMusica ? self.artistasDoMusica : self.generosDoMusica;
+    return d[l[0]] ?: [self origemAutomaticaDe:l];
+}
+
+// As linhas dos separadores do Música (nome, género no Música, faixas) pela
+// ordem do cabeçalho; o nome desempata, sempre de A a Z.
+- (NSArray<NSArray *> *)ordenarLinhas:(NSArray<NSArray *> *)linhas {
+    NSSortDescriptor *d = self.lista.sortDescriptors.firstObject;
+    if (!d) return linhas;
+    NSString *k = d.key;
+    BOOL sobe = d.ascending;
+    return [linhas sortedArrayUsingComparator:^NSComparisonResult(NSArray *a, NSArray *b) {
+        NSComparisonResult r = NSOrderedSame;
+        if ([k isEqualToString:@"faixas"]) r = [a[2] compare:b[2]];
+        else if ([k isEqualToString:@"generoMusica"]) r = [a[1] localizedStandardCompare:b[1]];
+        else if ([k isEqualToString:@"origem"]) r = [[self origemMostradaDe:a] localizedStandardCompare:[self origemMostradaDe:b]];
+        else r = [a[0] localizedStandardCompare:b[0]];
+        if (r == NSOrderedSame) return [a[0] localizedStandardCompare:b[0]];
+        return sobe ? r : -r;
+    }];
+}
+
 - (void)tableView:(NSTableView *)t sortDescriptorsDidChange:(NSArray<NSSortDescriptor *> *)antigos {
-    if (t != self.etiquetas) return;
     NSSortDescriptor *d = t.sortDescriptors.firstObject;
-    if (d) [[NSUserDefaults standardUserDefaults] setObject:@[d.key, @(d.ascending)] forKey:kZPOrdemDasEtiquetas];
+    if (t == self.etiquetas) {
+        if (d) [[NSUserDefaults standardUserDefaults] setObject:@[d.key, @(d.ascending)] forKey:kZPOrdemDasEtiquetas];
+    } else if (t == self.lista) {
+        if (self.aReporOrdem) return;   // é o -mudarDeLado: a repor, e ele próprio aplica o filtro
+        if (d) [[NSUserDefaults standardUserDefaults] setObject:@[d.key, @(d.ascending)] forKey:[self chaveDaOrdemDaLista]];
+    } else return;
     [self aplicarFiltro];
 }
 
