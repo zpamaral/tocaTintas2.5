@@ -59,6 +59,9 @@ static NSString *ZPChaveDoArtistaDasOrigens(NSString *a) {
 @property (nonatomic, strong) NSTextField *legenda;
 @end
 
+// A ordem escolhida na tabela das etiquetas: (coluna, ascendente).
+static NSString * const kZPOrdemDasEtiquetas = @"ZPOrigensOrdemDasEtiquetas";
+
 @implementation ZPOrigens
 
 - (instancetype)initComBase:(NSString *)base mapa:(NSString *)mapa regras:(NSString *)regras {
@@ -141,6 +144,19 @@ static NSString *ZPChaveDoArtistaDasOrigens(NSString *a) {
     self.etiquetas = [self tabelaComColunas:@[@[@"marca", @"", @24],
                                               @[@"genero", NSLocalizedString(@"origins_col_genre", @"Etiqueta GENRE"), @200],
                                               @[@"faixas", NSLocalizedString(@"origins_col_tracks", @"Faixas"), @60]]];
+    // Carregar no cabeçalho ordena: a etiqueta por nome, as faixas da mais
+    // frequente para a menos (o primeiro clique); outro clique inverte. A
+    // escolha fica lembrada.
+    [self.etiquetas tableColumnWithIdentifier:@"genero"].sortDescriptorPrototype =
+        [NSSortDescriptor sortDescriptorWithKey:@"genero" ascending:YES];
+    [self.etiquetas tableColumnWithIdentifier:@"faixas"].sortDescriptorPrototype =
+        [NSSortDescriptor sortDescriptorWithKey:@"faixas" ascending:NO];
+    NSArray *lembrada = [[NSUserDefaults standardUserDefaults] arrayForKey:kZPOrdemDasEtiquetas];
+    if (lembrada.count == 2 && [@[@"genero", @"faixas"] containsObject:lembrada[0]]) {
+        self.etiquetas.sortDescriptors = @[[NSSortDescriptor sortDescriptorWithKey:lembrada[0] ascending:[lembrada[1] boolValue]]];
+    } else {
+        self.etiquetas.sortDescriptors = @[[NSSortDescriptor sortDescriptorWithKey:@"faixas" ascending:NO]];
+    }
     NSScrollView *rolEtiquetas = [self rolar:self.etiquetas];
     self.rolEtiquetas = rolEtiquetas;
     self.lista = [self tabelaComColunas:@[@[@"nome", NSLocalizedString(@"origins_col_name", @"Artista"), @200],
@@ -456,14 +472,38 @@ static NSString *ZPPrimeiroArtista(NSString *a) {
         }]];
     }
     [self.lista reloadData];
-    if (f.length == 0) { self.generosVisiveis = self.generos; }
-    else {
+    NSArray<NSArray *> *generos = self.generos;
+    if (f.length) {
         NSStringCompareOptions o = NSCaseInsensitiveSearch | NSDiacriticInsensitiveSearch;
-        self.generosVisiveis = [self.generos filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSArray *g, NSDictionary *b) {
+        generos = [generos filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSArray *g, NSDictionary *b) {
             return [g[0] rangeOfString:f options:o].location != NSNotFound;
         }]];
     }
+    self.generosVisiveis = [self ordenarEtiquetas:generos];
     [self.etiquetas reloadData];
+}
+
+// Pela ordem do cabeçalho: nome (à maneira do Finder) ou número de faixas,
+// com o nome a desempatar.
+- (NSArray<NSArray *> *)ordenarEtiquetas:(NSArray<NSArray *> *)generos {
+    NSSortDescriptor *d = self.etiquetas.sortDescriptors.firstObject;
+    if (!d) return generos;
+    BOOL porFaixas = [d.key isEqualToString:@"faixas"], sobe = d.ascending;
+    return [generos sortedArrayUsingComparator:^NSComparisonResult(NSArray *a, NSArray *b) {
+        NSComparisonResult r = porFaixas ? [a[1] compare:b[1]] : NSOrderedSame;
+        if (r == NSOrderedSame) {
+            r = [a[0] localizedStandardCompare:b[0]];
+            if (porFaixas) return r;   // o desempate é sempre de A a Z
+        }
+        return sobe ? r : -r;
+    }];
+}
+
+- (void)tableView:(NSTableView *)t sortDescriptorsDidChange:(NSArray<NSSortDescriptor *> *)antigos {
+    if (t != self.etiquetas) return;
+    NSSortDescriptor *d = t.sortDescriptors.firstObject;
+    if (d) [[NSUserDefaults standardUserDefaults] setObject:@[d.key, @(d.ascending)] forKey:kZPOrdemDasEtiquetas];
+    [self aplicarFiltro];
 }
 
 - (void)controlTextDidChange:(NSNotification *)nota {
