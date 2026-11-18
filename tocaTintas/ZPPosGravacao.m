@@ -504,6 +504,38 @@ static NSDictionary *ZPEdicaoNoMusicBrainz(NSString *artista, NSString *album, N
     return nil;
 }
 
+// Um disco erudito é ópera? A Apple não o diz (o Verismo da Netrebko é
+// «Clássica» no álbum e em cada faixa); o MusicBrainz diz, nas etiquetas e nos
+// géneros do grupo da edição. Procura-se o grupo pelo título e pelo artista,
+// mesmo quando nenhuma edição bateu nas durações: o género é do grupo.
+static BOOL ZPEOperaNoMusicBrainz(NSString *artista, NSString *album, NSString *grupo) {
+    BOOL ok = YES;
+    NSArray *grupos = nil;
+    [NSThread sleepForTimeInterval:1.1];
+    if (grupo.length) {
+        NSDictionary *g = ZPPedirJSON(ZPEndereco([NSString stringWithFormat:@"https://musicbrainz.org/ws/2/release-group/%@", grupo],
+                                                 @{ @"inc": @"genres+tags", @"fmt": @"json" }), &ok);
+        grupos = g ? @[g] : nil;
+    } else if (artista.length && album.length) {
+        NSString *q = [NSString stringWithFormat:@"releasegroup:\"%@\" AND artist:\"%@\"",
+                       [album stringByReplacingOccurrencesOfString:@"\"" withString:@""],
+                       [artista stringByReplacingOccurrencesOfString:@"\"" withString:@""]];
+        NSDictionary *r = ZPPedirJSON(ZPEndereco(@"https://musicbrainz.org/ws/2/release-group/",
+                                                 @{ @"query": q, @"fmt": @"json", @"limit": @"3" }), &ok);
+        NSMutableArray *bons = [NSMutableArray array];
+        for (NSDictionary *g in r[@"release-groups"]) if ([g[@"score"] integerValue] >= 90) [bons addObject:g];
+        grupos = bons.count == 1 ? bons : nil;   // mais do que um: ambíguo, fica erudito
+    }
+    for (NSDictionary *g in grupos) {
+        for (NSString *chave in @[@"genres", @"tags"]) {
+            for (NSDictionary *t in g[chave]) {
+                if ([[t[@"name"] lowercaseString] isEqualToString:@"opera"]) return YES;
+            }
+        }
+    }
+    return NO;
+}
+
 #pragma mark - ReplayGain (BS.1770)
 
 // O filtro K da BS.1770 a qualquer frequência: as fórmulas do libebur128, que
@@ -1280,7 +1312,14 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
 
         NSString *genero = ZPOuNada(((NSDictionary *)inteiras[0][@"catalogo"])[@"primaryGenreName"]) ?: ZPOuNada(cat[@"primaryGenreName"]);
         BOOL erudita = [genero isEqualToString:@"Classical"] || [genero isEqualToString:@"Clássica"];
-        if (erudita) genero = @"Erudite";
+        if (erudita) {
+            genero = @"Erudite";
+            NSString *grupo = ZPOuNada(ZPOuNada(mb[@"release-group"])[@"id"]);
+            if (ZPEOperaNoMusicBrainz(artistaDoAlbum, nomeDoAlbum, grupo)) {
+                genero = @"Opera";
+                [rel addObject:@"Género: Opera (etiqueta «opera» do grupo no MusicBrainz)."];
+            }
+        }
         NSString *ano = [ZPOuNada(mb[@"date"]) ?: ZPOuNada(cat[@"releaseDate"]) ?: @"" description];
         if (ano.length > 4) ano = [ano substringToIndex:4];
         NSArray *editoras = mb[@"label-info"];
