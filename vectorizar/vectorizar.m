@@ -1043,6 +1043,24 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
                 break;
             }
         }
+        // Uma semente que não está na base nem no mapa (o excerto da loja de uma
+        // faixa do catálogo) só se conhece pelo --artista. A origem vem dele: a
+        // regra à mão, a dos ficheiros dele, senão a mais frequente das faixas
+        // dele no mapa. Sem isto a estação de uma fadista saía sem limite.
+        if (!artistaDaSemente && gSementeArtista.length) {
+            NSString *k = ZPChaveDoArtista(gSementeArtista.precomposedStringWithCanonicalMapping, @"");
+            artistaDaSemente = k;
+            origemDaSemente = gArtistasDoMusica[k] ?: origemDoArtista[k];
+            if (!origemDaSemente) {
+                NSCountedSet *doMapa = [NSCountedSet set];
+                for (NSUInteger i = 0; i < n; ++i) {
+                    if (origemDe[i].length && [ZPChaveDoArtista(faixas[i][1], @"") isEqualToString:k]) [doMapa addObject:origemDe[i]];
+                }
+                for (NSString *g in doMapa) if (!origemDaSemente || [doMapa countForObject:g] > [doMapa countForObject:origemDaSemente]) origemDaSemente = g;
+            }
+            fprintf(stderr, "origens: a semente é um excerto de %s; origem %s\n", gSementeArtista.UTF8String,
+                    (origemDaSemente.length ? origemDaSemente : @"desconhecida").UTF8String);
+        }
         // «Sérgio Godinho com Caetano Veloso» é do Sérgio Godinho.
         NSSet<NSString *> *doArtista = artistaDaSemente ? regrasDosArtistas[artistaDaSemente] : nil;
         for (NSString *k in regrasDosArtistas) {
