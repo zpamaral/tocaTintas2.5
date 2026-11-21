@@ -1542,8 +1542,9 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
     // zero (a «Magic Window» do Geogaddi, 2026-11-20, com a rampa de entrada e
     // ruído abaixo de 1 LSB até ao fim), põe-lhe tramas fora de todas as
     // grelhas, e o álbum inteiro saía em 24 bits e «não bit-exacto». No CD é
-    // zeros. Não conta para o veredicto e arredonda-se; num álbum de 24 bits
-    // fica com o que tem. Uma faixa com som de verdade passa sempre de meio LSB.
+    // zeros. Não conta para o veredicto e arredonda-se: sai em 16 bits, como
+    // qualquer faixa na grelha (ver 6). Uma faixa com som de verdade passa
+    // sempre de meio LSB.
     const long long pedaco = 65536;
     float *buf = malloc(sizeof(float) * 2 * pedaco);
     void (^medir)(NSMutableDictionary *) = ^(NSMutableDictionary *f) {
@@ -1584,15 +1585,19 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
     };
     for (NSMutableDictionary *f in faixas) if (!f[@"falta"]) medir(f);
 
-    // 5b. AccurateRip, por álbum, quando o álbum cai na grelha de 16 bits (ver
-    // ZPAlinharPeloAccurateRip). As faixas que mudaram de sítio medem-se outra vez.
+    // 5b. AccurateRip, por álbum, quando alguma faixa com som cai na grelha de
+    // 16 bits (ver ZPAlinharPeloAccurateRip). Não se exige o álbum inteiro: no
+    // Go Plastic de 2026-11-21, 9,5 s de um som alheio somado na faixa 5 (que
+    // nem saiu desta gravação) deixaram as 1–4 sem alinhamento, 24 ms fora do
+    // CD, e em 24 bits. Uma faixa fora da grelha não coincide e fica onde o TOC
+    // a põe. As faixas que mudaram de sítio medem-se outra vez.
     for (NSMutableDictionary *a in albuns) {
         NSMutableArray<NSMutableDictionary *> *inteiras = [NSMutableArray array];
-        BOOL dezasseis = YES;
+        BOOL dezasseis = NO;
         for (NSMutableDictionary *f in a[@"faixas"]) {
             if (f[@"falta"]) continue;
             [inteiras addObject:f];
-            if ([f[@"fora16"] longLongValue] > 0) dezasseis = NO;
+            if (![f[@"silencio"] boolValue] && [f[@"fora16"] longLongValue] == 0) dezasseis = YES;
         }
         NSString *grupo = ZPOuNada(ZPOuNada(a[@"mb"][@"release-group"])[@"id"]);
         if (!inteiras.count || !dezasseis || !grupo) continue;
@@ -1643,18 +1648,27 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
             continue;
         }
 
-        long long fora16 = 0, fora24 = 0, naRampa = 0;
+        // A profundidade é de cada faixa: uma fora da grelha de 16 bits já não
+        // põe as outras em 24 (ver 5b). O álbum é bit-exacto se cada faixa o
+        // for na sua grelha.
+        long long fora24 = 0, naRampa = 0;
+        NSUInteger em24 = 0;
+        BOOL exacto = YES;
         NSMutableData *blocosDoAlbum = [NSMutableData data];
         double picoDoAlbum = 0.0;
         for (NSMutableDictionary *f in inteiras) {
-            fora16 += [f[@"fora16"] longLongValue];
-            fora24 += [f[@"fora24"] longLongValue];
+            BOOL f24 = [f[@"fora16"] longLongValue] > 0;
+            if (f24) {
+                ++em24;
+                fora24 += [f[@"fora24"] longLongValue];
+                if ([f[@"fora24"] longLongValue] > 0) exacto = NO;
+            }
             naRampa += [f[@"naRampa"] longLongValue];
             [blocosDoAlbum appendData:f[@"blocos"]];
             picoDoAlbum = MAX(picoDoAlbum, [f[@"pico"] doubleValue]);
         }
-        unsigned bits = fora16 == 0 ? 16 : 24;
-        BOOL exacto = fora16 == 0 || fora24 == 0;
+        NSString *bits = !em24 ? @"16 bits" : em24 == inteiras.count ? @"24 bits"
+                       : [NSString stringWithFormat:@"16 bits (24 em %lu %@)", (unsigned long)em24, em24 == 1 ? @"faixa" : @"faixas"];
         double sonoridadeDoAlbum = ZPSonoridade(blocosDoAlbum);
         double ganhoDoAlbum = -18.0 - sonoridadeDoAlbum;
 
@@ -1740,7 +1754,7 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         NSString *notaDoGanho = jaTinha
             ? @"ReplayGain de álbum não escrito: a pasta já tinha faixas deste álbum; corre «rsgain easy -p zp» na pasta depois de as juntar"
             : [NSString stringWithFormat:@"ReplayGain do álbum %+.2f dB, pico verdadeiro %.6f", ganhoDoAlbum, picoDoAlbum];
-        [rel addObject:[NSString stringWithFormat:@"%u bits, %@%@. %@.%@", bits,
+        [rel addObject:[NSString stringWithFormat:@"%@, %@%@. %@.%@", bits,
                         !exacto ? [NSString stringWithFormat:@"NÃO bit-exacto (%lld tramas fora da grelha de 24 bits, arredondadas)", fora24]
                         : naRampa ? [NSString stringWithFormat:@"bit-exacto fora das rampas que ficaram como estão (%lld tramas, arredondadas)", naRampa]
                         : @"bit-exacto",
@@ -1826,7 +1840,7 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
             }
             long long ini = [f[@"inicio"] longLongValue], fim = [f[@"fim"] longLongValue];
             NSString *falha = nil;
-            BOOL bem = ZPEscreverFLAC(caminho, &g, cs, nc, ini, fim, bits, et, capa, &falha);
+            BOOL bem = ZPEscreverFLAC(caminho, &g, cs, nc, ini, fim, [f[@"fora16"] longLongValue] == 0 ? 16 : 24, et, capa, &falha);
             if (bem) ++escritas;
             NSString *grelha = [f[@"silencio"] boolValue]
                                  ? ([f[@"ruido"] longLongValue] > 0 ? [NSString stringWithFormat:@"silêncio digital (%@ tramas de ruído abaixo de meio LSB, arredondadas)", f[@"ruido"]]
@@ -1846,7 +1860,7 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
         BOOL duracoesDoMusica = NO;
         for (NSMutableDictionary *f in inteiras) if (!f[@"catalogo"] && !f[@"mb"]) duracoesDoMusica = YES;
         if (duracoesDoMusica) [rel addObject:@"Há faixas sem catálogo nem MusicBrainz: cortadas nas marcas do Música (±0,1 s), ou nos silêncios junto a elas. Convém rever essas fronteiras."];
-        [resumos addObject:[NSString stringWithFormat:@"%@ — %@: %lu de %lu faixas, %u bits%@", artistaDoAlbum, nomeDoAlbum,
+        [resumos addObject:[NSString stringWithFormat:@"%@ — %@: %lu de %lu faixas, %@%@", artistaDoAlbum, nomeDoAlbum,
                             (unsigned long)escritas, (unsigned long)todas.count, bits, exacto ? @", bit-exacto" : @", não bit-exacto"]];
     }
 
