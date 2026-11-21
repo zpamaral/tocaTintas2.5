@@ -853,6 +853,30 @@ static void ZPSomasDaFaixaAR(const ZPGravacao *g, const ZPCorreccao *cs, int nc,
     }
 }
 
+// A soma v2 da faixa a começar em a: a mesma regra das pontas, mas cada
+// produto de 64 bits entra com as duas metades. Não é linear, por isso não
+// desliza: calcula-se só onde a v1 já encontrou a faixa. A base guarda as duas
+// versões em conjuntos separados (no Geogaddi, a prensagem mais comum tinha
+// 163 cópias na v1 e 189 na v2).
+static uint32_t ZPSomaV2DaFaixaAR(const ZPGravacao *g, const ZPCorreccao *cs, int nc, long long a, long long W, BOOL primeira, BOOL ultima) {
+    const long long pedaco = 65536;
+    const long long de = primeira ? 5 * kZPSectorAR - 1 : 1, ate = ultima ? W - 5 * kZPSectorAR : W;
+    uint32_t *x = malloc(sizeof(uint32_t) * pedaco);
+    uint32_t soma = 0;
+    for (long long p = 0; p < W; p += pedaco) {
+        long long m = MIN(pedaco, W - p);
+        ZPPalavrasAR(g, cs, nc, a + p, m, x);
+        for (long long i = 0; i < m; ++i) {
+            long long mult = p + i + 1;
+            if (mult < de || mult > ate) continue;
+            uint64_t produto = (uint64_t)x[i] * (uint64_t)mult;
+            soma += (uint32_t)produto + (uint32_t)(produto >> 32);
+        }
+    }
+    free(x);
+    return soma;
+}
+
 static int ZPSomaDosDigitos(long v) { int s = 0; for (; v > 0; v /= 10) s += v % 10; return s; }
 
 // Os TOC de CD do grupo, sem repetir: cada um com os deslocamentos (em
@@ -999,11 +1023,14 @@ static NSString *ZPAlinharPeloAccurateRip(const ZPGravacao *g, const ZPCorreccao
         if (k >= 1 && k <= (long)[t[@"offsets"] count]) inicio = disco + posicaoNoTOC(t, k, &W);
         BOOL muda = [f[@"silencio"] boolValue];
         if (c) {
-            f[@"ar"] = daqui[c];
-            confianca = MAX(confianca, daqui[c].longValue);
+            NSDictionary<NSNumber *, NSNumber *> *alvo = t[@"somas"][k-1];
+            long v2 = [alvo[@(ZPSomaV2DaFaixaAR(g, cs, nc, inicio, W, k == 1, k == (long)[t[@"offsets"] count]))] longValue];
+            f[@"ar"] = @(MAX(daqui[c].longValue, v2));
+            confianca = MAX(confianca, MAX(daqui[c].longValue, v2));
             [desvios addObject:@((inicio - antes) * 1000.0 / g->taxa)];
             ++verificadas;
-            f[@"como"] = [NSString stringWithFormat:@"AccurateRip, confiança %@ (%+.0f ms do corte de antes)", daqui[c], (inicio - antes) * 1000.0 / g->taxa];
+            f[@"como"] = [NSString stringWithFormat:@"AccurateRip, confiança %@ na v1%@ (%+.0f ms do corte de antes)", daqui[c],
+                          v2 ? [NSString stringWithFormat:@" e %ld na v2", v2] : @"", (inicio - antes) * 1000.0 / g->taxa];
         } else {
             f[@"ar"] = @0;
             if (muda) ++mudas; else ++semVerificar;
