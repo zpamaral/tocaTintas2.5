@@ -20,14 +20,19 @@
 ///      Música guardadas na TOC e acertada à amostra pelo silêncio digital que
 ///      encoste a uma das fronteiras; uma pausa ou um encravamento a meio de
 ///      uma faixa deixa-a de fora e começa outra cadeia;
-///   3. FLAC de 16 ou 24 bits, conforme a grelha em que o álbum cai — bit-
-///      exacto quando a gravação o é;
-///   4. etiquetas do catálogo da Apple e, quando a edição bate sem ambiguidade,
-///      do MusicBrainz; a capa; o ReplayGain (BS.1770, referência −18 LUFS).
+///   3. num álbum de 16 bits, as fronteiras acertadas à amostra pelo
+///      AccurateRip, com o TOC dos CDs do mesmo grupo no MusicBrainz, quando
+///      alguma faixa coincide com o CD;
+///   4. FLAC de 16 ou 24 bits, conforme a grelha em que o álbum cai — bit-
+///      exacto quando a gravação o é; as faixas de silêncio com ruído abaixo
+///      de meio LSB não contam e arredondam-se;
+///   5. etiquetas do catálogo da Apple e, quando a edição bate sem ambiguidade,
+///      do MusicBrainz; a capa; o ReplayGain (BS.1770, referência −18 LUFS),
+///      sem o de álbum quando a pasta já tinha faixas dele.
 ///
 /// Faixas incompletas (a gravação começou depois do início ou parou antes do
 /// fim) não saem, mas ficam no relatório, que vai para cada pasta de álbum
-/// como «Processamento.txt».
+/// como «Processamento.txt», ou «Processamento (2).txt» se já lá houver um.
 ///
 /// Síncrona e demorada (segundos por faixa): nunca no thread principal.
 /// Devolve o relatório; em `pastas`, as pastas de álbum escritas.

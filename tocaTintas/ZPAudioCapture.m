@@ -839,9 +839,11 @@ static NSURL *ZPFicheiroDaTOC(NSURL *wav) {
     return (long long)_tramaDoBloco + llround(segundos * self.recordSampleRate);
 }
 
-// A trama de uma ficha do Música: a do relógio antes da pergunta (a posição é
-// lida logo no início: quando a pergunta demora mais, a posição não muda), ou,
-// sem relógio, a já escrita. Na ioQueue.
+// A trama de uma ficha do Música: a do relógio antes da pergunta, ou, sem
+// relógio, a já escrita. Na ioQueue. Quase sempre a posição é a do princípio da
+// pergunta, mas uma resposta mais lenta do que as vizinhas pode trazê-la
+// adiantada no que demorou a mais (o Geogaddi de 2026-11-20); quem acerta isso
+// é o ZPCortarPelaTOC, pela «demora» de cada ficha.
 - (long long)tramaDaFicha:(NSDictionary *)faixa escrita:(unsigned long long)escrita {
     long long t = [self tramaDoHost:faixa[@"hostAntes"]];
     return t >= 0 ? t : (long long)escrita;
@@ -1311,7 +1313,8 @@ static OSStatus ZPIOProcMusica(AudioObjectID dispositivo, const AudioTimeStamp *
 // nenhuma.
 //
 // Por isso janelas de um segundo de som (os silêncios digitais não contam: zero
-// está em todas as grelhas), e o estado da gravação a cada uma, que o botão ⏺
+// está em todas as grelhas; nem o ruído abaixo de meio degrau de 16 bits, que o
+// Música põe nas faixas mudas), e o estado da gravação a cada uma, que o botão ⏺
 // mostra pela cor:
 //
 //   bit-exacta              nada fora da grelha até agora           vermelho
@@ -1340,7 +1343,16 @@ static void ZPPublicarEstadoDaGrelha(ZPEstadoDaGrelha estado) {
 
     for (UInt32 i = 0; i < tramas; ++i) {
         float e = par[2*i], d = par[2*i+1];
-        if (e == 0.0f && d == 0.0f) {
+        // Multiplicar por potências de 2 é exacto em float.
+        float e16 = e * 32768.0f, d16 = d * 32768.0f;
+        // Abaixo de meio degrau de 16 bits é silêncio, mesmo sem ser zero: o
+        // Música, quando arranca do zero uma faixa muda (a «Magic Window» do
+        // Geogaddi, 2026-11-21), põe-lhe ruído abaixo de 1 LSB, fora de todas as
+        // grelhas, e o ⏺ dava a gravação por estragada. Num master de 16 bits
+        // não há amostras destas; num de 24, um volume ou um efeito mexem
+        // também nas amostras com som, e essas continuam a contar. Os silêncios
+        // da TOC (-registarSilencios:) continuam a ser só os zeros exactos.
+        if (fabsf(e16) < 0.5f && fabsf(d16) < 0.5f) {
             // Uma sequência curta fora da grelha mesmo antes do silêncio é a
             // rampa de saída: descontam-se as tramas que já tinham contado.
             if (g->sequenciaFora > 0 && g->sequenciaFora <= kZPTramasDeRampa) {
@@ -1353,8 +1365,7 @@ static void ZPPublicarEstadoDaGrelha(ZPEstadoDaGrelha estado) {
         haSom = YES;
         g->tramas++;
         g->desdeSilencio++;
-        // Multiplicar por potências de 2 é exacto em float.
-        float e16 = e * 32768.0f, d16 = d * 32768.0f, e24 = e * 8388608.0f, d24 = d * 8388608.0f;
+        float e24 = e * 8388608.0f, d24 = d * 8388608.0f;
         if (e16 != rintf(e16) || d16 != rintf(d16)) g->fora16++;
         if (e24 != rintf(e24) || d24 != rintf(d24)) {
             g->sequenciaFora++;

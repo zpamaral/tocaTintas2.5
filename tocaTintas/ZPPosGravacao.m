@@ -32,6 +32,17 @@ static const double kZPErroMaximoDaRampa = 0.01;   // LSB
 
 static const NSUInteger kZPTamanhoDoCabecalhoWav = 56;
 
+static id ZPOuNada(id v) { return (v && v != [NSNull null]) ? v : nil; }
+
+// Vazio dá 0. Nada de NaN neste ficheiro: compila-se com -Ofast, que liga o
+// -ffast-math, e aí o compilador pode tirar os isnan().
+static double ZPMediana(NSArray<NSNumber *> *v) {
+    if (!v.count) return 0.0;
+    NSArray *o = [v sortedArrayUsingSelector:@selector(compare:)];
+    return o.count % 2 ? [o[o.count / 2] doubleValue]
+                       : ([o[o.count / 2 - 1] doubleValue] + [o[o.count / 2] doubleValue]) / 2.0;
+}
+
 #pragma mark - A gravação, com as correcções por cima
 
 typedef struct {
@@ -766,6 +777,254 @@ static BOOL ZPEscreverFLAC(NSString *caminho, const ZPGravacao *g, const ZPCorre
     return bem;
 }
 
+#pragma mark - AccurateRip
+
+// A Apple serve muitos álbuns com o master do CD, e então a gravação coincide
+// amostra a amostra com as cópias de CD na base do AccurateRip. No Geogaddi de
+// 2026-11-20 coincidiram 22 de 23 faixas (a «Corsair» da Apple difere do CD;
+// regravada, saiu igual à primeira), e as fronteiras certas ficaram 98 ms
+// depois do fim do silêncio que as ancorava e 175 ms depois das posições do
+// Música: nenhuma das duas âncoras é de fiar à amostra; esta é.
+//
+// O TOC do CD vem do MusicBrainz, dos lançamentos em CD do mesmo grupo (a
+// edição que bate nas durações é quase sempre a digital, sem TOC). Uma faixa
+// desliza ±0,5 s à volta do corte que já tinha, à procura da soma v1 de algum
+// conjunto da base: a soma é linear, por isso desliza em O(1) por trama.
+// Prensagens diferentes desviam o som do TOC (no Geogaddi, de 68 a 98 ms
+// depois do silêncio): fica a que somar mais confiança no álbum.
+
+static const long long kZPSectorAR = 588;              // tramas por sector de CD
+static const double kZPProcuraAR = 0.5;                // s, para cada lado do corte que havia
+
+// Uma trama de 16 bits como o AccurateRip a lê: o esquerdo em baixo.
+static void ZPPalavrasAR(const ZPGravacao *g, const ZPCorreccao *cs, int nc, long long inicio, long long n, uint32_t *destino) {
+    const long long pedaco = 65536;
+    float *buf = malloc(sizeof(float) * 2 * pedaco);
+    for (long long p = 0; p < n; p += pedaco) {
+        long long m = MIN(pedaco, n - p);
+        ZPLer(g, cs, nc, inicio + p, m, buf);
+        for (long long i = 0; i < m; ++i) {
+            long l = lrint((double)buf[2*i] * 32768.0), r = lrint((double)buf[2*i+1] * 32768.0);
+            l = MIN(MAX(l, -32768L), 32767L);
+            r = MIN(MAX(r, -32768L), 32767L);
+            destino[p + i] = (uint32_t)(uint16_t)l | (uint32_t)(uint16_t)r << 16;
+        }
+    }
+    free(buf);
+}
+
+// Σ_{j=1}^{L} j·x[a+s+j−1], módulo 2^32, para s = 0…n−1. C(s+1) = C(s) − S(s) + L·x[a+s+L],
+// com S(s) a soma simples da janela. Lê a janela uma vez e as duas pontas.
+static void ZPSomasAR(const ZPGravacao *g, const ZPCorreccao *cs, int nc, long long a, long long L, long long n, uint32_t *saida) {
+    if (L <= 0) { memset(saida, 0, (size_t)n * sizeof(uint32_t)); return; }
+    const long long pedaco = 65536;
+    uint32_t *x = malloc(sizeof(uint32_t) * (size_t)MAX(pedaco, n));
+    uint32_t C = 0, S = 0;
+    for (long long p = 0; p < L; p += pedaco) {
+        long long m = MIN(pedaco, L - p);
+        ZPPalavrasAR(g, cs, nc, a + p, m, x);
+        for (long long i = 0; i < m; ++i) { C += (uint32_t)(p + i + 1) * x[i]; S += x[i]; }
+    }
+    uint32_t *cabeca = malloc(sizeof(uint32_t) * (size_t)n), *cauda = x;
+    ZPPalavrasAR(g, cs, nc, a, n, cabeca);
+    ZPPalavrasAR(g, cs, nc, a + L, n, cauda);
+    for (long long s = 0; s < n; ++s) {
+        saida[s] = C;
+        C = C - S + (uint32_t)L * cauda[s];
+        S = S - cabeca[s] + cauda[s];
+    }
+    free(cabeca);
+    free(x);
+}
+
+// A soma v1 da faixa a começar em a + s, s = 0…n−1: na primeira do disco não
+// contam os multiplicadores abaixo de 5 × 588 − 1, na última os 5 sectores do
+// fim (a regra do accuraterip-checksum e do whipper; no Geogaddi a primeira
+// começa em silêncio e não a pôs à prova).
+static void ZPSomasDaFaixaAR(const ZPGravacao *g, const ZPCorreccao *cs, int nc, long long a, long long W,
+                             BOOL primeira, BOOL ultima, long long n, uint32_t *saida) {
+    long long fim = ultima ? W - 5 * kZPSectorAR : W;
+    ZPSomasAR(g, cs, nc, a, fim, n, saida);
+    if (primeira) {
+        uint32_t *menos = malloc(sizeof(uint32_t) * (size_t)n);
+        ZPSomasAR(g, cs, nc, a, 5 * kZPSectorAR - 2, n, menos);
+        for (long long s = 0; s < n; ++s) saida[s] -= menos[s];
+        free(menos);
+    }
+}
+
+static int ZPSomaDosDigitos(long v) { int s = 0; for (; v > 0; v /= 10) s += v % 10; return s; }
+
+// Os TOC de CD do grupo, sem repetir: cada um com os deslocamentos (em
+// sectores, com os 150 do princípio) e o fim, e o que o AccurateRip tem dele:
+// por faixa, um dicionário soma v1 → confiança somada dos conjuntos.
+static NSArray<NSDictionary *> *ZPDiscosNoAccurateRip(NSString *grupo, long disco, long faixasNoDisco, BOOL *respondeu) {
+    *respondeu = YES;
+    if (!grupo.length || faixasNoDisco <= 0) return @[];
+    [NSThread sleepForTimeInterval:1.1];   // um pedido por segundo ao MusicBrainz
+    BOOL ok = YES;
+    NSDictionary *r = ZPPedirJSON(ZPEndereco(@"https://musicbrainz.org/ws/2/release",
+                                             @{ @"release-group": grupo, @"inc": @"discids+media", @"limit": @"100", @"fmt": @"json" }), &ok);
+    if (!ok) *respondeu = NO;
+    NSMutableArray<NSDictionary *> *discos = [NSMutableArray array];
+    NSMutableSet<NSString *> *vistos = [NSMutableSet set];
+    for (NSDictionary *e in r[@"releases"]) {
+        for (NSDictionary *m in e[@"media"]) {
+            if (![[ZPOuNada(m[@"format"]) description] containsString:@"CD"]) continue;
+            if ([ZPOuNada(m[@"position"]) longValue] != disco) continue;
+            for (NSDictionary *dc in m[@"discs"]) {
+                NSArray<NSNumber *> *o = ZPOuNada(dc[@"offsets"]);
+                long fimDoDisco = [ZPOuNada(dc[@"sectors"]) longValue];
+                if ((long)o.count != faixasNoDisco || fimDoDisco <= 0) continue;
+                uint32_t id1 = 0, id2 = 0;
+                int digitos = 0;
+                for (NSUInteger i = 0; i < o.count; ++i) {
+                    long lba = o[i].longValue - 150;
+                    id1 += (uint32_t)lba;
+                    id2 += (uint32_t)(MAX(lba, 1L) * (long)(i + 1));
+                    digitos += ZPSomaDosDigitos(o[i].longValue / 75);
+                }
+                id1 += (uint32_t)(fimDoDisco - 150);
+                id2 += (uint32_t)((fimDoDisco - 150) * (long)(o.count + 1));
+                uint32_t cddb = (uint32_t)(digitos % 255) << 24 | (uint32_t)(fimDoDisco / 75 - o[0].longValue / 75) << 8 | (uint32_t)o.count;
+                NSString *endereco = [NSString stringWithFormat:@"https://www.accuraterip.com/accuraterip/%x/%x/%x/dBAR-%03lu-%08x-%08x-%08x.bin",
+                                      id1 & 0xF, id1 >> 4 & 0xF, id1 >> 8 & 0xF, (unsigned long)o.count, id1, id2, cddb];
+                if ([vistos containsObject:endereco]) continue;
+                [vistos addObject:endereco];
+                BOOL veio = YES;
+                NSData *d = ZPPedir([NSURL URLWithString:endereco], &veio);
+                if (!veio) *respondeu = NO;
+                if (!d.length) continue;
+                NSMutableArray<NSMutableDictionary<NSNumber *, NSNumber *> *> *somas = [NSMutableArray array];
+                for (NSUInteger i = 0; i < o.count; ++i) [somas addObject:[NSMutableDictionary dictionary]];
+                const uint8_t *b = d.bytes;
+                for (NSUInteger p = 0; p + 13 <= d.length; ) {
+                    NSUInteger nt = b[p];
+                    p += 13;
+                    if (nt != o.count || p + 9 * nt > d.length) break;
+                    for (NSUInteger t = 0; t < nt; ++t, p += 9) {
+                        uint8_t conf = b[p];
+                        uint32_t crc = (uint32_t)b[p+1] | (uint32_t)b[p+2] << 8 | (uint32_t)b[p+3] << 16 | (uint32_t)b[p+4] << 24;
+                        if (!conf || !crc) continue;   // soma 0: faixa muda, nada a verificar
+                        somas[t][@(crc)] = @([somas[t][@(crc)] longValue] + conf);
+                    }
+                }
+                [discos addObject:@{ @"offsets": o, @"fim": @(fimDoDisco), @"somas": somas, @"id": dc[@"id"] ?: @"" }];
+            }
+        }
+    }
+    return discos;
+}
+
+// Acerta as fronteiras das faixas inteiras de um álbum pelo AccurateRip, se
+// houver coincidência. `numeros` e `discos` são, por faixa, o número e o disco
+// do catálogo; `totais`, as faixas desse disco. Devolve a linha do relatório.
+// Muda «inicio», «fim» e «como» de cada faixa e põe «ar» (confiança, 0 se não
+// coincide). As faixas mudas (só zeros) não se verificam: seguem as vizinhas.
+static NSString *ZPAlinharPeloAccurateRip(const ZPGravacao *g, const ZPCorreccao *cs, int nc, NSArray<NSMutableDictionary *> *faixas,
+                                          NSString *grupo, NSArray<NSNumber *> *numeros, NSArray<NSNumber *> *discos, NSArray<NSNumber *> *totais) {
+    const long long M = llround(kZPProcuraAR * g->taxa);
+    if (llround(g->taxa) != 44100) return nil;
+    // Os TOC de cada disco do álbum.
+    NSMutableDictionary<NSNumber *, NSArray<NSDictionary *> *> *tocs = [NSMutableDictionary dictionary];
+    BOOL semResposta = NO;
+    for (NSUInteger i = 0; i < faixas.count; ++i) {
+        if (tocs[discos[i]]) continue;
+        BOOL ok = YES;
+        tocs[discos[i]] = ZPDiscosNoAccurateRip(grupo, discos[i].longValue, totais[i].longValue, &ok);
+        if (!ok) semResposta = YES;
+    }
+    // Cada coincidência diz onde, na gravação, começaria o disco por aquele TOC:
+    // a posição da faixa menos o seu deslocamento no TOC. É por aí que se
+    // soma, e não pelo desvio ao corte de antes, que não é coerente ao
+    // milissegundo de faixa para faixa (no Geogaddi, de +96 a +98 ms).
+    // Chave: «índice do TOC:trama do princípio do disco».
+    NSMutableArray<NSMutableDictionary<NSString *, NSNumber *> *> *achados = [NSMutableArray array];   // chave → confiança
+    NSMutableDictionary<NSString *, NSNumber *> *peso = [NSMutableDictionary dictionary];               // chave → confiança no álbum
+    NSMutableArray<NSDictionary *> *todosOsTOC = [NSMutableArray array];
+    for (NSNumber *d in tocs) [todosOsTOC addObjectsFromArray:tocs[d]];
+    long long (^posicaoNoTOC)(NSDictionary *, long, long long *) = ^long long (NSDictionary *t, long k, long long *W) {
+        NSArray<NSNumber *> *o = t[@"offsets"];
+        *W = ((k < (long)o.count ? o[k].longLongValue : [t[@"fim"] longLongValue]) - o[k-1].longLongValue) * kZPSectorAR;
+        return (o[k-1].longLongValue - o[0].longLongValue) * kZPSectorAR;
+    };
+    uint32_t *somas = malloc(sizeof(uint32_t) * (size_t)(2 * M + 1));
+    for (NSUInteger i = 0; i < faixas.count; ++i) {
+        NSMutableDictionary<NSString *, NSNumber *> *daqui = [NSMutableDictionary dictionary];
+        [achados addObject:daqui];
+        long k = numeros[i].longValue;
+        long long a = [faixas[i][@"inicio"] longLongValue] - M;
+        for (NSDictionary *t in tocs[discos[i]]) {
+            if (k < 1 || k > (long)[t[@"offsets"] count]) continue;
+            long long W = 0, noTOC = posicaoNoTOC(t, k, &W);
+            NSDictionary<NSNumber *, NSNumber *> *alvo = t[@"somas"][k-1];
+            if (!alvo.count || a < 0 || a + W + 2 * M + 1 > g->n) continue;
+            ZPSomasDaFaixaAR(g, cs, nc, a, W, k == 1, k == (long)[t[@"offsets"] count], 2 * M + 1, somas);
+            for (long long s = 0; s <= 2 * M; ++s) {
+                NSNumber *conf = alvo[@(somas[s])];
+                if (!conf) continue;
+                NSString *chave = [NSString stringWithFormat:@"%lu:%lld", (unsigned long)[todosOsTOC indexOfObjectIdenticalTo:t], a + s - noTOC];
+                if (conf.longValue > [daqui[chave] longValue]) daqui[chave] = conf;
+            }
+        }
+        for (NSString *c in daqui) peso[c] = @([peso[c] longValue] + daqui[c].longValue);
+    }
+    free(somas);
+    NSString *melhor = nil;
+    for (NSString *c in peso) if (!melhor || peso[c].longValue > peso[melhor].longValue) melhor = c;
+    if (!melhor) {
+        return semResposta && !todosOsTOC.count ? @"AccurateRip: o MusicBrainz ou o AccurateRip não responderam; cortes sem verificação."
+             : !todosOsTOC.count ? @"AccurateRip: sem TOC de CD no MusicBrainz, ou sem o disco na base; cortes sem verificação."
+             : @"AccurateRip: nenhuma faixa coincide com o CD (outro master, ou a gravação não é a do CD); cortes sem verificação.";
+    }
+    // As faixas: pelo princípio de disco do álbum; uma que só coincida noutro
+    // (uma pausa entre faixas parte a cadeia) fica no seu. As que não coincidem
+    // ficam onde o TOC do álbum as põe, encostadas às vizinhas, se isso estiver
+    // a menos de ±0,5 s do corte de antes; senão ficam como estavam.
+    NSArray<NSString *> *partes = [melhor componentsSeparatedByString:@":"];
+    NSDictionary *tocDoAlbum = todosOsTOC[(NSUInteger)partes[0].integerValue];
+    const long long discoDoAlbum = partes[1].longLongValue;
+    NSUInteger verificadas = 0, mudas = 0, semVerificar = 0;
+    long confianca = 0;
+    NSMutableArray<NSNumber *> *desvios = [NSMutableArray array];
+    for (NSUInteger i = 0; i < faixas.count; ++i) {
+        NSMutableDictionary *f = faixas[i];
+        NSDictionary<NSString *, NSNumber *> *daqui = achados[i];
+        NSString *c = daqui[melhor] ? melhor : nil;
+        if (!c) for (NSString *x in daqui) if (!c || daqui[x].longValue > daqui[c].longValue) c = x;
+        long k = numeros[i].longValue;
+        long long antes = [f[@"inicio"] longLongValue], W = 0, inicio = -1;
+        NSDictionary *t = c ? todosOsTOC[(NSUInteger)[[c componentsSeparatedByString:@":"][0] integerValue]] : tocDoAlbum;
+        long long disco = c ? [[c componentsSeparatedByString:@":"][1] longLongValue] : discoDoAlbum;
+        if (k >= 1 && k <= (long)[t[@"offsets"] count]) inicio = disco + posicaoNoTOC(t, k, &W);
+        BOOL muda = [f[@"silencio"] boolValue];
+        if (c) {
+            f[@"ar"] = daqui[c];
+            confianca = MAX(confianca, daqui[c].longValue);
+            [desvios addObject:@((inicio - antes) * 1000.0 / g->taxa)];
+            ++verificadas;
+            f[@"como"] = [NSString stringWithFormat:@"AccurateRip, confiança %@ (%+.0f ms do corte de antes)", daqui[c], (inicio - antes) * 1000.0 / g->taxa];
+        } else {
+            f[@"ar"] = @0;
+            if (muda) ++mudas; else ++semVerificar;
+            if (inicio < 0 || llabs(inicio - antes) > M) {
+                f[@"como"] = [NSString stringWithFormat:@"%@; %@ (sem verificação)", muda ? @"silêncio digital" : @"NÃO coincide com o AccurateRip", f[@"como"]];
+                continue;
+            }
+            f[@"como"] = [NSString stringWithFormat:@"%@; onde o TOC do CD a põe (%+.0f ms do corte de antes)",
+                          muda ? @"silêncio digital, nada a verificar" : @"NÃO coincide com o AccurateRip", (inicio - antes) * 1000.0 / g->taxa];
+        }
+        f[@"inicio"] = @(MAX(inicio, 0LL));
+        f[@"fim"] = @(MIN(inicio + W, g->n));
+        if (i > 0 && [faixas[i-1][@"fim"] longLongValue] > inicio) faixas[i-1][@"fim"] = @(inicio);   // sem sobreposições
+    }
+    return [NSString stringWithFormat:@"AccurateRip: %lu de %lu faixas coincidem com o CD%@%@ (confiança até %ld, %+.0f ms em mediana do corte de antes).",
+            (unsigned long)verificadas, (unsigned long)(verificadas + semVerificar),
+            semVerificar ? @"; as outras ficam onde o TOC as põe" : @"",
+            mudas ? [NSString stringWithFormat:@"; mais %lu de silêncio digital, sem nada a verificar", (unsigned long)mudas] : @"",
+            confianca, ZPMediana(desvios)];
+}
+
 #pragma mark - O processamento
 
 static NSString *ZPNomeDeFicheiro(NSString *s) {
@@ -775,8 +1034,6 @@ static NSString *ZPNomeDeFicheiro(NSString *s) {
     while ([n hasPrefix:@"."]) n = [n substringFromIndex:1];
     return n.length ? n : @"Sem nome";
 }
-
-static id ZPOuNada(id v) { return (v && v != [NSNull null]) ? v : nil; }
 
 // A faixa como o Música a mostrava, em JSON, para a etiqueta APPLE_MUSICA. Os
 // nomes do ficheiro vêm do MusicBrainz ou do catálogo e podem ser outros (o
@@ -844,15 +1101,6 @@ static const ZPLimitesDasPosicoes kZPPelaEscrita = { 0.30, 0.15, 0.08, 0.025 }; 
 static const double kZPSilencioMinimo = 0.01;      // s: os mais curtos são da própria música
 static const double kZPDemoraMaxima = 0.25;        // s: perguntas ao Música mais lentas não contam
 
-// Só com v não vazio. Nada de NaN neste ficheiro: compila-se com -Ofast, que
-// liga o -ffast-math, e aí o compilador pode tirar os isnan().
-static double ZPMediana(NSArray<NSNumber *> *v) {
-    if (!v.count) return 0.0;
-    NSArray *o = [v sortedArrayUsingSelector:@selector(compare:)];
-    return o.count % 2 ? [o[o.count / 2] doubleValue]
-                       : ([o[o.count / 2 - 1] doubleValue] + [o[o.count / 2] doubleValue]) / 2.0;
-}
-
 // Milésimas de trama para tramas, com o meio para longe do zero. As fronteiras
 // somam-se em inteiros: com -ffast-math o compilador soma os double pela ordem
 // que quer, e uma fronteira a meia trama (ms × 44,1 acaba em ,5 quando o ms
@@ -884,11 +1132,35 @@ static void ZPCortarPelaTOC(const ZPGravacao *g, NSArray<NSMutableDictionary *> 
     [pontos sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
         return [a[@"trama"] compare:b[@"trama"]];
     }];
+    // Pelo relógio, a trama é da hora da pergunta, mas o Música lê a posição
+    // perto do fim da ida e volta: uma resposta mais lenta do que o costume traz
+    // a posição adiantada nessa diferença. No Geogaddi de 2026-11-20 três
+    // perguntas levaram 0,24 s contra 0,12 s, a cinco segundos do princípio do
+    // «Dandelion», do «I Saw Drones» e do «You Could Feel the Sky»; o início
+    // dessas saltava 0,12–0,13 s (o excesso da demora, a 5 ms) e as três passavam
+    // por interrompidas sem buraco nenhum no som. Acerta-se cada pergunta pelo
+    // que demorou a mais ou a menos do que a mediana das vizinhas (três para cada
+    // lado), não a da gravação toda: a partir dos 59:48 do mesmo Geogaddi o
+    // Música passou a responder em 0,208 s certos, e aí as posições não vinham
+    // adiantadas (pela mediana geral, o «You Could Feel the Sky» saltava 88 ms).
+    // Com as vizinhas, o pior salto foi de 15 ms e nenhum início mexeu mais de 2 ms.
+    NSMutableArray<NSDictionary *> *perguntas = [NSMutableArray array];
+    if (peloRelogio) for (NSDictionary *p in posicoes) if (p[@"demora"]) [perguntas addObject:p];
+    [perguntas sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        return [a[@"trama"] compare:b[@"trama"]];
+    }];
+    NSMapTable<NSDictionary *, NSNumber *> *acerto = [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsObjectPointerPersonality
+                                                                              valueOptions:NSPointerFunctionsStrongMemory];
+    for (NSUInteger j = 0; j < perguntas.count; ++j) {
+        NSUInteger de = j >= 3 ? j - 3 : 0, ate = MIN(j + 4, perguntas.count);
+        NSArray<NSNumber *> *vizinhas = [[perguntas subarrayWithRange:NSMakeRange(de, ate - de)] valueForKey:@"demora"];
+        [acerto setObject:@([perguntas[j][@"demora"] doubleValue] - ZPMediana(vizinhas)) forKey:perguntas[j]];
+    }
     for (NSDictionary *p in pontos) {
         double posicao = [p[@"posicao"] doubleValue];
         if (![p[@"estado"] isEqualToString:@"playing"] || posicao < 1.0 || ![p[@"pid"] length]) continue;
         if (p[@"demora"] && [p[@"demora"] doubleValue] > kZPDemoraMaxima) continue;
-        long long trama = [p[@"trama"] longLongValue];
+        long long trama = [p[@"trama"] longLongValue] + llround([[acerto objectForKey:p] doubleValue] * taxa);
         // A faixa: a última com este pid que já tinha começado.
         for (NSInteger i = (NSInteger)faixas.count - 1; i >= 0; --i) {
             NSDictionary *m = faixas[i][@"marca"];
@@ -1238,18 +1510,26 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
     if (pelaTOC) ZPCortarPelaTOC(&g, faixas, toc);
 
     // 5. A grelha de cada faixa, já com as rampas desfeitas; a sonoridade.
+    // Uma faixa em que nenhuma amostra chegue a meio LSB de 16 bits é silêncio
+    // digital com ruído por cima: o Música, quando arranca uma faixa muda do
+    // zero (a «Magic Window» do Geogaddi, 2026-11-20, com a rampa de entrada e
+    // ruído abaixo de 1 LSB até ao fim), põe-lhe tramas fora de todas as
+    // grelhas, e o álbum inteiro saía em 24 bits e «não bit-exacto». No CD é
+    // zeros. Não conta para o veredicto e arredonda-se; num álbum de 24 bits
+    // fica com o que tem. Uma faixa com som de verdade passa sempre de meio LSB.
     const long long pedaco = 65536;
     float *buf = malloc(sizeof(float) * 2 * pedaco);
-    for (NSMutableDictionary *f in faixas) {
-        if (f[@"falta"]) continue;
+    void (^medir)(NSMutableDictionary *) = ^(NSMutableDictionary *f) {
         long long a = [f[@"inicio"] longLongValue], b = [f[@"fim"] longLongValue];
         // As rampas que ficaram como estão não contam para o veredicto, como
         // no vigia da gravação: contam-se à parte, para o relatório.
         long long fora16 = 0, fora24 = 0, naRampa = 0;
+        float maximo = 0.0f;
         int k = 0;
         for (long long p = a; p < b; p += pedaco) {
             long long n = MIN(pedaco, b - p);
             ZPLer(&g, cs, nc, p, n, buf);
+            for (long long i = 0; i < 2 * n; ++i) maximo = MAX(maximo, fabsf(buf[i]));
             for (long long i = 0; i < n; ++i) {
                 BOOL f16 = ZPForaDaGrelha(buf[2*i], 32768.0f) || ZPForaDaGrelha(buf[2*i+1], 32768.0f);
                 BOOL f24 = ZPForaDaGrelha(buf[2*i], 8388608.0f) || ZPForaDaGrelha(buf[2*i+1], 8388608.0f);
@@ -1264,10 +1544,51 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
                 if (f24) ++fora24;
             }
         }
+        BOOL silencio = maximo * 32768.0f < 0.5f;
+        f[@"silencio"] = @(silencio);
+        if (silencio) {
+            f[@"ruido"] = @(fora24 + naRampa);
+            fora16 = fora24 = naRampa = 0;
+        }
         double pico = 0.0;
         NSData *blocos = ZPBlocosDeEnergia(&g, cs, nc, a, b, &pico);
         [f addEntriesFromDictionary:@{ @"fora16": @(fora16), @"fora24": @(fora24), @"naRampa": @(naRampa),
                                        @"pico": @(pico), @"blocos": blocos }];
+    };
+    for (NSMutableDictionary *f in faixas) if (!f[@"falta"]) medir(f);
+
+    // 5b. AccurateRip, por álbum, quando o álbum cai na grelha de 16 bits (ver
+    // ZPAlinharPeloAccurateRip). As faixas que mudaram de sítio medem-se outra vez.
+    for (NSMutableDictionary *a in albuns) {
+        NSMutableArray<NSMutableDictionary *> *inteiras = [NSMutableArray array];
+        BOOL dezasseis = YES;
+        for (NSMutableDictionary *f in a[@"faixas"]) {
+            if (f[@"falta"]) continue;
+            [inteiras addObject:f];
+            if ([f[@"fora16"] longLongValue] > 0) dezasseis = NO;
+        }
+        NSString *grupo = ZPOuNada(ZPOuNada(a[@"mb"][@"release-group"])[@"id"]);
+        if (!inteiras.count || !dezasseis || !grupo) continue;
+        NSMutableArray<NSNumber *> *numeros = [NSMutableArray array], *discos = [NSMutableArray array], *totais = [NSMutableArray array];
+        BOOL conhecidas = YES;
+        for (NSMutableDictionary *f in inteiras) {
+            NSDictionary *t = f[@"catalogo"], *mt = f[@"mb"];
+            long numero = [(ZPOuNada(t[@"trackNumber"]) ?: ZPOuNada(mt[@"position"]) ?: @0) longValue];
+            long disco = [(ZPOuNada(t[@"discNumber"]) ?: @1) longValue], total = 0;
+            NSArray *suportes = a[@"mb"][@"media"];
+            if (disco >= 1 && (NSUInteger)disco <= suportes.count) total = [suportes[disco - 1][@"track-count"] longValue];
+            if (numero <= 0 || total <= 0) conhecidas = NO;
+            [numeros addObject:@(numero)];
+            [discos addObject:@(disco)];
+            [totais addObject:@(total)];
+        }
+        if (!conhecidas) continue;
+        NSMutableArray<NSArray<NSNumber *> *> *antes = [NSMutableArray array];
+        for (NSMutableDictionary *f in inteiras) [antes addObject:@[ f[@"inicio"], f[@"fim"] ]];
+        a[@"accuraterip"] = ZPAlinharPeloAccurateRip(&g, cs, nc, inteiras, grupo, numeros, discos, totais);
+        for (NSUInteger i = 0; i < inteiras.count; ++i) {
+            if (![antes[i][0] isEqual:inteiras[i][@"inicio"]] || ![antes[i][1] isEqual:inteiras[i][@"fim"]]) medir(inteiras[i]);
+        }
     }
     free(buf);
 
@@ -1340,6 +1661,14 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
 
         NSURL *pasta = [[raiz URLByAppendingPathComponent:ZPNomeDeFicheiro(artistaDoAlbum) isDirectory:YES]
                         URLByAppendingPathComponent:ZPNomeDeFicheiro(nomeDoAlbum) isDirectory:YES];
+        // Uma pasta que já tem FLAC deste álbum (faixas regravadas, como a
+        // «Corsair» de 2026-11-21): o ReplayGain de álbum daqui seria só das
+        // faixas novas (deu −0,77 dB contra os −5,53 do Geogaddi), por isso não
+        // se escreve; calcula-se com o rsgain depois de as juntar.
+        BOOL jaTinha = NO;
+        for (NSString *nome in [[NSFileManager defaultManager] subpathsOfDirectoryAtPath:pasta.path error:NULL] ?: @[]) {
+            if ([nome.pathExtension.lowercaseString isEqualToString:@"flac"] && nome.pathComponents.count <= 2) { jaTinha = YES; break; }
+        }
         if (![[NSFileManager defaultManager] createDirectoryAtURL:pasta withIntermediateDirectories:YES attributes:nil error:&erro]) {
             [rel addObject:[NSString stringWithFormat:@"Não consegui criar %@: %@", pasta.path, erro.localizedDescription]];
             continue;
@@ -1375,11 +1704,21 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
                 notaDaCapa = [NSString stringWithFormat:@" Não consegui escrever albumart_backup/%@.", nome];
             }
         }
-        [rel addObject:[NSString stringWithFormat:@"%u bits, %@. ReplayGain do álbum %+.2f dB, pico verdadeiro %.6f.%@", bits,
+        long long ruido = 0;
+        NSUInteger comRuido = 0;
+        for (NSMutableDictionary *f in inteiras) if ([f[@"ruido"] longLongValue] > 0) { ruido += [f[@"ruido"] longLongValue]; ++comRuido; }
+        NSString *notaDoRuido = !ruido ? @""
+            : [NSString stringWithFormat:@" (mais %lld tramas de ruído abaixo de meio LSB em %lu %@ de silêncio, arredondadas para zero)",
+               ruido, (unsigned long)comRuido, comRuido == 1 ? @"faixa" : @"faixas"];
+        NSString *notaDoGanho = jaTinha
+            ? @"ReplayGain de álbum não escrito: a pasta já tinha faixas deste álbum; corre «rsgain easy -p zp» na pasta depois de as juntar"
+            : [NSString stringWithFormat:@"ReplayGain do álbum %+.2f dB, pico verdadeiro %.6f", ganhoDoAlbum, picoDoAlbum];
+        [rel addObject:[NSString stringWithFormat:@"%u bits, %@%@. %@.%@", bits,
                         !exacto ? [NSString stringWithFormat:@"NÃO bit-exacto (%lld tramas fora da grelha de 24 bits, arredondadas)", fora24]
                         : naRampa ? [NSString stringWithFormat:@"bit-exacto fora das rampas que ficaram como estão (%lld tramas, arredondadas)", naRampa]
                         : @"bit-exacto",
-                        ganhoDoAlbum, picoDoAlbum, notaDaCapa]];
+                        notaDoRuido, notaDoGanho, notaDaCapa]];
+        if (a[@"accuraterip"]) [rel addObject:a[@"accuraterip"]];
 
         NSUInteger escritas = 0;
         for (NSUInteger i = 0; i < todas.count; ++i) {
@@ -1436,7 +1775,7 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
                 por(@"REPLAYGAIN_TRACK_GAIN", [NSString stringWithFormat:@"%+.2f dB", ganho]);
                 por(@"REPLAYGAIN_TRACK_PEAK", [NSString stringWithFormat:@"%.8f", [f[@"pico"] doubleValue]]);
             }
-            if (sonoridadeDoAlbum > kZPSemSonoridade) {
+            if (sonoridadeDoAlbum > kZPSemSonoridade && !jaTinha) {
                 por(@"REPLAYGAIN_ALBUM_GAIN", [NSString stringWithFormat:@"%+.2f dB", ganhoDoAlbum]);
                 por(@"REPLAYGAIN_ALBUM_PEAK", [NSString stringWithFormat:@"%.8f", picoDoAlbum]);
             }
@@ -1462,15 +1801,19 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
             NSString *falha = nil;
             BOOL bem = ZPEscreverFLAC(caminho, &g, cs, nc, ini, fim, bits, et, capa, &falha);
             if (bem) ++escritas;
-            NSString *grelha = [f[@"fora16"] longLongValue] == 0 ? @"16 bits exactos"
+            NSString *grelha = [f[@"silencio"] boolValue]
+                                 ? ([f[@"ruido"] longLongValue] > 0 ? [NSString stringWithFormat:@"silêncio digital (%@ tramas de ruído abaixo de meio LSB, arredondadas)", f[@"ruido"]]
+                                                                    : @"silêncio digital")
+                             : [f[@"fora16"] longLongValue] == 0 ? @"16 bits exactos"
                              : [f[@"fora24"] longLongValue] == 0 ? @"24 bits exactos"
                              : [NSString stringWithFormat:@"%@ tramas fora da grelha", f[@"fora24"]];
             if ([f[@"naRampa"] longLongValue] > 0) {
                 grelha = [grelha stringByAppendingFormat:@" (mais %@ numa rampa que ficou como está)", f[@"naRampa"]];
             }
-            [rel addObject:[NSString stringWithFormat:@"  %@  %@ a %@ (%@)  %@; %@; %+.2f dB%@",
+            NSString *ganhoDaFaixa = sonoridade > kZPSemSonoridade ? [NSString stringWithFormat:@"%+.2f dB", ganho] : @"sem ReplayGain de faixa";
+            [rel addObject:[NSString stringWithFormat:@"  %@  %@ a %@ (%@)  %@; %@; %@%@",
                             [caminho substringFromIndex:pasta.path.length + 1], ZPTempo(ini, g.taxa), ZPTempo(fim, g.taxa), ZPTempo(fim - ini, g.taxa),
-                            f[@"como"], grelha, ganho, bem ? @"" : [NSString stringWithFormat:@"  — FALHOU: %@", falha]]];
+                            f[@"como"], grelha, ganhoDaFaixa, bem ? @"" : [NSString stringWithFormat:@"  — FALHOU: %@", falha]]];
         }
         if (erudita) [rel addObject:@"Erudita: os compositores, os intérpretes e os títulos vêm da Apple e têm de ser revistos (convenção da fonoteca)."];
         BOOL duracoesDoMusica = NO;
@@ -1498,8 +1841,14 @@ NSString *ZPProcessarGravacaoAgora(NSURL *wav, NSURL *raiz, NSArray<NSURL *> **p
     if (!resumos.count) [resumos addObject:@"Nenhum álbum processado."];
     [rel insertObject:[resumos componentsJoinedByString:@"; "] atIndex:0];
     NSString *relatorio = [[rel componentsJoinedByString:@"\n"] stringByAppendingString:@"\n"];
-    for (NSURL *pasta in pastas) {
-        [relatorio writeToURL:[pasta URLByAppendingPathComponent:@"Processamento.txt"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    // O relatório não apaga o de outra gravação do mesmo álbum: «Processamento
+    // (2).txt», como os FLAC.
+    for (NSURL *pasta in [NSOrderedSet orderedSetWithArray:pastas]) {
+        NSURL *destino = [pasta URLByAppendingPathComponent:@"Processamento.txt"];
+        for (int k = 2; [[NSFileManager defaultManager] fileExistsAtPath:destino.path]; ++k) {
+            destino = [pasta URLByAppendingPathComponent:[NSString stringWithFormat:@"Processamento (%d).txt", k]];
+        }
+        [relatorio writeToURL:destino atomically:YES encoding:NSUTF8StringEncoding error:NULL];
     }
     if (pastasEscritas) *pastasEscritas = pastas;
     return relatorio;
