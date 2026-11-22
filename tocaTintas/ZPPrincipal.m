@@ -65,6 +65,7 @@ SOFTWARE.
 #import "ZPAgoraATocar.h"   // O «A tocar» do sistema e os comandos dos AirPods e do teclado
 #import "ZPDescobertas.h"   // A janela «A seguir»: a fila da estação
 #import "ZPOrigens.h"       // A janela «Origens»: as regras de origem das estações
+#import "ZPContagens.h"     // A janela «Contagens»: a vista audicoes_locais da fonoteca
 #import "ZPLeitorEspacial.h"   // O leitor com áudio espacial, para a saída em Bluetooth
 
 #define NUM_BUFFERS 3  // Three is typically a good number for real-time audio playback
@@ -409,6 +410,7 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, copy) NSArray<NSString *> *sementeDoExcerto;   // artista, álbum e título da faixa de que se tirou o excerto (para o vectorizar a reconhecer)
 @property (nonatomic) NSInteger caixaDesde;        // a primeira faixa da lista que a caixa das músicas mostra (0 fora de uma estação)
 @property (nonatomic, strong) ZPOrigens *janelaDasOrigens;   // Reprodução ▸ Origens…
+@property (nonatomic, strong) ZPContagens *janelaDasContagens;   // Reprodução ▸ Contagens…
 @property (nonatomic, strong) NSTask *mapearTask;   // o «vectorizar mapear» a correr
 @property (nonatomic, strong) NSTask *refinarTask;                // o «vectorizar refinar» em curso
 @property (nonatomic, strong) NSTimer *relogioDeRefinar;
@@ -5618,6 +5620,14 @@ static NSMutableDictionary<NSString *, NSArray<NSString *> *> *ZPLerInfoDaEstaca
     [self.janelaDasOrigens mostrar];
 }
 
+// As audições da fonoteca (a vista audicoes_locais), numa janela que se relê
+// sozinha e não deixa a base presa.
+- (IBAction)mostrarContagens:(id)sender {
+    NSString *base = [[self loadSongsDirectoryPath] stringByAppendingPathComponent:@".fonoteca.sqlite"];
+    if (!self.janelaDasContagens) self.janelaDasContagens = [[ZPContagens alloc] initComBase:base];
+    [self.janelaDasContagens mostrar];
+}
+
 - (IBAction)mostrarDescobertas:(id)sender {
     if (!self.descobertas) self.descobertas = [[ZPDescobertas alloc] initComFonte:self];
     [self.descobertas mostrar];
@@ -5916,6 +5926,10 @@ typedef NS_ENUM(NSInteger, ZPTecla) {
                                                      action:@selector(mostrarOrigens:) keyEquivalent:@""];
     origens.target = self;
     [menu addItem:origens];
+    NSMenuItem *contagens = [[NSMenuItem alloc] initWithTitle:NSLocalizedString(@"counts_menu", @"Contagens…")
+                                                       action:@selector(mostrarContagens:) keyEquivalent:@""];
+    contagens.target = self;
+    [menu addItem:contagens];
 
     NSMenuItem *topo = [[NSMenuItem alloc] initWithTitle:menu.title action:NULL keyEquivalent:@""];
     topo.submenu = menu;
