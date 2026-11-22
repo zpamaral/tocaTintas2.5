@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>A base de dados da fonoteca — tocaTintas</title>
 <meta name="description" content="A base de dados indentifica três coisas: a música (uma gravação), o ficheiro (onde ela está agora, num dado formato) e o disco (o CD de onde veio). Uma dada música pode ter vários…">
-<meta name="keywords" content="Tabelas, Vistas, Quem escreve o quê, Exemplos, musicas, 37 675, ficheiros, 19 471, discos, 1 237, faixas_cd, 15 991, faixas_musica, 37 896, candidatas_musica, 5 098, audicoes, 992, contagens, ficheiros_contagens, fonoteca, audicoes_locais, SQLite, base de dados, audições, UUID, FONOTECA_ID">
+<meta name="keywords" content="Tabelas, Vistas, Quem escreve o quê, Exemplos, musicas, 37 675, ficheiros, 19 471, discos, 1 237, faixas_cd, 15 991, faixas_musica, 37 896, candidatas_musica, 5 098, audicoes, 992, assinaturas, 19 682, contagens, ficheiros_contagens, fonoteca, audicoes_locais, SQLite, base de dados, audições, UUID, FONOTECA_ID">
 <meta name="robots" content="index, anchors">
 <link rel="stylesheet" href="estilo.css">
 </head>
@@ -37,6 +37,8 @@
 <p class="rotulo"><strong>audicoes</strong> (992)</p>
 <p>Uma linha por audição, com a música, a data e hora (ISO 8601, em UTC), a origem (<code>ficheiro</code>, <code>cd</code> ou <code>musica</code>) e o ficheiro, o disco ou a faixa do Música que tocou. Uma faixa do tocaTintas conta ao fim de 5 segundos de audição efectiva. Pausar e retomar não avançarão a contagem, nem avançar antes dos 5 segundos, e cada reprodução contará uma vez. As regras da aplicação Música estão em <a href="audicoes-do-musica.html"><strong>AUDIÇÕES DO MÚSICA</strong></a>.</p>
 
+<p class="rotulo"><strong>assinaturas</strong> (19&nbsp;682)</p>
+<p>Uma linha por música e por modelo, com o vector de 512 números (em vírgula flutuante de 16 bits, 1024 octetos), o MD5 do áudio de que foi tirado e a data. O nome do modelo inclui a maneira de tirar os excertos (<code>larger_clap_music/3x10s</code>), para que as assinaturas de outro modelo ou de outro método nunca se misturem com estas. Ver <a href="estacao.html"><strong>ESTAÇÃO</strong></a>.</p>
 <a name="base-da-fonoteca-vistas"></a><h3 id="base-da-fonoteca-vistas">Vistas</h3>
 <p class="rotulo"><strong>contagens</strong></p>
 <p>Por música, o total de audições e a data da última. O total soma as contagens importadas, as que o Música tinha quando as suas faixas foram ligadas à música e as audições registadas.</p>
@@ -46,6 +48,7 @@
 <p>A vista de leitura, a da Fig. 3. Tem uma linha por música, com as audições, a última, quantos ficheiros tem, os formatos (<code>aac+flac</code>), o caminho preferido (o do FLAC, se houver) e os CDs onde está, no formato <code>cddb:faixa</code>.</p>
 <p class="rotulo"><strong>audicoes_locais</strong></p>
 <p>As audições à hora local, a mais recente primeiro. Mostra a hora (WET ou WEST, conforme a data), o artista, o álbum, o título, quantas vezes a música já tocou ao todo (a contagem que a janela mostra) e o que tocou: <code>flac</code>, <code>aac</code>, <code>alac</code>, <code>mp3</code>, <code>cd</code> ou <code>música</code>. A tabela guarda as horas em UTC, para que a ordem e as contas não se baralhem na mudança de hora. A conversão faz-se na leitura e acompanha a hora de Verão de cada audição.</p>
+<p>A janela <strong>Reprodução ▸ Contagens…</strong> mostra a última audição de cada música, com as colunas desta vista, e nas «vezes» o total da música. Não deixa nenhuma de fora: mostra-as em páginas de mil, e os botões do rodapé andam uma página (‹ ›) ou dez (« »). Abre na página do topo, a das mais recentes, onde « e ‹ estão desligados; na última página, são › e ». A janela relê-se sozinha enquanto estiver aberta, e uma música que volte a tocar sobe para o topo. Pode filtrar-se por artista, álbum, título, formato ou data, ordenar por qualquer coluna, e copiar as linhas seleccionadas com ⌘C. A base não fica presa: cada leitura abre-a só para leitura e fecha-a logo, ao contrário de um programa como o DB Browser for SQLite, que a mantém aberta e impede que o registo das audições passe do <code>-wal</code> para a base.</p>
 <a name="base-da-fonoteca-quem-escreve-o-que"></a><h3 id="base-da-fonoteca-quem-escreve-o-que">Quem escreve o quê</h3>
 <p>O <strong>verificar_md5IV.sh</strong> e o <strong>fonoteca.py</strong> são os curadores das músicas, dos ficheiros, dos discos e das faixas dos CDs. O <code>fonoteca.py sincronizar-musica</code> regista as audições que o Música contou, integrando tudo na base de dados. Na base de dados, o tocaTintas acrescenta:</p>
 <ul>
@@ -55,6 +58,7 @@
 <li>a TOC e o disc ID de um disco conhecido só pelo CDDB, e o título, o artista e o álbum de uma faixa que não os tenha;</li>
 <li>as escolhas feitas na janela <strong>Ligar faixas do Música</strong>, e as audições das faixas do catálogo da Apple, pelo <code>fonoteca.py ouvir-musica</code>.</li>
 </ul>
+<p>O <strong>vectorizar</strong> escreve só na tabela <strong>assinaturas</strong>, que cria se não existir.</p>
 <p>Os campos da quarta alínea só se escrevem quando estão vazios. O que os os roteiros da fonoteca lá puseram automaticamente nunca será substituído.</p>
 <a name="base-da-fonoteca-exemplos"></a><h3 id="base-da-fonoteca-exemplos">Exemplos</h3>
 <pre><code>sqlite3 -readonly CDs/.fonoteca.sqlite \

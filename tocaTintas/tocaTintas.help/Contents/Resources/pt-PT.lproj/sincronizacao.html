@@ -33,7 +33,7 @@
 <li><strong>O atraso nunca passa de 8 segundos.</strong> A correcção de deriva não deixa o áudio em trânsito passar dos seis, e a latência é de um. Acima disso, é mais provável o relógio estar errado do que o áudio estar tanto tempo a caminho.</li>
 </ul>
 <a name="sincronizacao-quando-se-aplica"></a><h3 id="sincronizacao-quando-se-aplica">Quando se aplica</h3>
-<p><strong>Só sem auscultadores.</strong> Com auscultadores ligados, ouve-se o som local, sem atraso, e o histograma acompanha esse, mesmo com o AirPlay a transmitir ao mesmo tempo. Sem auscultadores, o que se ouve é o receptor, e o histograma atrasa-se o Δ medido.</p>
+<p><strong>Só sem auriculares.</strong> Com auriculares ligados, ouve-se o som local, sem atraso, e o histograma acompanha esse, mesmo com o AirPlay a transmitir ao mesmo tempo. Sem auriculares, o que se ouve é o receptor, e o histograma atrasa-se o Δ medido.</p>
 <p>Um Δ igual a zero quer dizer «não sei», e não «estão sincronizados». Se o raop_play não tiver escrito nenhuma linha, o histograma não se atrasa. Ao fim de cinco segundos de transmissão sem linhas, o tocaTintas regista o problema.</p>
 <a name="sincronizacao-limitacao"></a><h3 id="sincronizacao-limitacao">Limitação</h3>
 <p>A soma da latência pressupõe que o receptor guarda exactamente as tramas que lhe foram pedidas. Um aparelho que guarde menos faz o Δ sair grande de mais, e o som chega antes das barras. É um desvio fixo de cada aparelho. Distingue-se de um erro de contagem pela forma: no registo é constante, enquanto um erro de contagem varia com o que se passou no fluxo.</p>

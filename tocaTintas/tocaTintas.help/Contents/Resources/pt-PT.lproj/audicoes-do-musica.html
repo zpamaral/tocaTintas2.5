@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Audições da aplicação Música — tocaTintas</title>
 <meta name="description" content="O que se ouvir na aplicação Música também contará na base de dados da fonoteca. Se a mesma gravação existir num ficheiro ou num CD, as audições somam-se às dessa música. Se não…">
-<meta name="keywords" content="As três regras, Sincronização, Como se liga uma faixa, A janela «Ligar faixas do Música», Ligar, ↩, ou duplo clique, Saltar, Aceitar o álbum, ▶︎ Ouvir 10 s, Apple Music, Música, contagens, played count, sincronizar, ligar faixas, pendentes, catálogo">
+<meta name="keywords" content="As três regras, Sincronização, Como se liga uma faixa, A janela «Ligar faixas do Música», Ligar, ↩, ou duplo clique, Saltar, Aceitar o álbum, ▶︎ Ouvir a do Música e ▶︎ Ouvir a candidata, Apple Music, Música, contagens, played count, sincronizar, ligar faixas, pendentes, catálogo">
 <meta name="robots" content="index, anchors">
 <link rel="stylesheet" href="estilo.css">
 </head>
@@ -49,16 +49,25 @@
 <p>Ficam pendentes as faixas com candidatas mas sem nenhuma certa. São encontradas pelo título sem sufixos de versão («Live», «Mix», «Edit»…), pelo álbum e número da faixa, muito usado na música clássica, em que o Música e o MusicBrainz escrevem o artista de maneiras diferentes, ou pelo título com outra duração. Uma faixa pendente ainda não conta. O que o Música tiver contado entretanto entra quando ela for ligada.</p>
 <a name="audicoes-do-musica-a-janela-ligar-faixas-do-musica"></a><h3 id="audicoes-do-musica-a-janela-ligar-faixas-do-musica">A janela «Ligar faixas do Música»</h3>
 <p>Abre-se em <strong>Ficheiro</strong> ▸ <strong>Ligar faixas do Música…</strong>, ou clicando na notificação «Faixas do Música por ligar», que aparece quando o número de pendentes aumenta. É o mesmo género de escolha que o Música propõe quando um CD tem várias entradas.</p>
-<p>À esquerda estão as faixas pendentes, com um campo para filtrar por artista, álbum ou título. À direita estão as candidatas da faixa escolhida, com a sugestão já seleccionada, a diferença de duração, onde está cada uma (o formato, o CD ou «só no Música») e o critério que a encontrou. A última opção é sempre <strong>Nenhuma — fica como música própria</strong>.</p>
+<p>Ao abrir, a janela sincroniza com o Música, para que as candidatas contem com o que se registou entretanto — um álbum gravado, aprovado e aberto agora mesmo, por exemplo. Se houver ficheiros a registar, espera primeiro por eles. Enquanto isso, no lugar da contagem lê-se «A actualizar com o Música…», e só se pode ouvir: as escolhas esperam pelas candidatas novas. Com o Música fechado não há sincronização, e a janela mostra o que a base já tem.</p>
+<p>À esquerda estão as faixas pendentes, com um campo para filtrar por artista, álbum ou título. À direita estão as candidatas da faixa escolhida, com a sugestão já seleccionada, a diferença de duração, onde está cada uma (o formato, o CD ou «só no Música») e o parecer. A última opção é sempre <strong>Nenhuma — fica como música própria</strong>.</p>
+<p>O <strong>parecer</strong> vem da diferença de duração e do que os títulos dizem da versão (o que está entre parênteses ou depois de « - », sem contar a remasterização nem os convidados):</p>
+<ul>
+<li><strong>mesma gravação</strong>: até 3 s de diferença e nenhuma indicação de versão diferente. Uma remasterização diferente não muda o parecer;</li>
+<li><strong>outra versão</strong>: mais de 10 s de diferença;</li>
+<li><strong>por ouvir</strong>: tudo o resto, como a mesma duração com «(7″ Version)» de um lado e nada do outro.</li>
+</ul>
+<p>Entre parênteses fica o critério com que a candidata foi encontrada.</p>
+<p>Por baixo das duas tabelas lê-se a comparação da escolha seleccionada: o parecer por extenso e a razão dele; a faixa do Música e a candidata lado a lado, com álbum, número, duração, onde está a candidata, as audições que cada uma já tem e quantas faixas do Música já estão ligadas à candidata; e a consequência da escolha. Ao ligar, as audições da faixa passam a contar para a candidata, e diz-se com quantas fica. Se a candidata tem ficheiro local, é ele que toca nas estações, e a faixa do Música não entra nelas; se não tem, continua a tocar pelo Música. Com «Nenhuma», a faixa fica como música própria, com contagem só dela, e entra nas estações como faixa do Música.</p>
 <p class="rotulo"><strong>Ligar</strong> (↩, ou duplo clique)</p>
 <p>Liga a faixa à candidata escolhida e passa à seguinte.</p>
 <p class="rotulo"><strong>Saltar</strong></p>
 <p>Deixa a faixa pendente e passa à seguinte.</p>
 <p class="rotulo"><strong>Aceitar o álbum</strong></p>
 <p>Aceita as sugestões de todas as faixas pendentes do mesmo álbum, depois de uma confirmação que diz quantas ficam ligadas e quantas ficam como músicas próprias. É a forma rápida de tratar os discos de música clássica.</p>
-<p class="rotulo"><strong>▶︎ Ouvir 10 s</strong></p>
-<p>Toca dez segundos da versão local, a partir de 30 % da duração, para comparar de ouvido. Não conta como audição. Só funciona com os formatos que o macOS lê sozinho (FLAC, ALAC, AAC e MP3).</p>
-<p>A sugestão é a primeira candidata, excepto quando só se encontrou uma pelo título com outra duração. Nesse caso, a sugestão é <strong>Nenhuma</strong>.</p>
+<p class="rotulo"><strong>▶︎ Ouvir a do Música</strong> e <strong>▶︎ Ouvir a candidata</strong></p>
+<p>Tocam dez segundos de cada lado, para comparar de ouvido. Não contam como audição nem mexem no Música. A candidata com ficheiro ouve-se dele, a partir de 30% da duração (só nos formatos que o macOS lê sozinho: FLAC, ALAC, AAC e MP3). A faixa do Música, e a candidata que só lá existe, ouvem-se pelo excerto de 30 segundos da loja da Apple: o da própria versão, escolhido pela duração, ou nenhum, e nesse caso a comparação diz que não há amostra. Para a loja vão só o artista e o título.</p>
+<p>A sugestão é a primeira candidata com parecer de mesma gravação. Não havendo nenhuma, é a primeira de todas, excepto quando só foi encontrada pelo título com outra duração: nesse caso, a sugestão é <strong>Nenhuma</strong>.</p>
 </main>
 <nav class="percurso fim"><span><a href="base-da-fonoteca.html">◂ A base de dados da fonoteca</a></span><span><a href="index.html">Temas</a></span><span><a href="listas-m3u.html">Listas M3U e M3U8 ▸</a></span></nav>
 </div>

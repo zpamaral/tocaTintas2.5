@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fonoteca — tocaTintas</title>
-<meta name="description" content="A pasta de música escolhe-se nas Preferências, no separador Música. O tocaTintas percorrerá então todas as subpastas e encontrará os ficheiros de áudio nelas contidos.">
+<meta name="description" content="A pasta de música escolhe-se nas Preferências, no separador música. O tocaTintas percorrerá então todas as subpastas e encontrará os ficheiros de áudio nelas contidos.">
 <meta name="keywords" content="Registo automático, Verificação diária, pasta de música, registo, FSEvents, MD5, verificação, consistência, verificar_md5IV">
 <meta name="robots" content="index, anchors">
 <link rel="stylesheet" href="estilo.css">
@@ -15,7 +15,7 @@
 <nav class="percurso"><span><a href="capas.html">◂ Capas</a></span><span><a href="index.html">Temas</a></span><span><a href="base-da-fonoteca.html">A base de dados da fonoteca ▸</a></span></nav>
 <main>
 <h2 id="fonoteca">Fonoteca</h2>
-<p>A pasta de música escolhe-se nas Preferências, no separador <strong>Música</strong>. O tocaTintas percorrerá então todas as subpastas e encontrará os ficheiros de áudio nelas contidos.</p>
+<p>A pasta de música escolhe-se nas Preferências, no separador <strong>música</strong>. O tocaTintas percorrerá então todas as subpastas e encontrará os ficheiros de áudio nelas contidos.</p>
 <p>Dentro dessa pasta principal poderá estar <code>.fonoteca.sqlite</code>, a base de dados mantida pelo <strong>verificar_md5IV.sh</strong> e pelo <strong>fonoteca.py</strong>. Nessa base de dados, cada música tem um UUID, que é o mesmo na etiqueta <code>FONOTECA_ID</code> do ficheiro e na faixa do CD donde veio. O tocaTintas acrescenta-lhe o número de audições e os discos que tocou antes de terem sido riporinados. Quando preenche um campo, só o faz se ele estiver vazio, e nunca apaga nem substitui informação (ver <a href="base-da-fonoteca.html"><strong>A BASE DE DADOS DA FONOTECA</strong></a>).</p>
 <p>A base de dados pode estar num disco externo mesmo que esteja em pausa. Todo o fluxo de acesso à base de dados passa por uma fila própria, fora do thread principal, e se a base não estiver disponível, o tocaTintas continuará a tentar actualizar a base de dados até ao disco acordar ou ser outra vez montado.</p>
 <a name="fonoteca-registo-automatico"></a><h3 id="fonoteca-registo-automatico">Registo automático</h3>

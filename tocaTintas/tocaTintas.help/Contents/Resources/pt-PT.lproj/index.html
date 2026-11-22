@@ -34,7 +34,11 @@
 <p><strong>Ficheiro</strong> ▸ <strong>Tocar o CD</strong></p>
 <p><strong>Ficheiro</strong> ▸ <strong>Ligar faixas do Música…</strong></p>
 <p><strong>Ficheiro</strong> ▸ <strong>Sincronizar com o Música</strong></p>
+<p><strong>Ficheiro</strong> ▸ <strong>Guardar estação…</strong> (⌘S)</p>
+<p><strong>Ficheiro</strong> ▸ <strong>Guardar estação como…</strong> (⇧⌘S)</p>
 <p><strong>Ficheiro</strong> ▸ <strong>Sair do modo corrente</strong> (⇧⌘P)</p>
+<p><strong>Reprodução</strong> ▸ <em>as teclas do tocador</em></p>
+<p><strong>Reprodução</strong> ▸ <strong>Criar estação</strong></p>
 <p><strong>Ajuda</strong> ▸ <strong>Ajuda do tocaTintas</strong> (⌘?)</p>
 <p><code>osascript -e 'tell application "tocaTintas" to</code> <em>comando</em><code>'</code></p>
 
@@ -43,7 +47,7 @@
 <p>Cada faixa toca mostrando a sua <strong>capa</strong>. Esta poderá ser a que vem embutida no ficheiro ou, se essa não existir, a que estiver na pasta de imagem de capa do álbum. A capa aparecerá na janela do tocador, na notificação do sistema, na página WWW «a tocar» e no caso dos WavPack nos ícones gerados pelo Finder. Adicionalmente, um CD receberá também uma capa de álbum. Esta poderá ser a que já exista na fonoteca ou uma obtida no Cover Art Archive (ver <a href="capas.html"><strong>CAPAS</strong></a>).</p>
 <p>Além disso, faz uma série de ajustes de som:</p>
 <ul>
-<li>crossfeed <a href="https://bs2b.sourceforge.net/">bs2b</a> e equalização <a href="https://github.com/jaakkopasanen/AutoEq">AutoEQ</a> para os auscultadores;</li>
+<li>crossfeed <a href="https://bs2b.sourceforge.net/">bs2b</a> e equalização <a href="https://github.com/jaakkopasanen/AutoEq">AutoEQ</a> para os auriculares;</li>
 <li>áudio espacial nos AirPods, com o tocaTintas integrado no «A tocar» do sistema e comandado pelas hastes dos AirPods e pelas teclas multimédia do teclado;</li>
 <li>transmissão de áudio para receptores AirPlay e AirPlay 2, como o HomePod e a Apple TV;</li>
 <li>leitura de CDs, com metadados ad hoc vindos do <a href="https://musicbrainz.org/">MusicBrainz</a> e do <a href="https://gnudb.org/">gnudb</a>;</li>
@@ -58,17 +62,18 @@
 <li><a href="janela-principal.html">Janela principal</a><span>À esquerda fica a capa. Ao centro estão o artista, o álbum e a faixa, em etiquetas que deslizam quando o texto não…</span></li>
 <li><a href="formatos.html">Formatos</a><span>FLAC, WavPack (.wv), Monkey’s Audio (.ape), ALAC e AAC (.m4a), AIFF, MP3 e Opus. Quando a mesma faixa existir em vários…</span></li>
 <li><a href="capas.html">Capas</a><span>Ficheiros</span></li>
-<li><a href="fonoteca.html">Fonoteca</a><span>A pasta de música escolhe-se nas Preferências, no separador Música. O tocaTintas percorrerá então todas as subpastas e…</span></li>
+<li><a href="fonoteca.html">Fonoteca</a><span>A pasta de música escolhe-se nas Preferências, no separador música. O tocaTintas percorrerá então todas as subpastas e…</span></li>
 <li><a href="base-da-fonoteca.html">A base de dados da fonoteca</a><span>A base de dados indentifica três coisas: a música (uma gravação), o ficheiro (onde ela está agora, num dado formato) e…</span></li>
 <li><a href="audicoes-do-musica.html">Audições da aplicação Música</a><span>O que se ouvir na aplicação Música também contará na base de dados da fonoteca. Se a mesma gravação existir num…</span></li>
 <li><a href="listas-m3u.html">Listas M3U e M3U8</a><span>Ficheiro ▸ Abrir… (⌘O)</span></li>
+<li><a href="estacao.html">Estação</a><span>Reprodução ▸ Criar estação</span></li>
 <li><a href="cd-de-audio.html">CD de áudio</a><span>Quando se mete um CD, o tocaTintas pergunta se o deve tocar. Se sim, as faixas do disco passam a ser a lista em vigor…</span></li>
 <li><a href="caminho-do-som.html">O caminho do som</a><span>A saída do sistema é o BlackHole, um aparelho de áudio virtual. Tudo o que o Mac toca entra nele, e dele parte para…</span></li>
-<li><a href="auscultadores.html">Auscultadores</a><span>O crossfeed mistura em cada ouvido um pouco do canal oposto, filtrado, como a cabeça faria ao ouvir colunas. Isso…</span></li>
-<li><a href="airpods.html">AirPods</a><span>Com uns AirPods, ou outros auscultadores Bluetooth, como saída do sistema, o tocaTintas toca directamente para eles. O…</span></li>
+<li><a href="auriculares.html">Auriculares</a><span>O crossfeed mistura em cada ouvido um pouco do canal oposto, filtrado, como a cabeça faria ao ouvir colunas. Isso…</span></li>
+<li><a href="airpods.html">AirPods</a><span>Com uns AirPods, ou outros auriculares Bluetooth, como saída do sistema, o tocaTintas toca directamente para eles. O…</span></li>
 <li><a href="airplay.html">AirPlay</a><span>A transmissão é feita pelo raop_play, que vem dentro da aplicação e fala os dois protocolos: o AirPlay 1, para os…</span></li>
 <li><a href="sincronizacao.html">Sincronização do histograma com o AirPlay</a><span>O cava lê o BlackHole, no início da cadeia, e mostra o áudio no instante em que é capturado. O receptor AirPlay toca…</span></li>
-<li><a href="emparelhamento.html">Emparelhamento</a><span>A Apple TV 4K só aceita som de quem tiver feito um emparelhamento com ela. Faz-se uma vez, no separador Emparelhamento.…</span></li>
+<li><a href="emparelhamento.html">Emparelhamento</a><span>A Apple TV 4K só aceita som de quem tiver feito um emparelhamento com ela. Faz-se uma vez, no separador emparelhar.…</span></li>
 <li><a href="gravacao.html">Gravação</a><span>O botão ⏺ grava para WAV em vírgula flutuante de 32 bits, em /var/tmp, onde fica até o álbum ser aprovado. A fonte…</span></li>
 <li><a href="applescript.html">AppleScript</a><span>O tocaTintas tem um dicionário AppleScript, que o Editor de Scripts mostra em Ficheiro ▸ Abrir dicionário… e que serve…</span></li>
 <li><a href="histograma.html">Histograma</a><span>O histograma é desenhado a partir do cava 1.0.0, que vem dentro da aplicação, lê o BlackHole e entrega as barras por um…</span></li>
