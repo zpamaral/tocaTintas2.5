@@ -2060,11 +2060,6 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
     }
 }
 
-// Desfaz uma selecção que não chegou a pegar. Sem isto ficavam três estados
-// desencontrados — a caixa ligada, o SelectedAirPlayDevice já gravado e nenhum
-// streamer vivo —, e a única saída era desmarcar e voltar a marcar às cegas até
-// calhar. Era metade do ritual dos dois ou três ciclos; a outra metade era a
-// lista estar a descrever um ficheiro que a descoberta já tinha apagado.
 // Reabre a sessão RAOP para o aparelho que já está seleccionado.
 //
 // Para que serve: por vezes o histograma sai desalinhado do som — no Apple TV 3,
@@ -2112,6 +2107,11 @@ static const CGFloat kZPLarguraMaximaDoPopoverDeAirPlay = 340;
     [self.airPlayStreamer startStreaming];
 }
 
+// Desfaz uma selecção que não chegou a pegar. Sem isto ficavam três estados
+// desencontrados — a caixa ligada, o SelectedAirPlayDevice já gravado e nenhum
+// streamer vivo —, e a única saída era desmarcar e voltar a marcar às cegas até
+// calhar. Era metade do ritual dos dois ou três ciclos; a outra metade era a
+// lista estar a descrever um ficheiro que a descoberta já tinha apagado.
 - (void)desfazerSeleccaoDeAirPlay:(NSButton *)button {
     self.isProgrammaticChange = YES;
     button.state = NSControlStateValueOff;

@@ -39,6 +39,11 @@ SOFTWARE.
 #import <signal.h>        // kill
 #import <string.h>
 #import <stdatomic.h>
+#import <Network/Network.h>   // nw_path_monitor (regresso ao cabo)
+#import <libproc.h>           // proc_pidfdinfo: por onde sai o raop_play
+#import <ifaddrs.h>
+#import <net/if.h>
+#import <arpa/inet.h>
 
 #pragma mark - Diário do raop_play
 
@@ -127,6 +132,10 @@ static NSFileHandle *ZPDiarioDoRaopPlayParaStderr(void) {
 
 // Observer da reconfiguração do engine (mudanças de dispositivos de áudio)
 @property (nonatomic, strong) id engineConfigObserver;
+
+// Regresso ao cabo (ver o bloco com esse nome). Só no thread principal.
+@property (nonatomic, copy) NSSet<NSString *> *interfacesComFios;
+@property (nonatomic, copy, nullable) NSSet<NSString *> *cabosJaTentados;
 
 // Private helper used to send a DMAP "play" command
 - (void)sendPlayCommandToDeviceWithIP:(NSString *)deviceIP
@@ -484,6 +493,13 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
     _Atomic uint64_t _relogioLinhas;          // quantas linhas já chegaram
     _Atomic double   _relogioInstante;        // quando chegou a última
     _Atomic double   _relogioAtraso;          // Δ em segundos; 0 = desconhecido
+
+    // Regresso ao cabo. A bandeira é levantada no principal e lida pelo tap,
+    // que conta o silêncio só enquanto ela estiver de pé.
+    nw_path_monitor_t _vigiaDoCabo;
+    _Atomic bool     _mudarParaOCabo;         // o raop_play está fora do cabo
+    _Atomic bool     _mudancaPedida;          // o tap já mandou mudar
+    _Atomic uint64_t _tramasEmSilencio;       // seguidas, a 44,1 kHz
 }
 
 #pragma mark - Initialization
@@ -511,6 +527,7 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
         atomic_store(&_ganhoCompensacao, 1.0f);
         [self refreshSystemVolumeCompensation];
         [self observeSystemVolume];
+        [self comecarAVigiarOCabo];
         [self updateReplayGainValue:replayGainValue trackPeak:0.0f];
         _ganhoActual = atomic_load(&_ganhoAlvo) * atomic_load(&_ganhoCompensacao);
 
@@ -568,6 +585,10 @@ static void sendCommandWithInfo(NSDictionary *info, NSString *command) {
     if (_engineConfigObserver) {
         [[NSNotificationCenter defaultCenter] removeObserver:_engineConfigObserver];
         _engineConfigObserver = nil;
+    }
+    if (_vigiaDoCabo) {
+        nw_path_monitor_cancel(_vigiaDoCabo);
+        _vigiaDoCabo = nil;
     }
 
     // Rede de segurança: se algum caminho de erro deixou o tranco por largar, é
@@ -1685,6 +1706,8 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
     // aparelho corrigia por acidente, porque cada selecção cria um streamer
     // novo — e um tampão novo com ele.
     TPCircularBufferClear(&_circularBuffer);
+    atomic_store(&_mudarParaOCabo, false);
+    [self verificarDaquiAPoucoSeEstaNoCabo];
     atomic_store(&_bytesCapturados, 0);
     atomic_store(&_bytesCortadosTotal, 0);
     atomic_store(&_bytesEntreguesAoRaop, 0);
@@ -1866,6 +1889,160 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
     #ifdef DEBUG
     NSLog(@"[Streaming] Streaming stopped and resources cleaned up.");
     #endif
+}
+
+#pragma mark - Regresso ao cabo
+
+// Em casa a transmissão vai pelo cabo; no colégio só há Wi‑Fi. O raop_play não
+// escolhe interface: liga-se ao IP do aparelho e o macOS escolhe a origem nesse
+// instante. Os quatro sockets (RTSP e os três UDP) ficam presos a ela até o
+// processo acabar. Uma transmissão que arranque sem cabo — ao acordar, a Wi‑Fi
+// liga-se primeiro; ao mudar o adaptador de porta há uns segundos só com ela —
+// fica na Wi‑Fi para sempre, mesmo com o cabo de volta a 1 Gb/s. Visto a
+// 2026-11-22: raop_play das 09:05 a sair por 192.168.86.20 com o en12 activo.
+//
+// Uma vigia do framework Network, só para interfaces com fios, avisa quando o
+// cabo aparece ou desaparece; não interroga nada periodicamente. Quando há cabo
+// que chegue ao aparelho e o raop_play está noutra interface, levanta-se uma
+// bandeira, e o tap passa a medir o silêncio. Ao fim de dois segundos seguidos
+// abaixo de −60 dBFS — uma pausa, uma paragem, o fim do álbum, o intervalo
+// entre faixas que o tenham —, reabre-se a sessão como no ⌘+clique. Um álbum
+// encadeado não tem silêncio desses e espera, portanto, pela pausa ou pelo fim.
+// Não há pressa: o ALAC são ~1,4 Mb/s e a Wi‑Fi aguenta-os; mudar é limpeza.
+//
+// Se depois de reaberta a sessão ainda não estiver no cabo (o macOS a preferir
+// a Wi‑Fi por alguma razão), não se volta a tentar com os mesmos cabos: os
+// `cabosJaTentados` só se esquecem quando o conjunto de cabos muda.
+
+static const float  kZPLimiarDoSilencio  = 0.001f;  // −60 dBFS
+static const double kZPSilencioParaMudar = 2.0;     // segundos seguidos
+static const double kZPVerificarDepoisDeArrancar = 5.0;
+
+/// A interface de onde sai o RTSP (TCP) do processo, pelo endereço local do
+/// socket. Nil se ainda não houver ligação.
+static NSString * _Nullable ZPInterfaceDoProcesso(pid_t pid) {
+    if (pid <= 0) return nil;
+    int tamanho = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, NULL, 0);
+    if (tamanho <= 0) return nil;
+    struct proc_fdinfo *fds = malloc((size_t)tamanho);
+    if (!fds) return nil;
+    tamanho = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, fds, tamanho);
+
+    BOOL achado = NO;
+    struct in_addr local = {0};
+    for (int i = 0; tamanho > 0 && i < tamanho / (int)sizeof(struct proc_fdinfo); i++) {
+        if (fds[i].proc_fdtype != PROX_FDTYPE_SOCKET) continue;
+        struct socket_fdinfo info;
+        if (proc_pidfdinfo(pid, fds[i].proc_fd, PROC_PIDFDSOCKETINFO, &info, sizeof(info)) != sizeof(info)) continue;
+        if (info.psi.soi_kind != SOCKINFO_TCP) continue;
+        const struct in_sockinfo *in = &info.psi.soi_proto.pri_tcp.tcpsi_ini;
+        if (!(in->insi_vflag & INI_IPV4)) continue;
+        local = in->insi_laddr.ina_46.i46a_addr4;
+        achado = local.s_addr != 0;
+        if (achado) break;
+    }
+    free(fds);
+    if (!achado) return nil;
+
+    NSString *nome = nil;
+    struct ifaddrs *lista = NULL;
+    if (getifaddrs(&lista) != 0) return nil;
+    for (struct ifaddrs *a = lista; a; a = a->ifa_next) {
+        if (!a->ifa_addr || a->ifa_addr->sa_family != AF_INET) continue;
+        if (((const struct sockaddr_in *)(const void *)a->ifa_addr)->sin_addr.s_addr == local.s_addr) {
+            nome = @(a->ifa_name);
+            break;
+        }
+    }
+    freeifaddrs(lista);
+    return nome;
+}
+
+/// Alguma destas interfaces está na mesma sub-rede IPv4 que o aparelho? Um cabo
+/// ligado a outra rede não serve, e reabrir a sessão só para ela voltar à Wi‑Fi
+/// era um corte de graça.
+static BOOL ZPAlgumaAlcanca(NSSet<NSString *> *interfaces, NSString *ip) {
+    struct in_addr destino;
+    if (interfaces.count == 0 || inet_pton(AF_INET, ip.UTF8String ?: "", &destino) != 1) return NO;
+    BOOL alcanca = NO;
+    struct ifaddrs *lista = NULL;
+    if (getifaddrs(&lista) != 0) return NO;
+    for (struct ifaddrs *a = lista; a && !alcanca; a = a->ifa_next) {
+        if (!a->ifa_addr || !a->ifa_netmask || a->ifa_addr->sa_family != AF_INET) continue;
+        if (!(a->ifa_flags & IFF_UP) || ![interfaces containsObject:@(a->ifa_name)]) continue;
+        in_addr_t endereco = ((const struct sockaddr_in *)(const void *)a->ifa_addr)->sin_addr.s_addr;
+        in_addr_t mascara  = ((const struct sockaddr_in *)(const void *)a->ifa_netmask)->sin_addr.s_addr;
+        alcanca = (endereco & mascara) == (destino.s_addr & mascara);
+    }
+    freeifaddrs(lista);
+    return alcanca;
+}
+
+- (void)comecarAVigiarOCabo {
+    _vigiaDoCabo = nw_path_monitor_create_with_type(nw_interface_type_wired);
+    nw_path_monitor_set_queue(_vigiaDoCabo, dispatch_get_main_queue());
+    __weak typeof(self) fraco = self;
+    nw_path_monitor_set_update_handler(_vigiaDoCabo, ^(nw_path_t caminho) {
+        NSMutableSet<NSString *> *nomes = [NSMutableSet set];
+        if (nw_path_get_status(caminho) == nw_path_status_satisfied) {
+            nw_path_enumerate_interfaces(caminho, ^bool(nw_interface_t interface) {
+                [nomes addObject:@(nw_interface_get_name(interface))];
+                return true;
+            });
+        }
+        __strong typeof(fraco) forte = fraco;
+        if (!forte) return;
+        if (![nomes isEqualToSet:forte.interfacesComFios ?: [NSSet set]]) {
+            forte.cabosJaTentados = nil;
+        }
+        forte.interfacesComFios = nomes;
+        [forte verificarSeEstaNoCabo];
+    });
+    nw_path_monitor_start(_vigiaDoCabo);
+}
+
+/// O raop_play só abre o RTSP um instante depois de lançado, e o cabo pode
+/// ter chegado entretanto sem a vigia ter mais nada a dizer; daí uma
+/// verificação a seguir a cada arranque.
+- (void)verificarDaquiAPoucoSeEstaNoCabo {
+    __weak typeof(self) fraco = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kZPVerificarDepoisDeArrancar * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        [fraco verificarSeEstaNoCabo];
+    });
+}
+
+- (void)verificarSeEstaNoCabo {
+    NSSet<NSString *> *cabos = self.interfacesComFios;
+    NSString *onde = nil;
+    BOOL mudar = NO;
+    if (self.isStreaming && self.raopTask.isRunning && cabos.count > 0 &&
+        ![cabos isEqualToSet:self.cabosJaTentados ?: [NSSet set]] &&
+        ZPAlgumaAlcanca(cabos, self.ipAddress)) {
+        onde = ZPInterfaceDoProcesso(self.raopTask.processIdentifier);
+        mudar = onde != nil && ![cabos containsObject:onde];
+    }
+
+    bool antes = atomic_exchange(&_mudarParaOCabo, (bool)mudar);
+    if (mudar && !antes) {
+        atomic_store(&_tramasEmSilencio, 0);
+        atomic_store(&_mudancaPedida, false);
+        ZPEscreverNoDiarioDoRaopPlay([NSString stringWithFormat:
+            @"raop_play (pid %d) a sair por %@ com o cabo (%@) disponível; muda no próximo silêncio.",
+            self.raopTask.processIdentifier, onde, [cabos.allObjects componentsJoinedByString:@", "]]);
+    } else if (!mudar && antes) {
+        ZPEscreverNoDiarioDoRaopPlay(@"Mudança para o cabo cancelada: já não há cabo, ou já não é preciso.");
+    }
+}
+
+- (void)mudarParaOCabo {
+    if (!atomic_load(&_mudarParaOCabo) || !self.isStreaming) return;
+    atomic_store(&_mudarParaOCabo, false);
+    self.cabosJaTentados = self.interfacesComFios;
+    ZPEscreverNoDiarioDoRaopPlay(@"Silêncio: a reabrir a sessão para passar para o cabo.");
+    // O mesmo que o ⌘+clique (-reabrirSessaoDeAirPlay no ZPPrincipal).
+    [self stopStreaming];
+    [self startStreaming];
 }
 
 #pragma mark - Audio Capture
@@ -2071,7 +2248,15 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
         const float *rightChannel = floatBuffer.floatChannelData[1];
         int16_t *pcmData = convertedBuffer.int16ChannelData[0];
 
+        // O pico do bloco só interessa enquanto houver mudança para o cabo à
+        // espera de silêncio; no resto do tempo nem se calcula.
+        const bool vigiarSilencio = atomic_load_explicit(&strongSelf->_mudarParaOCabo, memory_order_relaxed);
+        float picoDoBloco = 0.0f;
+
         for (AVAudioFrameCount i = 0; i < frames; i++, ganho += passo) {
+            if (vigiarSilencio) {
+                picoDoBloco = fmaxf(picoDoBloco, fmaxf(fabsf(leftChannel[i]), fabsf(rightChannel[i])));
+            }
             float esquerdo = fmaxf(-1.0f, fminf(1.0f, leftChannel[i]  * ganho));
             float direito  = fmaxf(-1.0f, fminf(1.0f, rightChannel[i] * ganho));
             // lrintf arredonda; o molde para int truncava em direcção a zero,
@@ -2081,6 +2266,20 @@ static const double   kRaopClockSilencioMaximo = 5.0;  // segundos sem linha = p
         }
 
         strongSelf->_ganhoActual = ganhoAlvo;
+
+        if (vigiarSilencio) {
+            if (picoDoBloco < kZPLimiarDoSilencio) {
+                uint64_t seguidas = atomic_fetch_add(&strongSelf->_tramasEmSilencio, frames) + frames;
+                if (seguidas >= (uint64_t)(kZPSilencioParaMudar * 44100.0) &&
+                    !atomic_exchange(&strongSelf->_mudancaPedida, true)) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        [weakSelf mudarParaOCabo];
+                    });
+                }
+            } else {
+                atomic_store(&strongSelf->_tramasEmSilencio, 0);
+            }
+        }
 
         NSUInteger byteCount = frames * convertedBuffer.format.streamDescription->mBytesPerFrame;
 
