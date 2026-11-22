@@ -264,8 +264,13 @@
 "counts_col_format" = "Formato";
 "counts_filter" = "Filtrar";
 "counts_no_database" = "A base da fonoteca não está acessível.";
-"counts_total" = "%lu audições";
-"counts_filtered" = "%lu de %lu audições";
+"counts_range" = "%1$lu–%2$lu de %3$lu músicas";
+"counts_range_filtered" = "%1$lu–%2$lu de %3$lu músicas (filtradas de %4$lu)";
+"counts_none" = "Nenhuma música";
+"counts_back_ten" = "Dez páginas para cima";
+"counts_back_one" = "Uma página para cima";
+"counts_forward_one" = "Uma página para baixo";
+"counts_forward_ten" = "Dez páginas para baixo";
 "origins_tab_origins" = "Origens";
 "origins_tab_artists" = "Artistas";
 "origins_col_seed" = "Semente";

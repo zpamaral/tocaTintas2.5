@@ -2,8 +2,12 @@
 //  ZPContagens.m
 //  tocaTintas
 //
-//  A janela das audições: a vista audicoes_locais da fonoteca, numa tabela que
-//  se relê sozinha enquanto estiver à vista.
+//  A janela das audições: a última audição de cada música, como na vista
+//  audicoes_locais da fonoteca, numa tabela que se relê sozinha enquanto
+//  estiver à vista. Nada fica de fora; mostra-se em páginas de mil, e os
+//  botões do rodapé andam uma página (‹ ›) ou dez (« »). Abre na página do
+//  topo — a das mais recentes, com a ordem de origem —, onde « e ‹ ficam
+//  desligados; na do fundo, são › e ».
 //
 //  A base não fica presa. Uma ligação aberta no SQLite, mesmo só para leitura,
 //  segura uma transacção enquanto houver uma leitura a decorrer, e com o WAL
@@ -24,6 +28,24 @@
 #include <sys/stat.h>
 
 static const NSTimeInterval kZPIntervaloDasContagens = 2.0;
+static const NSUInteger kZPLinhasPorPagina = 1000;
+static const NSUInteger kZPPaginasPorSalto = 10;
+
+// A última audição de cada música, com as colunas da audicoes_locais. As
+// «vezes» da última audição são o total da música (contagens.n), tal como na
+// vista. A primeira coluna, a música, só serve para manter a selecção.
+static const char *kZPConsultaDasContagens =
+    "SELECT a.musica, datetime(a.quando, 'localtime'), m.artista, m.album, m.titulo, c.n,"
+    "       CASE a.origem WHEN 'cd' THEN 'cd' WHEN 'musica' THEN 'música' ELSE COALESCE(f.formato, '?') END"
+    " FROM (SELECT id, musica, quando, origem, ficheiro,"
+    "              ROW_NUMBER() OVER (PARTITION BY musica ORDER BY quando DESC, id DESC) AS r"
+    "       FROM audicoes) a"
+    " JOIN musicas m ON m.id = a.musica"
+    " JOIN contagens c ON c.musica = a.musica"
+    " LEFT JOIN ficheiros f ON f.id = a.ficheiro"
+    " WHERE a.r = 1";
+
+typedef NS_ENUM(NSInteger, ZPSalto) { ZPSaltoDezParaCima = 0, ZPSaltoUmParaCima, ZPSaltoUmParaBaixo, ZPSaltoDezParaBaixo };
 
 // As colunas: identificador (o nome na vista), título, largura.
 static NSArray<NSArray *> *ZPColunasDasContagens(void) {
@@ -44,7 +66,10 @@ static NSArray<NSArray *> *ZPColunasDasContagens(void) {
 @property (nonatomic, copy, nullable) NSString *assinatura;   // data e tamanho da base e do -wal, na última leitura
 @property (nonatomic) BOOL aLer;
 @property (nonatomic, strong) NSArray<NSDictionary *> *todas;
-@property (nonatomic, strong) NSArray<NSDictionary *> *visiveis;
+@property (nonatomic, strong) NSArray<NSDictionary *> *filtradas;   // todas as que passam o filtro, ordenadas
+@property (nonatomic, strong) NSArray<NSDictionary *> *visiveis;    // a página à vista
+@property (nonatomic) NSUInteger pagina;                            // 0 = a do topo
+@property (nonatomic, strong) NSSegmentedControl *saltos;
 @property (nonatomic, strong) NSSearchField *filtro;
 @property (nonatomic, strong) NSTableView *tabela;
 @property (nonatomic, strong) NSTextField *legenda;
@@ -62,7 +87,7 @@ static NSArray<NSArray *> *ZPColunasDasContagens(void) {
     if (!self) return nil;
     _base = [base copy];
     _fila = dispatch_queue_create("eu.zpsou.tocaTintas.contagens", DISPATCH_QUEUE_SERIAL);
-    _todas = @[]; _visiveis = @[];
+    _todas = @[]; _filtradas = @[]; _visiveis = @[];
     janela.title = NSLocalizedString(@"counts_title", @"Contagens");
     janela.minSize = NSMakeSize(600, 300);
     janela.releasedWhenClosed = NO;
@@ -124,7 +149,17 @@ static NSArray<NSArray *> *ZPColunasDasContagens(void) {
     self.legenda.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
     self.legenda.lineBreakMode = NSLineBreakByTruncatingMiddle;
 
-    for (NSView *x in @[self.filtro, rol, self.legenda]) {
+    NSArray<NSString *> *simbolos = @[@"chevron.left.2", @"chevron.left", @"chevron.right", @"chevron.right.2"];
+    NSMutableArray<NSImage *> *imagens = [NSMutableArray array];
+    for (NSString *n in simbolos) [imagens addObject:[NSImage imageWithSystemSymbolName:n accessibilityDescription:nil]];
+    self.saltos = [NSSegmentedControl segmentedControlWithImages:imagens trackingMode:NSSegmentSwitchTrackingMomentary
+                                                          target:self action:@selector(saltar:)];
+    [self.saltos setToolTip:NSLocalizedString(@"counts_back_ten", @"Dez páginas para cima") forSegment:ZPSaltoDezParaCima];
+    [self.saltos setToolTip:NSLocalizedString(@"counts_back_one", @"Uma página para cima") forSegment:ZPSaltoUmParaCima];
+    [self.saltos setToolTip:NSLocalizedString(@"counts_forward_one", @"Uma página para baixo") forSegment:ZPSaltoUmParaBaixo];
+    [self.saltos setToolTip:NSLocalizedString(@"counts_forward_ten", @"Dez páginas para baixo") forSegment:ZPSaltoDezParaBaixo];
+
+    for (NSView *x in @[self.filtro, rol, self.legenda, self.saltos]) {
         x.translatesAutoresizingMaskIntoConstraints = NO;
         [v addSubview:x];
     }
@@ -135,10 +170,12 @@ static NSArray<NSArray *> *ZPColunasDasContagens(void) {
         [rol.topAnchor constraintEqualToAnchor:self.filtro.bottomAnchor constant:10],
         [rol.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:14],
         [rol.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-14],
-        [self.legenda.topAnchor constraintEqualToAnchor:rol.bottomAnchor constant:6],
+        [self.saltos.topAnchor constraintEqualToAnchor:rol.bottomAnchor constant:8],
+        [self.saltos.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-14],
+        [self.saltos.bottomAnchor constraintEqualToAnchor:v.bottomAnchor constant:-10],
+        [self.legenda.centerYAnchor constraintEqualToAnchor:self.saltos.centerYAnchor],
         [self.legenda.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:14],
-        [self.legenda.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-14],
-        [self.legenda.bottomAnchor constraintEqualToAnchor:v.bottomAnchor constant:-10],
+        [self.legenda.trailingAnchor constraintLessThanOrEqualToAnchor:self.saltos.leadingAnchor constant:-10],
     ]];
 }
 
@@ -200,17 +237,17 @@ static NSString *ZPTextoDaColuna(sqlite3_stmt *s, int i) {
         } else {
             sqlite3_busy_timeout(db, 2000);
             sqlite3_stmt *s = NULL;
-            if (sqlite3_prepare_v2(db, "SELECT quando, artista, album, titulo, vezes, formato FROM audicoes_locais",
-                                   -1, &s, NULL) == SQLITE_OK) {
+            if (sqlite3_prepare_v2(db, kZPConsultaDasContagens, -1, &s, NULL) == SQLITE_OK) {
                 int r;
                 while ((r = sqlite3_step(s)) == SQLITE_ROW) {
                     [linhas addObject:@{
-                        @"quando":  ZPTextoDaColuna(s, 0),
-                        @"artista": ZPTextoDaColuna(s, 1),
-                        @"album":   ZPTextoDaColuna(s, 2),
-                        @"titulo":  ZPTextoDaColuna(s, 3),
-                        @"vezes":   @(sqlite3_column_int64(s, 4)),
-                        @"formato": ZPTextoDaColuna(s, 5),
+                        @"musica":  ZPTextoDaColuna(s, 0),
+                        @"quando":  ZPTextoDaColuna(s, 1),
+                        @"artista": ZPTextoDaColuna(s, 2),
+                        @"album":   ZPTextoDaColuna(s, 3),
+                        @"titulo":  ZPTextoDaColuna(s, 4),
+                        @"vezes":   @(sqlite3_column_int64(s, 5)),
+                        @"formato": ZPTextoDaColuna(s, 6),
                     }];
                 }
                 if (r != SQLITE_DONE) erro = @(sqlite3_errmsg(db));
@@ -239,9 +276,10 @@ static NSString *ZPTextoDaColuna(sqlite3_stmt *s, int i) {
 
 #pragma mark - Mostrar
 
-// A chave de uma linha, para manter a selecção e o sítio entre leituras.
+// A chave de uma linha, para manter a selecção e o sítio entre leituras: a
+// música, que é uma linha só, mesmo quando volta a tocar e muda de sítio.
 static NSString *ZPChaveDaLinha(NSDictionary *l) {
-    return [NSString stringWithFormat:@"%@\t%@\t%@\t%@", l[@"quando"], l[@"artista"], l[@"album"], l[@"titulo"]];
+    return l[@"musica"];
 }
 
 - (void)adoptar:(NSArray<NSDictionary *> *)linhas {
@@ -255,7 +293,7 @@ static NSString *ZPChaveDaLinha(NSDictionary *l) {
     NSString *chaveDoTopo = (topo > 0 && topo < (NSInteger)self.visiveis.count) ? ZPChaveDaLinha(self.visiveis[topo]) : nil;
 
     self.todas = linhas;
-    [self aplicarFiltro];
+    [self aplicarFiltroNaPagina:self.pagina];
 
     NSMutableIndexSet *indices = [NSMutableIndexSet indexSet];
     NSInteger novoTopo = -1;
@@ -274,7 +312,12 @@ static NSString *ZPChaveDaLinha(NSDictionary *l) {
     }
 }
 
+// Volta à página do topo: um filtro ou uma ordem nova são outra lista.
 - (void)aplicarFiltro {
+    [self aplicarFiltroNaPagina:0];
+}
+
+- (void)aplicarFiltroNaPagina:(NSUInteger)pagina {
     NSString *f = [self.filtro.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
     NSArray<NSDictionary *> *l = self.todas;
     if (f.length) {
@@ -286,18 +329,57 @@ static NSString *ZPChaveDaLinha(NSDictionary *l) {
             return NO;
         }]];
     }
-    self.visiveis = [l sortedArrayUsingDescriptors:self.tabela.sortDescriptors];
+    self.filtradas = [l sortedArrayUsingDescriptors:self.tabela.sortDescriptors];
+    [self mostrarPagina:pagina];
+}
+
+- (NSUInteger)paginas {
+    return MAX((NSUInteger)1, (self.filtradas.count + kZPLinhasPorPagina - 1) / kZPLinhasPorPagina);
+}
+
+- (void)mostrarPagina:(NSUInteger)pagina {
+    self.pagina = MIN(pagina, self.paginas - 1);
+    NSUInteger inicio = self.pagina * kZPLinhasPorPagina;
+    NSUInteger quantas = MIN(kZPLinhasPorPagina, self.filtradas.count - MIN(inicio, self.filtradas.count));
+    self.visiveis = [self.filtradas subarrayWithRange:NSMakeRange(MIN(inicio, self.filtradas.count), quantas)];
     [self.tabela reloadData];
+    BOOL noTopo = self.pagina == 0, noFundo = self.pagina + 1 >= self.paginas;
+    [self.saltos setEnabled:!noTopo forSegment:ZPSaltoDezParaCima];
+    [self.saltos setEnabled:!noTopo forSegment:ZPSaltoUmParaCima];
+    [self.saltos setEnabled:!noFundo forSegment:ZPSaltoUmParaBaixo];
+    [self.saltos setEnabled:!noFundo forSegment:ZPSaltoDezParaBaixo];
     [self actualizarLegenda];
+}
+
+// Dez páginas de uma vez param na primeira ou na última, se não houver tantas.
+- (void)saltar:(NSSegmentedControl *)sender {
+    NSInteger p = (NSInteger)self.pagina;
+    switch (sender.selectedSegment) {
+        case ZPSaltoDezParaCima:  p -= (NSInteger)kZPPaginasPorSalto; break;
+        case ZPSaltoUmParaCima:   p -= 1; break;
+        case ZPSaltoUmParaBaixo:  p += 1; break;
+        case ZPSaltoDezParaBaixo: p += (NSInteger)kZPPaginasPorSalto; break;
+        default: return;
+    }
+    [self.tabela deselectAll:nil];
+    [self mostrarPagina:(NSUInteger)MAX(0, MIN(p, (NSInteger)self.paginas - 1))];
+    [self.tabela scrollRowToVisible:0];
 }
 
 - (void)actualizarLegenda {
     if (self.erro) { self.legenda.stringValue = self.erro; return; }
-    self.legenda.stringValue = self.visiveis.count == self.todas.count
-        ? [NSString localizedStringWithFormat:NSLocalizedString(@"counts_total", @"%lu audições"),
-           (unsigned long)self.todas.count]
-        : [NSString localizedStringWithFormat:NSLocalizedString(@"counts_filtered", @"%lu de %lu audições"),
-           (unsigned long)self.visiveis.count, (unsigned long)self.todas.count];
+    unsigned long n = self.filtradas.count, de = self.pagina * kZPLinhasPorPagina + 1;
+    unsigned long ate = de + self.visiveis.count - 1;
+    if (n == 0) {
+        self.legenda.stringValue = NSLocalizedString(@"counts_none", @"Nenhuma música");
+    } else if (n == self.todas.count) {
+        self.legenda.stringValue = [NSString localizedStringWithFormat:
+            NSLocalizedString(@"counts_range", @"%1$lu–%2$lu de %3$lu músicas"), de, ate, n];
+    } else {
+        self.legenda.stringValue = [NSString localizedStringWithFormat:
+            NSLocalizedString(@"counts_range_filtered", @"%1$lu–%2$lu de %3$lu músicas (filtradas de %4$lu)"),
+            de, ate, n, (unsigned long)self.todas.count];
+    }
 }
 
 - (void)filtrar:(id)sender {

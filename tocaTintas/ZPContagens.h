@@ -2,17 +2,18 @@
 //  ZPContagens.h
 //  tocaTintas
 //
-//  A janela das audições (Reprodução ▸ Contagens…): a vista audicoes_locais
-//  da fonoteca, da mais recente para a mais antiga.
+//  A janela das audições (Reprodução ▸ Contagens…): a última audição de cada
+//  música, da mais recente para a mais antiga, em páginas de mil.
 //
 
 #import <Cocoa/Cocoa.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// Mostra a vista `audicoes_locais` da fonoteca: quando, artista, álbum,
-/// título, quantas vezes a música tinha sido ouvida até essa audição, e o
-/// formato. Com a janela à vista, relê-se sozinha quando a base muda.
+/// Mostra a última audição de cada música, com as colunas da vista
+/// `audicoes_locais`: quando, artista, álbum, título, quantas vezes a música
+/// tocou ao todo, e o formato. Todas as músicas, em páginas de mil, com « ‹ › »
+/// no rodapé. Com a janela à vista, relê-se sozinha quando a base muda.
 ///
 /// Não prende a base. Cada leitura abre-a só para leitura, lê tudo de uma vez
 /// (uns 30 ms) e fecha-a; entre leituras não fica ligação nenhuma aberta. O

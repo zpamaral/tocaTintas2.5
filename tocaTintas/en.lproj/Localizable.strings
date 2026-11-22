@@ -264,8 +264,13 @@
 "counts_col_format" = "Format";
 "counts_filter" = "Filter";
 "counts_no_database" = "The library database is not reachable.";
-"counts_total" = "%lu plays";
-"counts_filtered" = "%lu of %lu plays";
+"counts_range" = "%1$lu–%2$lu of %3$lu songs";
+"counts_range_filtered" = "%1$lu–%2$lu of %3$lu songs (filtered from %4$lu)";
+"counts_none" = "No songs";
+"counts_back_ten" = "Ten pages up";
+"counts_back_one" = "One page up";
+"counts_forward_one" = "One page down";
+"counts_forward_ten" = "Ten pages down";
 "origins_tab_origins" = "Origins";
 "origins_tab_artists" = "Artists";
 "origins_col_seed" = "Seed";
