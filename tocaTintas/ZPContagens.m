@@ -37,7 +37,7 @@ static NSArray<NSArray *> *ZPColunasDasContagens(void) {
     ];
 }
 
-@interface ZPContagens () <NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate, NSSearchFieldDelegate>
+@interface ZPContagens () <NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate, NSSearchFieldDelegate, NSMenuItemValidation>
 @property (nonatomic, copy) NSString *base;
 @property (nonatomic, strong) dispatch_queue_t fila;
 @property (nonatomic, strong) NSTimer *relogio;
