@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="250" viewBox="0 0 720 250" role="img" aria-label="Esquema: o tocaTintas toca para o BlackHole, que alimenta o bs2b_bridge para os auriculares, o raop_play para o AirPlay e o cava para o histograma"><style>rect{fill:#f2efe9;stroke:#d8d2c6;stroke-width:1.2}rect.realce{stroke:#8a4b1e}text{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:12.5px;fill:#23201c}text.nota{font-size:11px;fill:#5b5449}path{fill:none;stroke:#5b5449;stroke-width:1.3}.seta{fill:#5b5449;stroke:none}@media (prefers-color-scheme:dark){rect{fill:#201e1b;stroke:#3a352f}rect.realce{stroke:#e2a06a}text{fill:#e6e1d8}text.nota{fill:#a49b8d}path{stroke:#a49b8d}.seta{fill:#a49b8d}}</style>
+<defs><marker id="ponta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path class="seta" d="M0,0 L10,5 L0,10 z"></path></marker></defs>
+<rect x="10" y="100" width="130" height="50" rx="7" class="realce"></rect><text x="75" y="130" text-anchor="middle">tocaTintas</text>
+<rect x="190" y="100" width="130" height="50" rx="7"></rect><text x="255" y="123" text-anchor="middle">BlackHole</text><text x="255" y="139" text-anchor="middle" class="nota">saída do sistema</text>
+<rect x="390" y="15" width="150" height="50" rx="7"></rect><text x="465" y="38" text-anchor="middle">bs2b_bridge</text><text x="465" y="54" text-anchor="middle" class="nota">crossfeed + EQ</text>
+<rect x="390" y="100" width="150" height="50" rx="7"></rect><text x="465" y="123" text-anchor="middle">raop_play</text><text x="465" y="139" text-anchor="middle" class="nota">ReplayGain</text>
+<rect x="390" y="185" width="150" height="50" rx="7"></rect><text x="465" y="208" text-anchor="middle">cava</text><text x="465" y="224" text-anchor="middle" class="nota">FFT</text>
+<text x="575" y="45">auriculares</text>
+<text x="575" y="130">AirPlay</text>
+<text x="575" y="215">histograma</text>
+<path d="M140,125 H184" marker-end="url(#ponta)"></path>
+<path d="M320,125 C355,125 355,40 384,40" marker-end="url(#ponta)"></path>
+<path d="M320,125 H384" marker-end="url(#ponta)"></path>
+<path d="M320,125 C355,125 355,210 384,210" marker-end="url(#ponta)"></path>
+<path d="M540,40 H568" marker-end="url(#ponta)"></path>
+<path d="M540,125 H568" marker-end="url(#ponta)"></path>
+<path d="M540,210 H568" marker-end="url(#ponta)"></path>
+</svg>
