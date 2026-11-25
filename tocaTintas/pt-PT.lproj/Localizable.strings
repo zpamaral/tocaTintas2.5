@@ -213,6 +213,7 @@
 "music_links_cmp_same_marks" = "os títulos não indicam versões diferentes";
 "music_links_cmp_other_marks" = "os títulos indicam versões diferentes: «%@» no Música, «%@» na candidata";
 "music_links_cmp_linked" = " Já há %ld faixas do Música ligadas a esta candidata.";
+"music_links_cmp_linked_one" = " Já há uma faixa do Música ligada a esta candidata.";
 "music_links_where_file" = "ficheiro %@";
 "music_links_where_cd" = "CD, sem ficheiro";
 "music_links_cons_link_file" = "Se ligar: as audições desta faixa passam a contar para a candidata, que fica com %ld no total. Nas estações toca o ficheiro, e esta faixa do Música não entra.";

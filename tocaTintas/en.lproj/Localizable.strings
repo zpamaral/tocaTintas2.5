@@ -213,6 +213,7 @@
 "music_links_cmp_same_marks" = "the titles do not point to different versions";
 "music_links_cmp_other_marks" = "the titles point to different versions: “%@” in Music, “%@” in the candidate";
 "music_links_cmp_linked" = " %ld Music tracks are already linked to this candidate.";
+"music_links_cmp_linked_one" = " One Music track is already linked to this candidate.";
 "music_links_where_file" = "%@ file";
 "music_links_where_cd" = "CD, no file";
 "music_links_cons_link_file" = "If you link: this track’s plays count towards the candidate, which will have %ld in all. Stations play the file, and this Music track stays out.";

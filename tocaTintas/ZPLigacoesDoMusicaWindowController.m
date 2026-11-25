@@ -324,6 +324,11 @@ static NSString *ZPLMDuracao(id segundos) {
     [self.grelha columnAtIndex:5].xPlacement = NSGridCellPlacementTrailing;   // duração
     [self.grelha columnAtIndex:7].xPlacement = NSGridCellPlacementTrailing;   // vezes
     self.grelha.translatesAutoresizingMaskIntoConstraints = NO;
+    // A grelha fica com a altura das três linhas; a que sobra vai para as
+    // tabelas. Sem isto as linhas espalhavam-se e o cabeçalho ficava longe.
+    NSLayoutConstraint *justa = [self.grelha.heightAnchor constraintEqualToConstant:0];
+    justa.priority = NSLayoutPriorityDefaultLow;
+    justa.active = YES;
 
     self.comparacao = [NSTextField wrappingLabelWithString:@""];
     self.comparacao.selectable = YES;
@@ -657,9 +662,12 @@ static NSString *ZPLMNumero(double x) {
             : [NSString stringWithFormat:NSLocalizedString(@"music_links_cmp_other_marks", @"os títulos indicam versões diferentes: «%@» no Música, «%@» na candidata"),
                m1.length ? m1 : nada, m2.length ? m2 : nada];
         junta([NSString stringWithFormat:@" — %@; %@.", duracao, versoes], normal);
-        if ([c[@"ligadas"] integerValue] > 0) {
+        NSInteger ligadas = [c[@"ligadas"] integerValue];
+        if (ligadas == 1) {
+            junta(NSLocalizedString(@"music_links_cmp_linked_one", @" Já há uma faixa do Música ligada a esta candidata."), fraco);
+        } else if (ligadas > 1) {
             junta([NSString stringWithFormat:NSLocalizedString(@"music_links_cmp_linked", @" Já há %ld faixas do Música ligadas a esta candidata."),
-                   (long)[c[@"ligadas"] integerValue]], fraco);
+                   (long)ligadas], fraco);
         }
         junta(@"\n", normal);
     } else {
