@@ -28,6 +28,7 @@ SOFTWARE.
 
 #import "ZPLigacoesDoMusicaWindowController.h"
 #import <AVFoundation/AVFoundation.h>
+#import "ZPCatalogoDaApple.h"
 #include <sqlite3.h>
 
 // O critério com que o sincronizar encontrou a candidata: só aqui, quando a
@@ -155,7 +156,12 @@ static NSString *ZPLMDuracao(id segundos) {
 @property (nonatomic, strong) NSTextField *contagem;
 @property (nonatomic, strong) NSTableView *tabelaDosCasos;
 @property (nonatomic, strong) NSTableView *tabelaDasCandidatas;
-@property (nonatomic, strong) NSTextField *comparacao;   // a comparação e a consequência da escolha à vista
+@property (nonatomic, strong) NSGridView *grelha;        // «Tocado no Música» e «Identificado com», campo a campo
+@property (nonatomic, strong) NSArray<NSArray<NSTextField *> *> *celulas;   // [0] a faixa do Música, [1] a candidata
+@property (nonatomic, strong) NSTextField *comparacao;   // o parecer e a consequência da escolha à vista
+// pid → número da faixa no álbum, pedido ao catálogo da Apple quando o Música dá
+// 0 (as faixas do catálogo); @"" enquanto se espera ou se a loja não o tem.
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *numerosDaLoja;
 @property (nonatomic, strong) NSButton *botaoOuvirMusica;
 @property (nonatomic, strong) NSButton *botaoOuvir;
 @property (nonatomic, strong) NSButton *botaoAlbum;
@@ -183,6 +189,7 @@ static NSString *ZPLMDuracao(id segundos) {
     _caminhoDaBase = [caminhoDaBase copy];
     _fila = dispatch_queue_create("tocaTintas.ligacoesDoMusica", DISPATCH_QUEUE_SERIAL);
     _casos = @[]; _casosVisiveis = @[]; _candidatas = @{};
+    _numerosDaLoja = [NSMutableDictionary dictionary];
     janela.title = NSLocalizedString(@"music_links_title", @"Ligar faixas do Música");
     janela.minSize = NSMakeSize(900, 520);
     janela.delegate = self;
@@ -267,6 +274,49 @@ static NSString *ZPLMDuracao(id segundos) {
     [divisao addArrangedSubview:[self rolar:self.tabelaDasCandidatas]];
     divisao.autosaveName = @"LigacoesDoMusicaDivisao";
 
+    // As duas faixas, campo a campo, em colunas: o que tocou no Música e
+    // aquilo com que está identificado (a candidata escolhida à direita).
+    NSArray *cabecalhos = @[@"", artista, album, numero, titulo, duracao,
+                            NSLocalizedString(@"music_links_col_format", @"Onde"),
+                            NSLocalizedString(@"music_links_col_plays", @"Vezes")];
+    NSMutableArray *linhas = [NSMutableArray array];
+    NSMutableArray *cab = [NSMutableArray array];
+    for (NSString *c in cabecalhos) {
+        NSTextField *l = [NSTextField labelWithString:c];
+        l.textColor = NSColor.secondaryLabelColor;
+        [cab addObject:l];
+    }
+    [linhas addObject:cab];
+    NSMutableArray *celulas = [NSMutableArray array];
+    for (NSString *rotulo in @[NSLocalizedString(@"music_links_row_played", @"Tocado no Música"),
+                               NSLocalizedString(@"music_links_row_identified", @"Identificado com")]) {
+        NSTextField *r = [NSTextField labelWithString:rotulo];
+        r.font = [NSFont systemFontOfSize:NSFont.systemFontSize weight:NSFontWeightSemibold];
+        NSMutableArray *linha = [NSMutableArray arrayWithObject:r];
+        NSMutableArray *campos = [NSMutableArray array];
+        for (NSUInteger i = 1; i < cabecalhos.count; ++i) {
+            NSTextField *l = [NSTextField labelWithString:@""];
+            l.lineBreakMode = NSLineBreakByTruncatingTail;
+            l.selectable = YES;
+            // Artista, álbum e título encolhem (com «…») quando a janela é estreita.
+            if (i == 1 || i == 2 || i == 4) {
+                [l setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationHorizontal];
+            }
+            [linha addObject:l];
+            [campos addObject:l];
+        }
+        [linhas addObject:linha];
+        [celulas addObject:campos];
+    }
+    self.celulas = celulas;
+    self.grelha = [NSGridView gridViewWithViews:linhas];
+    self.grelha.columnSpacing = 14;
+    self.grelha.rowSpacing = 4;
+    [self.grelha columnAtIndex:3].xPlacement = NSGridCellPlacementTrailing;   // n.º
+    [self.grelha columnAtIndex:5].xPlacement = NSGridCellPlacementTrailing;   // duração
+    [self.grelha columnAtIndex:7].xPlacement = NSGridCellPlacementTrailing;   // vezes
+    self.grelha.translatesAutoresizingMaskIntoConstraints = NO;
+
     self.comparacao = [NSTextField wrappingLabelWithString:@""];
     self.comparacao.selectable = YES;
     self.comparacao.translatesAutoresizingMaskIntoConstraints = NO;
@@ -279,8 +329,10 @@ static NSString *ZPLMDuracao(id segundos) {
     self.botaoSaltar = [self botao:@"music_links_skip" comentario:@"Saltar" accao:@selector(saltar:)];
     self.botaoLigar = [self botao:@"music_links_link" comentario:@"Ligar" accao:@selector(ligar:)];
     self.botaoLigar.keyEquivalent = @"\r";
+    self.botaoSaltar.toolTip = NSLocalizedString(@"music_links_skip_tip", @"Não grava nada: passa à faixa seguinte, e esta fica por ligar.");
+    self.botaoAlbum.toolTip = NSLocalizedString(@"music_links_accept_album_tip", @"Aplica a sugestão a todas as faixas por ligar deste álbum; pergunta antes de gravar.");
 
-    for (NSView *x in @[self.filtro, self.contagem, divisao, self.comparacao, self.botaoOuvirMusica, self.botaoOuvir,
+    for (NSView *x in @[self.filtro, self.contagem, divisao, self.grelha, self.comparacao, self.botaoOuvirMusica, self.botaoOuvir,
                         self.botaoAlbum, self.botaoSaltar, self.botaoLigar]) {
         [v addSubview:x];
     }
@@ -294,11 +346,14 @@ static NSString *ZPLMDuracao(id segundos) {
         [divisao.topAnchor constraintEqualToAnchor:self.filtro.bottomAnchor constant:m],
         [divisao.leadingAnchor constraintEqualToAnchor:v.leadingAnchor],
         [divisao.trailingAnchor constraintEqualToAnchor:v.trailingAnchor],
-        [divisao.bottomAnchor constraintEqualToAnchor:self.comparacao.topAnchor constant:-m],
+        [divisao.bottomAnchor constraintEqualToAnchor:self.grelha.topAnchor constant:-m],
+        [self.grelha.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:m],
+        [self.grelha.trailingAnchor constraintLessThanOrEqualToAnchor:v.trailingAnchor constant:-m],
+        [self.grelha.bottomAnchor constraintEqualToAnchor:self.comparacao.topAnchor constant:-10],
         [divisao.heightAnchor constraintGreaterThanOrEqualToConstant:120],
         [self.comparacao.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:m],
         [self.comparacao.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-m],
-        [self.comparacao.heightAnchor constraintGreaterThanOrEqualToConstant:112],
+        [self.comparacao.heightAnchor constraintGreaterThanOrEqualToConstant:64],
         [self.comparacao.bottomAnchor constraintEqualToAnchor:self.botaoLigar.topAnchor constant:-m],
         [self.botaoLigar.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-m],
         [self.botaoLigar.bottomAnchor constraintEqualToAnchor:v.bottomAnchor constant:-m],
@@ -495,6 +550,11 @@ static NSString *ZPLMDuracao(id segundos) {
     // Ouvir pode-se sempre; escolher só com a base em dia.
     BOOL escolher = ha && !self.aActualizar;
     self.botaoLigar.enabled = escolher;
+    // O botão diz o que faz com a linha escolhida à direita: ligar à candidata
+    // ou fazer dela uma entrada nova («Nenhuma»).
+    self.botaoLigar.title = (ha && [self candidataSeleccionada] == nil)
+        ? NSLocalizedString(@"music_links_new_entry", @"Entrada nova")
+        : NSLocalizedString(@"music_links_link", @"Ligar à candidata");
     self.botaoSaltar.enabled = escolher;
     self.botaoAlbum.enabled = escolher && [ZPLMTexto([self casoSeleccionado][@"album"]) length] > 0;
     NSString *parar = NSLocalizedString(@"music_links_stop", @"■ Parar");
@@ -511,15 +571,27 @@ static NSString *ZPLMNumero(double x) {
     return [NSString localizedStringWithFormat:@"%.1f", x];
 }
 
-// «Artista — Título · Álbum, faixa 3 · 4:02»
-static NSString *ZPLMDescricao(NSDictionary *f) {
-    NSMutableString *t = [NSMutableString stringWithFormat:@"%@ — %@", ZPLMTexto(f[@"artista"]), ZPLMTexto(f[@"titulo"])];
-    if (ZPLMTexto(f[@"album"]).length) [t appendFormat:@" · %@", ZPLMTexto(f[@"album"])];
-    if ([f[@"faixa"] integerValue] > 0) {
-        [t appendFormat:NSLocalizedString(@"music_links_cmp_track", @", faixa %ld"), (long)[f[@"faixa"] integerValue]];
-    }
-    if (f[@"duracao"]) [t appendFormat:@" · %@", ZPLMDuracao(f[@"duracao"])];
-    return t;
+// O número da faixa do Música no álbum. Nas do catálogo o Música dá 0, e vai-se
+// buscar ao catálogo da Apple, como faz o título na janela do tocador; chega
+// depois, e a comparação refaz-se se a faixa ainda for a escolhida.
+- (NSString *)numeroDoTocado:(NSDictionary *)caso {
+    NSInteger n = [caso[@"faixa"] integerValue];
+    if (n > 0) return [NSString stringWithFormat:@"%ld", (long)n];
+    NSString *pid = ZPLMTexto(caso[@"pid"]), *album = ZPLMTexto(caso[@"album"]);
+    if (!pid.length || !album.length) return @"";
+    NSString *sabido = self.numerosDaLoja[pid];
+    if (sabido) return sabido;
+    self.numerosDaLoja[pid] = @"";
+    __weak typeof(self) fraco = self;
+    [ZPCatalogoDaApple posicaoDe:ZPLMTexto(caso[@"artista"]) album:album titulo:ZPLMTexto(caso[@"titulo"])
+                         duracao:[caso[@"duracao"] doubleValue]
+                       concluido:^(NSInteger f, NSInteger total) {
+        __strong typeof(fraco) forte = fraco;
+        if (!forte || f <= 0) return;
+        forte.numerosDaLoja[pid] = [NSString stringWithFormat:@"%ld", (long)f];
+        if ([ZPLMTexto([forte casoSeleccionado][@"pid"]) isEqualToString:pid]) [forte mostrarComparacao];
+    }];
+    return @"";
 }
 
 - (NSString *)ondeEsta:(NSDictionary *)c {
@@ -535,7 +607,11 @@ static NSString *ZPLMDescricao(NSDictionary *f) {
 // está seleccionada.
 - (void)mostrarComparacao {
     NSDictionary *caso = [self casoSeleccionado];
-    if (!caso) { self.comparacao.stringValue = @""; return; }
+    if (!caso) {
+        self.comparacao.stringValue = @"";
+        for (NSArray *l in self.celulas) for (NSTextField *x in l) x.stringValue = @"";
+        return;
+    }
     NSDictionary *c = [self candidataSeleccionada];
     NSArray *cs = [self candidatasDe:caso];
     NSInteger vezes = [caso[@"vezes"] integerValue];
@@ -565,28 +641,46 @@ static NSString *ZPLMDescricao(NSDictionary *f) {
             ? NSLocalizedString(@"music_links_cmp_same_marks", @"os títulos não indicam versões diferentes")
             : [NSString stringWithFormat:NSLocalizedString(@"music_links_cmp_other_marks", @"os títulos indicam versões diferentes: «%@» no Música, «%@» na candidata"),
                m1.length ? m1 : nada, m2.length ? m2 : nada];
-        junta([NSString stringWithFormat:@" — %@; %@.\n", duracao, versoes], normal);
+        junta([NSString stringWithFormat:@" — %@; %@.", duracao, versoes], normal);
+        if ([c[@"ligadas"] integerValue] > 0) {
+            junta([NSString stringWithFormat:NSLocalizedString(@"music_links_cmp_linked", @" Já há %ld faixas do Música ligadas a esta candidata."),
+                   (long)[c[@"ligadas"] integerValue]], fraco);
+        }
+        junta(@"\n", normal);
     } else {
-        junta(NSLocalizedString(@"music_links_verdict_none", @"Nenhuma das candidatas"), forte);
+        junta(NSLocalizedString(@"music_links_verdict_none", @"Entrada nova"), forte);
+        // Porquê: a candidata mais próxima e a diferença na duração.
+        double d = INFINITY;
+        for (NSDictionary *x in cs) d = MIN(d, fabs([x[@"dif_duracao"] doubleValue]));
+        if (cs.count && isfinite(d)) {
+            junta([NSString stringWithFormat:NSLocalizedString(@"music_links_verdict_none_why", @" — a candidata mais próxima tem %@ s de diferença na duração; escolhe-a à direita para a ligar."), ZPLMNumero(d)], normal);
+        }
         junta(@"\n", normal);
     }
 
-    // 2. As duas faixas.
-    junta(NSLocalizedString(@"music_links_cmp_music", @"No Música: "), fraco);
-    junta(ZPLMDescricao(caso), normal);
-    junta([NSString stringWithFormat:NSLocalizedString(@"music_links_cmp_music_plays", @" · audições no Música: %ld"), (long)vezes], normal);
-    junta(@"\n", normal);
+    // 2. As duas faixas, na grelha.
+    NSString *(^numero)(NSDictionary *) = ^NSString *(NSDictionary *f) {
+        NSInteger n = [f[@"faixa"] integerValue];
+        return n > 0 ? [NSString stringWithFormat:@"%ld", (long)n] : @"";
+    };
+    NSArray *tocado = @[ZPLMTexto(caso[@"artista"]), ZPLMTexto(caso[@"album"]), [self numeroDoTocado:caso], ZPLMTexto(caso[@"titulo"]),
+                        ZPLMDuracao(caso[@"duracao"]), NSLocalizedString(@"music_links_where_music", @"Música"),
+                        [NSString stringWithFormat:@"%ld", (long)vezes]];
+    NSArray *identificado = c
+        ? @[ZPLMTexto(c[@"artista"]), ZPLMTexto(c[@"album"]), numero(c), ZPLMTexto(c[@"titulo"]),
+            ZPLMDuracao(c[@"duracao"]), [self ondeEsta:c], [NSString stringWithFormat:@"%ld", (long)[c[@"audicoes"] integerValue]]]
+        : @[NSLocalizedString(@"music_links_identified_none", @"nenhuma: entrada nova"), @"", @"", @"", @"", @"", @""];
+    for (NSUInteger i = 0; i < 7; ++i) {
+        self.celulas[0][i].stringValue = tocado[i];
+        self.celulas[1][i].stringValue = identificado[i];
+        self.celulas[1][i].textColor = c ? NSColor.labelColor : NSColor.secondaryLabelColor;
+    }
+    // O que difere da faixa do Música fica em destaque na candidata.
     if (c) {
-        junta(NSLocalizedString(@"music_links_cmp_candidate", @"Candidata: "), fraco);
-        junta(ZPLMDescricao(c), normal);
-        junta([NSString stringWithFormat:@" · %@", [self ondeEsta:c]], normal);
-        junta([NSString stringWithFormat:NSLocalizedString(@"music_links_cmp_library_plays", @" · audições na fonoteca: %ld"),
-               (long)[c[@"audicoes"] integerValue]], normal);
-        if ([c[@"ligadas"] integerValue] > 0) {
-            junta([NSString stringWithFormat:NSLocalizedString(@"music_links_cmp_linked", @" · faixas do Música já ligadas: %ld"),
-                   (long)[c[@"ligadas"] integerValue]], normal);
+        for (NSUInteger i = 0; i < 5; ++i) {
+            BOOL igual = [ZPLMChave(tocado[i]) isEqualToString:ZPLMChave(identificado[i])];
+            self.celulas[1][i].textColor = igual ? NSColor.labelColor : NSColor.systemOrangeColor;
         }
-        junta(@"\n", normal);
     }
 
     // 3. A consequência.

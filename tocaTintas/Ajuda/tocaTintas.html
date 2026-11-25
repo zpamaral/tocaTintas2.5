@@ -274,7 +274,7 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <h3>A janela «Ligar faixas do Música»</h3>
 <p>Abre-se em <strong>Ficheiro</strong> ▸ <strong>Ligar faixas do Música…</strong>, ou clicando na notificação «Faixas do Música por ligar», que aparece quando o número de pendentes aumenta. É o mesmo género de escolha que o Música propõe quando um CD tem várias entradas.</p>
 <p>Ao abrir, a janela sincroniza com o Música, para que as candidatas contem com o que se registou entretanto — um álbum gravado, aprovado e aberto agora mesmo, por exemplo. Se houver ficheiros a registar, espera primeiro por eles. Enquanto isso, no lugar da contagem lê-se «A actualizar com o Música…», e só se pode ouvir: as escolhas esperam pelas candidatas novas. Com o Música fechado não há sincronização, e a janela mostra o que a base já tem.</p>
-<p>À esquerda estão as faixas pendentes, com um campo para filtrar por artista, álbum ou título. À direita estão as candidatas da faixa escolhida, com a sugestão já seleccionada, a diferença de duração, onde está cada uma (o formato, o CD ou «só no Música») e o parecer. A última opção é sempre <strong>Nenhuma — fica como música própria</strong>.</p>
+<p>À esquerda estão as faixas pendentes, com um campo para filtrar por artista, álbum ou título. À direita estão as candidatas da faixa escolhida, com a sugestão já seleccionada, a diferença de duração, onde está cada uma (o formato, o CD ou «só no Música») e o parecer. A última opção é sempre <strong>Nenhuma — entrada nova</strong>.</p>
 <p>O <strong>parecer</strong> vem da diferença de duração e do que os títulos dizem da versão (o que está entre parênteses ou depois de « - », sem contar a remasterização nem os convidados):</p>
 <ul>
 <li><strong>mesma gravação</strong>: até 3 s de diferença e nenhuma indicação de versão diferente. Uma remasterização diferente não muda o parecer;</li>
@@ -282,16 +282,16 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <li><strong>por ouvir</strong>: tudo o resto, como a mesma duração com «(7″ Version)» de um lado e nada do outro.</li>
 </ul>
 <p>Entre parênteses fica o critério com que a candidata foi encontrada.</p>
-<p>Por baixo das duas tabelas lê-se a comparação da escolha seleccionada: o parecer por extenso e a razão dele; a faixa do Música e a candidata lado a lado, com álbum, número, duração, onde está a candidata, as audições que cada uma já tem e quantas faixas do Música já estão ligadas à candidata; e a consequência da escolha. Ao ligar, as audições da faixa passam a contar para a candidata, e diz-se com quantas fica. Se a candidata tem ficheiro local, é ele que toca nas estações, e a faixa do Música não entra nelas; se não tem, continua a tocar pelo Música. Com «Nenhuma», a faixa fica como música própria, com contagem só dela, e entra nas estações como faixa do Música.</p>
-<p class="rotulo"><strong>Ligar</strong> (↩, ou duplo clique)</p>
-<p>Liga a faixa à candidata escolhida e passa à seguinte.</p>
-<p class="rotulo"><strong>Saltar</strong></p>
-<p>Deixa a faixa pendente e passa à seguinte.</p>
-<p class="rotulo"><strong>Aceitar o álbum</strong></p>
-<p>Aceita as sugestões de todas as faixas pendentes do mesmo álbum, depois de uma confirmação que diz quantas ficam ligadas e quantas ficam como músicas próprias. É a forma rápida de tratar os discos de música clássica.</p>
+<p>Por baixo das duas tabelas, uma grelha põe lado a lado, campo a campo (artista, álbum, número, título, duração, onde está e quantas vezes tocou), a faixa <strong>Tocado no Música</strong> e aquilo com que está <strong>Identificado com</strong>, a candidata escolhida à direita. O que difere entre as duas fica a laranja na candidata. Segue-se o parecer por extenso e a razão dele, quantas faixas do Música já estão ligadas à candidata, e a consequência da escolha. Ao ligar, as audições da faixa passam a contar para a candidata, e diz-se com quantas fica. Se a candidata tem ficheiro local, é ele que toca nas estações, e a faixa do Música não entra nelas; se não tem, continua a tocar pelo Música. Como entrada nova, a faixa fica como música própria, com contagem só dela, e entra nas estações como faixa do Música. Quando a sugestão é uma entrada nova, a comparação diz quanto difere a candidata mais próxima; para a ligar, basta escolhê-la à direita.</p>
+<p class="rotulo"><strong>Ligar à candidata</strong> ou <strong>Entrada nova</strong> (↩, ou duplo clique)</p>
+<p>O botão muda com a linha escolhida à direita: com uma candidata, liga a faixa a ela; com «Nenhuma», faz dela uma entrada nova, música própria. Em ambos os casos grava a escolha e passa à faixa seguinte.</p>
+<p class="rotulo"><strong>Adiar</strong></p>
+<p>Não grava nada: deixa a faixa pendente e passa à seguinte.</p>
+<p class="rotulo"><strong>Ligar o álbum todo…</strong></p>
+<p>Aceita as sugestões de todas as faixas pendentes do mesmo álbum, depois de uma confirmação que diz quantas ficam ligadas e quantas ficam como entradas novas. É a forma rápida de tratar os discos de música clássica.</p>
 <p class="rotulo"><strong>▶︎ Ouvir a do Música</strong> e <strong>▶︎ Ouvir a candidata</strong></p>
 <p>Tocam dez segundos de cada lado, para comparar de ouvido. Não contam como audição nem mexem no Música. A candidata com ficheiro ouve-se dele, a partir de 30% da duração (só nos formatos que o macOS lê sozinho: FLAC, ALAC, AAC e MP3). A faixa do Música, e a candidata que só lá existe, ouvem-se pelo excerto de 30 segundos da loja da Apple: o da própria versão, escolhido pela duração, ou nenhum, e nesse caso a comparação diz que não há amostra. Para a loja vão só o artista e o título.</p>
-<p>A sugestão é a primeira candidata com parecer de mesma gravação. Não havendo nenhuma, é a primeira de todas, excepto quando só foi encontrada pelo título com outra duração: nesse caso, a sugestão é <strong>Nenhuma</strong>.</p>
+<p>A sugestão é a primeira candidata com parecer de mesma gravação. Não havendo nenhuma, é a primeira de todas, excepto quando só foi encontrada pelo título com outra duração: nesse caso, a sugestão é <strong>Nenhuma</strong> (entrada nova).</p>
 
 <h2 id="listas-m3u">Listas M3U e M3U8</h2>
 <p class="rotulo"><strong>Ficheiro</strong> ▸ <strong>Abrir…</strong> (⌘O)</p>
