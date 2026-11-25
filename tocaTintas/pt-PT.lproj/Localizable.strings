@@ -184,7 +184,7 @@
 "music_links_identified_none" = "nenhuma: entrada nova";
 "music_links_skip_tip" = "Não grava nada: passa à faixa seguinte, e esta fica por ligar.";
 "music_links_accept_album_tip" = "Aplica a sugestão (candidata ou entrada nova) a todas as faixas por ligar deste álbum; pergunta antes de gravar.";
-"music_links_verdict_none_why" = " — a candidata mais próxima tem %@ s de diferença na duração; escolhe-a à direita para a ligar.";
+"music_links_verdict_none_why" = " — a candidata mais próxima tem %@ s de diferença na duração; escolhe-a na tabela das candidatas para a ligar.";
 "music_links_accept_album_title" = "Aceitar as sugestões de «%@»?";
 "music_links_accept_album_text" = "%ld faixas: %ld ligadas à candidata sugerida, %ld como entradas novas.";
 "music_links_accept" = "Aceitar";

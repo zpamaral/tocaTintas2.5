@@ -191,7 +191,7 @@ static NSString *ZPLMDuracao(id segundos) {
     _casos = @[]; _casosVisiveis = @[]; _candidatas = @{};
     _numerosDaLoja = [NSMutableDictionary dictionary];
     janela.title = NSLocalizedString(@"music_links_title", @"Ligar faixas do Música");
-    janela.minSize = NSMakeSize(900, 520);
+    janela.minSize = NSMakeSize(900, 580);
     janela.delegate = self;
     janela.releasedWhenClosed = NO;
     [janela center];
@@ -255,27 +255,33 @@ static NSString *ZPLMDuracao(id segundos) {
     NSString *titulo = NSLocalizedString(@"music_links_col_title", @"Título");
     NSString *duracao = NSLocalizedString(@"music_links_col_duration", @"Duração");
     self.tabelaDosCasos = [self tabelaComColunas:@[
-        @[@"artista", artista, @130], @[@"album", album, @130], @[@"faixa", numero, @32],
-        @[@"titulo", titulo, @170], @[@"duracao", duracao, @48],
+        @[@"artista", artista, @240], @[@"album", album, @300], @[@"faixa", numero, @32],
+        @[@"titulo", titulo, @260], @[@"duracao", duracao, @56],
         @[@"vezes", NSLocalizedString(@"music_links_col_plays", @"Vezes no Música"), @44] ]];
     self.tabelaDasCandidatas = [self tabelaComColunas:@[
-        @[@"artista", artista, @120], @[@"album", album, @120], @[@"faixa", numero, @32],
-        @[@"titulo", titulo, @170], @[@"duracao", duracao, @80],
+        @[@"artista", artista, @200], @[@"album", album, @220], @[@"faixa", numero, @32],
+        @[@"titulo", titulo, @220], @[@"duracao", duracao, @96],
         @[@"formato", NSLocalizedString(@"music_links_col_format", @"Onde"), @56],
         @[@"criterio", NSLocalizedString(@"music_links_col_criterion", @"Parecer"), @190] ]];
     self.tabelaDasCandidatas.doubleAction = @selector(ligar:);
     self.tabelaDasCandidatas.target = self;
 
+    // As pendentes em cima, as candidatas da escolhida por baixo: cada tabela
+    // com a largura toda, para se lerem os nomes, e nenhuma pode encolher até
+    // desaparecer (lado a lado, a das candidatas chegou a ficar com largura 0).
     NSSplitView *divisao = [[NSSplitView alloc] init];
-    divisao.vertical = YES;
+    divisao.vertical = NO;
     divisao.dividerStyle = NSSplitViewDividerStyleThin;
     divisao.translatesAutoresizingMaskIntoConstraints = NO;
-    [divisao addArrangedSubview:[self rolar:self.tabelaDosCasos]];
-    [divisao addArrangedSubview:[self rolar:self.tabelaDasCandidatas]];
-    divisao.autosaveName = @"LigacoesDoMusicaDivisao";
+    NSScrollView *deCima = [self rolar:self.tabelaDosCasos], *deBaixo = [self rolar:self.tabelaDasCandidatas];
+    [divisao addArrangedSubview:deCima];
+    [divisao addArrangedSubview:deBaixo];
+    [deCima.heightAnchor constraintGreaterThanOrEqualToConstant:110].active = YES;
+    [deBaixo.heightAnchor constraintGreaterThanOrEqualToConstant:110].active = YES;
+    divisao.autosaveName = @"LigacoesDoMusicaDivisaoVertical";
 
     // As duas faixas, campo a campo, em colunas: o que tocou no Música e
-    // aquilo com que está identificado (a candidata escolhida à direita).
+    // aquilo com que está identificado (a candidata escolhida na tabela das candidatas).
     NSArray *cabecalhos = @[@"", artista, album, numero, titulo, duracao,
                             NSLocalizedString(@"music_links_col_format", @"Onde"),
                             NSLocalizedString(@"music_links_col_plays", @"Vezes")];
@@ -298,8 +304,10 @@ static NSString *ZPLMDuracao(id segundos) {
             NSTextField *l = [NSTextField labelWithString:@""];
             l.lineBreakMode = NSLineBreakByTruncatingTail;
             l.selectable = YES;
-            // Artista, álbum e título encolhem (com «…») quando a janela é estreita.
+            // Artista, álbum e título ficam com a largura que sobra; só
+            // encolhem (com «…», e o texto todo na dica) numa janela estreita.
             if (i == 1 || i == 2 || i == 4) {
+                [l setContentHuggingPriority:1 forOrientation:NSLayoutConstraintOrientationHorizontal];
                 [l setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow - 1 forOrientation:NSLayoutConstraintOrientationHorizontal];
             }
             [linha addObject:l];
@@ -348,9 +356,9 @@ static NSString *ZPLMDuracao(id segundos) {
         [divisao.trailingAnchor constraintEqualToAnchor:v.trailingAnchor],
         [divisao.bottomAnchor constraintEqualToAnchor:self.grelha.topAnchor constant:-m],
         [self.grelha.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:m],
-        [self.grelha.trailingAnchor constraintLessThanOrEqualToAnchor:v.trailingAnchor constant:-m],
+        [self.grelha.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-m],
         [self.grelha.bottomAnchor constraintEqualToAnchor:self.comparacao.topAnchor constant:-10],
-        [divisao.heightAnchor constraintGreaterThanOrEqualToConstant:120],
+        [divisao.heightAnchor constraintGreaterThanOrEqualToConstant:230],
         [self.comparacao.leadingAnchor constraintEqualToAnchor:v.leadingAnchor constant:m],
         [self.comparacao.trailingAnchor constraintEqualToAnchor:v.trailingAnchor constant:-m],
         [self.comparacao.heightAnchor constraintGreaterThanOrEqualToConstant:64],
@@ -550,7 +558,7 @@ static NSString *ZPLMDuracao(id segundos) {
     // Ouvir pode-se sempre; escolher só com a base em dia.
     BOOL escolher = ha && !self.aActualizar;
     self.botaoLigar.enabled = escolher;
-    // O botão diz o que faz com a linha escolhida à direita: ligar à candidata
+    // O botão diz o que faz com a linha escolhida nas candidatas: ligar à candidata
     // ou fazer dela uma entrada nova («Nenhuma»).
     self.botaoLigar.title = (ha && [self candidataSeleccionada] == nil)
         ? NSLocalizedString(@"music_links_new_entry", @"Entrada nova")
@@ -589,6 +597,13 @@ static NSString *ZPLMNumero(double x) {
         __strong typeof(fraco) forte = fraco;
         if (!forte || f <= 0) return;
         forte.numerosDaLoja[pid] = [NSString stringWithFormat:@"%ld", (long)f];
+        NSUInteger linha = [forte.casosVisiveis indexOfObjectPassingTest:^BOOL(NSDictionary *x, NSUInteger i, BOOL *pare) {
+            return [ZPLMTexto(x[@"pid"]) isEqualToString:pid];
+        }];
+        if (linha != NSNotFound) {
+            [forte.tabelaDosCasos reloadDataForRowIndexes:[NSIndexSet indexSetWithIndex:linha]
+                                            columnIndexes:[NSIndexSet indexSetWithIndex:[forte.tabelaDosCasos columnWithIdentifier:@"faixa"]]];
+        }
         if ([ZPLMTexto([forte casoSeleccionado][@"pid"]) isEqualToString:pid]) [forte mostrarComparacao];
     }];
     return @"";
@@ -657,7 +672,7 @@ static NSString *ZPLMNumero(double x) {
             d = i == 0 ? x : MIN(d, x);
         }
         if (cs.count) {
-            junta([NSString stringWithFormat:NSLocalizedString(@"music_links_verdict_none_why", @" — a candidata mais próxima tem %@ s de diferença na duração; escolhe-a à direita para a ligar."), ZPLMNumero(d)], normal);
+            junta([NSString stringWithFormat:NSLocalizedString(@"music_links_verdict_none_why", @" — a candidata mais próxima tem %@ s de diferença na duração; escolhe-a na tabela das candidatas para a ligar."), ZPLMNumero(d)], normal);
         }
         junta(@"\n", normal);
     }
@@ -677,6 +692,8 @@ static NSString *ZPLMNumero(double x) {
     for (NSUInteger i = 0; i < 7; ++i) {
         self.celulas[0][i].stringValue = tocado[i];
         self.celulas[1][i].stringValue = identificado[i];
+        self.celulas[0][i].toolTip = [tocado[i] length] ? tocado[i] : nil;
+        self.celulas[1][i].toolTip = [identificado[i] length] ? identificado[i] : nil;
         self.celulas[1][i].textColor = c ? NSColor.labelColor : NSColor.secondaryLabelColor;
     }
     // O que difere da faixa do Música fica em destaque na candidata.
@@ -730,7 +747,7 @@ static NSString *ZPLMNomeDoCriterio(NSString *c) {
     if (t == self.tabelaDosCasos) {
         NSDictionary *c = self.casosVisiveis[i];
         if ([col isEqualToString:@"duracao"]) return ZPLMDuracao(c[@"duracao"]);
-        if ([col isEqualToString:@"faixa"]) return [c[@"faixa"] integerValue] > 0 ? ZPLMTexto(c[@"faixa"]) : @"";
+        if ([col isEqualToString:@"faixa"]) return [self numeroDoTocado:c];
         return ZPLMTexto(c[col]);
     }
     NSArray *cs = [self candidatasDe:[self casoSeleccionado]];

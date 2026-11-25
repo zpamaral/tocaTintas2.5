@@ -184,7 +184,7 @@
 "music_links_identified_none" = "none: new entry";
 "music_links_skip_tip" = "Saves nothing: moves to the next track, and this one stays unlinked.";
 "music_links_accept_album_tip" = "Applies the suggestion (candidate or new entry) to every unlinked track of this album; asks before saving.";
-"music_links_verdict_none_why" = " — the closest candidate differs by %@ s in length; select it on the right to link it.";
+"music_links_verdict_none_why" = " — the closest candidate differs by %@ s in length; select it in the candidates table to link it.";
 "music_links_accept_album_title" = "Accept the suggestions for “%@”?";
 "music_links_accept_album_text" = "%ld tracks: %ld linked to the suggested candidate, %ld as new entries.";
 "music_links_accept" = "Accept";
