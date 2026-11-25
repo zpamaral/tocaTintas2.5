@@ -650,9 +650,13 @@ static NSString *ZPLMNumero(double x) {
     } else {
         junta(NSLocalizedString(@"music_links_verdict_none", @"Entrada nova"), forte);
         // Porquê: a candidata mais próxima e a diferença na duração.
-        double d = INFINITY;
-        for (NSDictionary *x in cs) d = MIN(d, fabs([x[@"dif_duracao"] doubleValue]));
-        if (cs.count && isfinite(d)) {
+        // Sem INFINITY nem isfinite: o alvo compila com matemática rápida.
+        double d = 0;
+        for (NSUInteger i = 0; i < cs.count; ++i) {
+            double x = fabs([cs[i][@"dif_duracao"] doubleValue]);
+            d = i == 0 ? x : MIN(d, x);
+        }
+        if (cs.count) {
             junta([NSString stringWithFormat:NSLocalizedString(@"music_links_verdict_none_why", @" — a candidata mais próxima tem %@ s de diferença na duração; escolhe-a à direita para a ligar."), ZPLMNumero(d)], normal);
         }
         junta(@"\n", normal);
