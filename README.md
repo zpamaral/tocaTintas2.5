@@ -61,11 +61,11 @@ tocaTintas: leitor de música para macOS, com crossfeed, AirPlay e gravação.
 
 **Ficheiro** ▸ **Guardar estação como…** (⇧⌘S)
 
-**Ficheiro** ▸ **Sair do modo corrente** (⇧⌘P)
-
 **Reprodução** ▸ *as teclas do tocador*
 
 **Reprodução** ▸ **Criar estação**
+
+**Reprodução** ▸ **Sair do modo corrente** (⇧⌘P)
 
 **Ajuda** ▸ **Ajuda do tocaTintas** (⌘?)
 
@@ -399,7 +399,7 @@ A sugestão é a primeira candidata com parecer de mesma gravação. Não havend
 
 Aceita listas `.m3u` e `.m3u8`, que para o macOS são o mesmo tipo de ficheiro (`public.m3u-playlist`). As listas abertas ficam em **Ficheiro** ▸ **Abrir recentes**.
 
-**Ficheiro** ▸ **Sair do modo corrente** (⇧⌘P)
+**Reprodução** ▸ **Sair do modo corrente** (⇧⌘P)
 
 Volta à fonoteca e mantém a faixa que está a tocar.
 
@@ -424,7 +424,7 @@ A lista passa a ser o que toca, e a fonoteca fica onde estava. Abrir uma lista *
 
 **Reprodução** ▸ **Criar estação**
 
-Faz uma lista de 50 faixas a partir da que está a tocar ou em pausa: ela própria, à cabeça, e as da fonoteca que mais se lhe assemelham no som, por ordem de semelhança. A estação comporta-se como uma lista M3U acabada de abrir: a faixa em curso continua a tocar, já dentro dela, e **Ficheiro** ▸ **Sair do modo corrente** volta à fonoteca. Com o baralhamento ligado, a estação é baralhada. Com o tocador parado e sem o Música na janela, a opção fica a cinzento.
+Faz uma lista de 50 faixas a partir da que está a tocar ou em pausa: ela própria, à cabeça, e as da fonoteca que mais se lhe assemelham no som, por ordem de semelhança. A estação comporta-se como uma lista M3U acabada de abrir: a faixa em curso continua a tocar, já dentro dela, e **Reprodução** ▸ **Sair do modo corrente** volta à fonoteca. Com o baralhamento ligado, a estação é baralhada. Com o tocador parado e sem o Música na janela, a opção fica a cinzento.
 
 A semelhança mede-se pelas **assinaturas**: um vector de 512 números por música, tirado de três excertos de 10 segundos (aos 25, 50 e 75% da faixa) por uma rede neuronal, o codificador de áudio do CLAP, na variante treinada para música (`music_audioset_epoch_15_esc_90.14`, do LAION), que corre no Neural Engine. Duas músicas são tanto mais parecidas quanto maior for o co-seno entre as suas assinaturas. O modelo ouve o som e não lê as etiquetas: reconhece bem o estilo e a instrumentação, e não sabe nada da língua nem da nacionalidade.
 

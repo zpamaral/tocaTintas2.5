@@ -85,9 +85,9 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <p><strong>Ficheiro</strong> ▸ <strong>Sincronizar com o Música</strong></p>
 <p><strong>Ficheiro</strong> ▸ <strong>Guardar estação…</strong> (⌘S)</p>
 <p><strong>Ficheiro</strong> ▸ <strong>Guardar estação como…</strong> (⇧⌘S)</p>
-<p><strong>Ficheiro</strong> ▸ <strong>Sair do modo corrente</strong> (⇧⌘P)</p>
 <p><strong>Reprodução</strong> ▸ <em>as teclas do tocador</em></p>
 <p><strong>Reprodução</strong> ▸ <strong>Criar estação</strong></p>
+<p><strong>Reprodução</strong> ▸ <strong>Sair do modo corrente</strong> (⇧⌘P)</p>
 <p><strong>Ajuda</strong> ▸ <strong>Ajuda do tocaTintas</strong> (⌘?)</p>
 <p><code>osascript -e 'tell application "tocaTintas" to</code> <em>comando</em><code>'</code></p>
 
@@ -296,7 +296,7 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <h2 id="listas-m3u">Listas M3U e M3U8</h2>
 <p class="rotulo"><strong>Ficheiro</strong> ▸ <strong>Abrir…</strong> (⌘O)</p>
 <p>Aceita listas <code>.m3u</code> e <code>.m3u8</code>, que para o macOS são o mesmo tipo de ficheiro (<code>public.m3u-playlist</code>). As listas abertas ficam em <strong>Ficheiro</strong> ▸ <strong>Abrir recentes</strong>.</p>
-<p class="rotulo"><strong>Ficheiro</strong> ▸ <strong>Sair do modo corrente</strong> (⇧⌘P)</p>
+<p class="rotulo"><strong>Reprodução</strong> ▸ <strong>Sair do modo corrente</strong> (⇧⌘P)</p>
 <p>Volta à fonoteca e mantém a faixa que está a tocar.</p>
 <h3>O que se lê da lista</h3>
 <ul>
@@ -314,7 +314,7 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 
 <h2 id="estacao">Estação</h2>
 <p class="rotulo"><strong>Reprodução</strong> ▸ <strong>Criar estação</strong></p>
-<p>Faz uma lista de 50 faixas a partir da que está a tocar ou em pausa: ela própria, à cabeça, e as da fonoteca que mais se lhe assemelham no som, por ordem de semelhança. A estação comporta-se como uma lista M3U acabada de abrir: a faixa em curso continua a tocar, já dentro dela, e <strong>Ficheiro</strong> ▸ <strong>Sair do modo corrente</strong> volta à fonoteca. Com o baralhamento ligado, a estação é baralhada. Com o tocador parado e sem o Música na janela, a opção fica a cinzento.</p>
+<p>Faz uma lista de 50 faixas a partir da que está a tocar ou em pausa: ela própria, à cabeça, e as da fonoteca que mais se lhe assemelham no som, por ordem de semelhança. A estação comporta-se como uma lista M3U acabada de abrir: a faixa em curso continua a tocar, já dentro dela, e <strong>Reprodução</strong> ▸ <strong>Sair do modo corrente</strong> volta à fonoteca. Com o baralhamento ligado, a estação é baralhada. Com o tocador parado e sem o Música na janela, a opção fica a cinzento.</p>
 <p>A semelhança mede-se pelas <strong>assinaturas</strong>: um vector de 512 números por música, tirado de três excertos de 10 segundos (aos 25, 50 e 75% da faixa) por uma rede neuronal, o codificador de áudio do CLAP, na variante treinada para música (<code>music_audioset_epoch_15_esc_90.14</code>, do LAION), que corre no Neural Engine. Duas músicas são tanto mais parecidas quanto maior for o co-seno entre as suas assinaturas. O modelo ouve o som e não lê as etiquetas: reconhece bem o estilo e a instrumentação, e não sabe nada da língua nem da nacionalidade.</p>
 <p>Enquanto a estação for a lista corrente, o título da faixa leva à frente o sinal de estação do Música (um ponto com ondas à direita), como o «♫» das faixas do Música. As faixas que a estação entrega ao Música levam as duas marcas; o que o Música toque por conta própria não leva a da estação. A marca é só da janela: o aviso, o «A tocar» e o AppleScript dão o título sem ela.</p>
 <p>Na escolha das vizinhas há três regras: nunca outra versão da mesma canção (um título igual, sem contar com maiúsculas, acentos e o que vem entre parênteses), no máximo três faixas por artista e duas por álbum. Nas eruditas, o artista é o compositor. Numa colectânea de vários artistas, conta o álbum.</p>

@@ -5828,12 +5828,21 @@ typedef NS_ENUM(NSInteger, ZPTecla) {
 // barra de espaços carrega em botões), e a barra de espaços e as setas não
 // podem ser tiradas a quem está a escrever na caixa das músicas.
 - (BOOL)menuHasKeyEquivalent:(NSMenu *)menu forEvent:(NSEvent *)event target:(id *)target action:(SEL *)action {
-    if (menu != self.menuDaReproducao || event.type != NSEventTypeKeyDown || event.window != self.view.window) return NO;
+    if (menu != self.menuDaReproducao || event.type != NSEventTypeKeyDown) return NO;
     NSString *teclas = event.charactersIgnoringModifiers;
     if (teclas.length != 1) return NO;
     unichar tecla = [teclas characterAtIndex:0];
     NSEventModifierFlags mods = event.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagShift |
                                                        NSEventModifierFlagOption | NSEventModifierFlagControl);
+    // ⇧⌘P, «Sair do modo corrente»: em qualquer janela, como quando estava no
+    // Ficheiro. Este delegado tapa os atalhos dos itens do menu, e sem isto
+    // o do item deixava de valer.
+    if (mods == (NSEventModifierFlagCommand | NSEventModifierFlagShift) && (tecla == 'p' || tecla == 'P')) {
+        *target = self;
+        *action = @selector(exitPlaylistModeAction:);
+        return YES;
+    }
+    if (event.window != self.view.window) return NO;
     BOOL aEscrever = [event.window.firstResponder isKindOfClass:[NSText class]];
     SEL accao = NULL;
     if (mods == 0) {
@@ -5851,8 +5860,10 @@ typedef NS_ENUM(NSInteger, ZPTecla) {
 }
 
 // Chamado uma vez no arranque, depois do -prepararCDDeAudio (que põe os seus
-// itens no menu Ficheiro): o menu Reprodução, a seguir ao Ficheiro, e os dois
-// «Guardar estação» no Ficheiro, antes de «Sair do modo corrente».
+// itens no menu Ficheiro, antes de «Sair do modo corrente»): os dois «Guardar
+// estação» no Ficheiro, no mesmo sítio, e o menu Reprodução, a seguir ao
+// Ficheiro. «Sair do modo corrente» vem no storyboard no Ficheiro e passa daqui
+// para o fim da Reprodução: os modos (lista, estação, CD) são da reprodução.
 - (void)prepararMenuDaReproducao {
     NSMenu *principal = NSApp.mainMenu;
     NSMenuItem *sair = nil;
@@ -5930,6 +5941,14 @@ typedef NS_ENUM(NSInteger, ZPTecla) {
                                                        action:@selector(mostrarContagens:) keyEquivalent:@""];
     contagens.target = self;
     [menu addItem:contagens];
+
+    // «Sair do modo corrente», do Ficheiro para o fim daqui. O Ficheiro não
+    // fica a acabar num separador.
+    NSMenu *ficheiro = sair.menu;
+    [ficheiro removeItem:sair];
+    while (ficheiro.numberOfItems && ficheiro.itemArray.lastObject.isSeparatorItem) [ficheiro removeItemAtIndex:ficheiro.numberOfItems - 1];
+    [menu addItem:[NSMenuItem separatorItem]];
+    [menu addItem:sair];
 
     NSMenuItem *topo = [[NSMenuItem alloc] initWithTitle:menu.title action:NULL keyEquivalent:@""];
     topo.submenu = menu;
