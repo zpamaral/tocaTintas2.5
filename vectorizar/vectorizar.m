@@ -761,8 +761,9 @@ static float *ZPBonusDasListas(NSArray<NSArray<NSString *> *> *faixas, NSInteger
 
 #pragma mark Origens
 
-// A origem de uma faixa é a etiqueta GENRE do ficheiro, quando ela diz a
-// origem («Fado», «Portuguesa», «Brasileira»…). O ficheiro das regras
+// A origem de uma faixa é uma etiqueta GENRE do ficheiro, quando ela diz a
+// origem («Fado», «Portuguesa», «Brasileira»…): a primeira que tenha regra,
+// senão a primeira de todas. O ficheiro das regras
 // (--origens, um JSON) diz o que cada origem admite numa estação, e o que
 // admite cada artista que seja excepção:
 //     { "origens":  { "Fado": ["Fado", "Fado de Coimbra"], … },
@@ -772,16 +773,89 @@ static float *ZPBonusDasListas(NSArray<NSArray<NSString *> *> *faixas, NSInteger
 // dela estiver na lista; a de uma faixa do Música é a mais frequente entre os
 // ficheiros do mesmo artista, e sem ficheiros dele fica de fora.
 //
-// As etiquetas lêem-se pelo Core Audio (uns 4 ms por ficheiro) e guardam-se na
-// tabela generos da base, com a data do ficheiro: de cada vez só se relêem os
-// que mudaram.
+// As etiquetas guardam-se na tabela generos da base, com a data do ficheiro: de
+// cada vez só se relêem os que mudaram. «genero» é a primeira GENRE (a que o
+// Core Audio dá, e a que a janela das Origens mostra); «todos» são todas, uma
+// por linha. Um ficheiro pode ter várias («Rock», «Shoegaze»), e a origem é a
+// primeira delas que tenha regra.
 
-static NSDictionary<NSString *, NSString *> *ZPGenerosDosFicheiros(sqlite3 *db) {
-    NSMutableDictionary<NSString *, NSString *> *generos = [NSMutableDictionary dictionary];
-    sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS generos (caminho TEXT PRIMARY KEY, genero TEXT, data REAL NOT NULL)", NULL, NULL, NULL);
-    NSMutableDictionary<NSString *, NSArray *> *guardados = [NSMutableDictionary dictionary];
+// As GENRE de um FLAC, pela ordem do ficheiro, lidas dos comentários Vorbis (o
+// Core Audio só dá a primeira). nil se não for um FLAC que se deixe ler.
+static NSArray<NSString *> *ZPGenerosDoFLAC(NSString *caminho) {
+    FILE *f = fopen(caminho.fileSystemRepresentation, "rb");
+    if (!f) return nil;
+    NSMutableArray<NSString *> *generos = nil;
+    unsigned char cab[4];
+    if (fread(cab, 1, 4, f) == 4 && memcmp(cab, "fLaC", 4) == 0) {
+        BOOL ultimo = NO;
+        while (!ultimo && fread(cab, 1, 4, f) == 4) {
+            ultimo = (cab[0] & 0x80) != 0;
+            uint32_t tamanho = ((uint32_t)cab[1] << 16) | ((uint32_t)cab[2] << 8) | cab[3];
+            if ((cab[0] & 0x7F) != 4) {   // 4: VORBIS_COMMENT
+                if (fseeko(f, tamanho, SEEK_CUR) != 0) break;
+                continue;
+            }
+            NSMutableData *dados = [NSMutableData dataWithLength:tamanho];
+            if (fread(dados.mutableBytes, 1, tamanho, f) != tamanho) break;
+            const unsigned char *p = dados.bytes, *fim = p + tamanho;
+            #define ZPLE32(q) ((uint32_t)(q)[0] | ((uint32_t)(q)[1] << 8) | ((uint32_t)(q)[2] << 16) | ((uint32_t)(q)[3] << 24))
+            if (fim - p < 4) break;
+            uint32_t n = ZPLE32(p); p += 4;
+            if ((uint32_t)(fim - p) < n) break;
+            p += n;                                    // o vendedor
+            if (fim - p < 4) break;
+            uint32_t quantos = ZPLE32(p); p += 4;
+            generos = [NSMutableArray array];
+            for (uint32_t i = 0; i < quantos && fim - p >= 4; ++i) {
+                n = ZPLE32(p); p += 4;
+                if ((uint32_t)(fim - p) < n) break;
+                if (n > 6 && strncasecmp((const char *)p, "GENRE=", 6) == 0) {
+                    NSString *g = [[NSString alloc] initWithBytes:p + 6 length:n - 6 encoding:NSUTF8StringEncoding];
+                    g = [g stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+                    if (g.length && ![generos containsObject:g]) [generos addObject:g];
+                }
+                p += n;
+            }
+            #undef ZPLE32
+            break;
+        }
+    }
+    fclose(f);
+    return generos;
+}
+
+// A primeira GENRE de um ficheiro qualquer, pelo Core Audio (uns 4 ms).
+static NSString *ZPGeneroPeloCoreAudio(NSString *caminho) {
+    NSString *genero = @"";
+    AudioFileID f = NULL;
+    if (AudioFileOpenURL((__bridge CFURLRef)[NSURL fileURLWithPath:caminho], kAudioFileReadPermission, 0, &f) == noErr) {
+        CFDictionaryRef d = NULL;
+        UInt32 tamanho = sizeof(d);
+        if (AudioFileGetProperty(f, kAudioFilePropertyInfoDictionary, &tamanho, &d) == noErr && d) {
+            NSDictionary *info = (__bridge_transfer NSDictionary *)d;
+            id x = info[@kAFInfoDictionary_Genre];
+            if ([x isKindOfClass:[NSString class]]) genero = [x stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        }
+        AudioFileClose(f);
+    }
+    return genero;
+}
+
+// Caminho → todas as GENRE do ficheiro (vazio se não tiver nenhuma).
+static NSDictionary<NSString *, NSArray<NSString *> *> *ZPGenerosDosFicheiros(sqlite3 *db) {
+    NSMutableDictionary<NSString *, NSArray<NSString *> *> *generos = [NSMutableDictionary dictionary];
+    sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS generos (caminho TEXT PRIMARY KEY, genero TEXT, data REAL NOT NULL, todos TEXT)", NULL, NULL, NULL);
+    // A coluna «todos» chegou depois: numa tabela antiga acrescenta-se, e as
+    // linhas sem ela relêem-se.
+    BOOL temTodos = NO;
     sqlite3_stmt *s = NULL;
-    if (sqlite3_prepare_v2(db, "SELECT caminho, genero, data FROM generos", -1, &s, NULL) == SQLITE_OK) {
+    if (sqlite3_prepare_v2(db, "SELECT 1 FROM pragma_table_info('generos') WHERE name = 'todos'", -1, &s, NULL) == SQLITE_OK) {
+        temTodos = sqlite3_step(s) == SQLITE_ROW;
+    }
+    sqlite3_finalize(s);
+    if (!temTodos) sqlite3_exec(db, "ALTER TABLE generos ADD COLUMN todos TEXT", NULL, NULL, NULL);
+    NSMutableDictionary<NSString *, NSArray *> *guardados = [NSMutableDictionary dictionary];
+    if (sqlite3_prepare_v2(db, "SELECT caminho, todos, data FROM generos WHERE todos IS NOT NULL", -1, &s, NULL) == SQLITE_OK) {
         while (sqlite3_step(s) == SQLITE_ROW) guardados[ZPTexto(s, 0)] = @[ZPTexto(s, 1), @(sqlite3_column_double(s, 2))];
     }
     sqlite3_finalize(s);
@@ -793,31 +867,28 @@ static NSDictionary<NSString *, NSString *> *ZPGenerosDosFicheiros(sqlite3 *db) 
             if (stat(caminho.fileSystemRepresentation, &st) != 0) continue;
             double data = (double)st.st_mtimespec.tv_sec + st.st_mtimespec.tv_nsec / 1e9;
             NSArray *g = guardados[caminho];
-            if (g && [g[1] doubleValue] == data) { generos[caminho] = g[0]; continue; }
-            NSString *genero = @"";
-            AudioFileID f = NULL;
-            if (AudioFileOpenURL((__bridge CFURLRef)[NSURL fileURLWithPath:caminho], kAudioFileReadPermission, 0, &f) == noErr) {
-                CFDictionaryRef d = NULL;
-                UInt32 tamanho = sizeof(d);
-                if (AudioFileGetProperty(f, kAudioFilePropertyInfoDictionary, &tamanho, &d) == noErr && d) {
-                    NSDictionary *info = (__bridge_transfer NSDictionary *)d;
-                    id x = info[@kAFInfoDictionary_Genre];
-                    if ([x isKindOfClass:[NSString class]]) genero = [x stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-                }
-                AudioFileClose(f);
+            if (g && [g[1] doubleValue] == data) {
+                generos[caminho] = [g[0] length] ? [g[0] componentsSeparatedByString:@"\n"] : @[];
+                continue;
             }
-            generos[caminho] = genero;
-            [novos addObject:@[caminho, genero, @(data)]];
+            NSArray<NSString *> *todos = [caminho.pathExtension.lowercaseString isEqualToString:@"flac"] ? ZPGenerosDoFLAC(caminho) : nil;
+            if (!todos) {
+                NSString *genero = ZPGeneroPeloCoreAudio(caminho);
+                todos = genero.length ? @[genero] : @[];
+            }
+            generos[caminho] = todos;
+            [novos addObject:@[caminho, todos.firstObject ?: @"", [todos componentsJoinedByString:@"\n"], @(data)]];
         }
     }
     sqlite3_finalize(s);
     if (novos.count) {
         sqlite3_exec(db, "BEGIN", NULL, NULL, NULL);
-        if (sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO generos VALUES (?, ?, ?)", -1, &s, NULL) == SQLITE_OK) {
+        if (sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO generos (caminho, genero, todos, data) VALUES (?, ?, ?, ?)", -1, &s, NULL) == SQLITE_OK) {
             for (NSArray *g in novos) {
                 sqlite3_bind_text(s, 1, [g[0] UTF8String], -1, SQLITE_TRANSIENT);
                 sqlite3_bind_text(s, 2, [g[1] UTF8String], -1, SQLITE_TRANSIENT);
-                sqlite3_bind_double(s, 3, [g[2] doubleValue]);
+                sqlite3_bind_text(s, 3, [g[2] UTF8String], -1, SQLITE_TRANSIENT);
+                sqlite3_bind_double(s, 4, [g[3] doubleValue]);
                 sqlite3_step(s);
                 sqlite3_reset(s);
             }
@@ -1003,14 +1074,23 @@ static int ZPModoEstacao(NSString *base, NSString *semente, NSUInteger quantas, 
     NSDictionary<NSString *, NSSet<NSString *> *> *regrasDasOrigens = nil, *regrasDosArtistas = nil;
     if (ZPLerRegrasDeOrigem(&regrasDasOrigens, &regrasDosArtistas)) {
         sqlite3 *dbg = ZPAbrirBase(base);
-        NSDictionary<NSString *, NSString *> *generos = dbg ? ZPGenerosDosFicheiros(dbg) : @{};
+        NSDictionary<NSString *, NSArray<NSString *> *> *generos = dbg ? ZPGenerosDosFicheiros(dbg) : @{};
         if (dbg) sqlite3_close(dbg);
         NSSet<NSString *> *conhecidas = [NSSet setWithArray:regrasDasOrigens.allKeys];
         // A origem de cada artista, pelos ficheiros dele: a mais frequente das que têm regra.
         NSMutableDictionary<NSString *, NSCountedSet *> *porArtistaContadas = [NSMutableDictionary dictionary];
         origemDe = [NSMutableArray arrayWithCapacity:n];
         for (NSArray<NSString *> *f in faixas) {
-            NSString *g = [f[0] hasPrefix:@"musica:"] ? @"" : (generos[f[4]] ?: @"").precomposedStringWithCanonicalMapping;
+            // A origem de um ficheiro: a primeira GENRE com regra, senão a primeira.
+            NSString *g = @"";
+            if (![f[0] hasPrefix:@"musica:"]) {
+                NSArray<NSString *> *todos = generos[f[4]] ?: @[];
+                g = (todos.firstObject ?: @"").precomposedStringWithCanonicalMapping;
+                for (NSString *x in todos) {
+                    NSString *y = x.precomposedStringWithCanonicalMapping;
+                    if ([conhecidas containsObject:y]) { g = y; break; }
+                }
+            }
             [origemDe addObject:g];
             if (![conhecidas containsObject:g]) continue;
             NSString *k = ZPChaveDoArtista(f[1], @"");

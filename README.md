@@ -482,7 +482,7 @@ Na janela, à esquerda estão as sementes com regra (origens ou artistas, confor
 
 Uma semente cuja etiqueta (ou artista) não tenha regra dá uma estação sem limite, como a de qualquer disco de rock. Numa estação limitada, uma faixa do Música entra com a origem que o mesmo artista tem nos ficheiros. Se o artista não tiver ficheiros, a origem vem do género que o Música lhe dá, traduzido no separador **Géneros do Música** («MPB» dá «Brasileira», «Fado» dá «Fado»), ou é escolhida à mão no separador **Artistas do Música**, que manda sobre tudo; «Nenhuma» deixa o artista fora de qualquer estação restrita. As tabelas destes dois separadores também se ordenam carregando no cabeçalho, por nome, género, faixas ou origem, e cada uma lembra a sua ordem. O género de cada faixa do Música guarda-se no mapa do catálogo a cada sincronização. Os portugueses de jazz e de electrónica guardam a etiqueta do estilo, e por isso não ficam presos à origem. Uma origem com poucas faixas dá uma estação mais curta: uma de música brasileira tem hoje uma dúzia.
 
-As etiquetas lêem-se dos ficheiros e guardam-se na base (tabela `generos`) com a data de cada ficheiro: mudar uma etiqueta vale na estação seguinte.
+As etiquetas lêem-se dos ficheiros e guardam-se na base (tabela `generos`) com a data de cada ficheiro: mudar uma etiqueta vale na estação seguinte. Um ficheiro com várias etiquetas GENRE («Shoegaze», «Rock») tem como origem a primeira que tenha regra; a janela mostra só a primeira de cada ficheiro.
 
 ### A seguir
 
