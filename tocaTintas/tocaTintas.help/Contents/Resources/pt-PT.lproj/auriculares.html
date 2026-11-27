@@ -24,6 +24,7 @@
 <p class="rotulo"><strong>Forte</strong></p>
 <p>650 Hz / 9,5 dB, o perfil de Jan Meier.</p>
 <p>A mudança tem efeito imediato. O som cala-se por um instante enquanto o filtro reinicia.</p>
+<p>Quem trata o som é o <a href="https://github.com/HEnquist/camilladsp">CamillaDSP</a> (<code>/usr/local/bin/camilladsp</code>), que o <strong>bs2b_bridge</strong> configura e lança, com o crossfeed e a seguir a equalização. Do bs2b vêm o modelo dos filtros (um passa-baixo de 1.ª ordem no ramo cruzado e uma prateleira de graves no directo, com a mesma margem contra a saturação) e os três perfis. A biblioteca libbs2b já não é usada: o nome da ponte vem da primeira versão, que a usava.</p>
 <a name="auriculares-equalizacao"></a><h3 id="auriculares-equalizacao">Equalização</h3>
 <p>O crossfeed imita a cabeça, e a equalização corrige os auriculares. No separador <strong>auriculares</strong> escolhem-se a marca e o modelo entre 523 correcções do <a href="https://github.com/jaakkopasanen/AutoEq">projecto AutoEQ</a>, de 106 marcas, para o alvo Harman over-ear. Todas foram medidas por <a href="https://github.com/jaakkopasanen/AutoEq/tree/master/results/oratory1990">oratory1990</a>, excepto a do Sony MDR-V600, que vem da Innerfidelity. A do Sony MDR-7506 vem embutida.</p>
 <p>Para acrescentar outra, põe-se o ficheiro <code>ParametricEQ.txt</code> em <code>~/Library/Application Support/tocaTintas/eq</code>, na raiz ou numa subpasta com o nome da marca. A linha <strong>Preamp</strong> é lida e respeitada, e é ela que impede o reforço de graves de saturar a saída.</p>

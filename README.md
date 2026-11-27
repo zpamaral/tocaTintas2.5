@@ -81,7 +81,7 @@ Cada faixa toca mostrando a sua **capa**. Esta poderá ser a que vem embutida no
 
 Além disso, faz uma série de ajustes de som:
 
-- crossfeed [bs2b](https://bs2b.sourceforge.net/) e equalização [AutoEQ](https://github.com/jaakkopasanen/AutoEq) para os auriculares;
+- crossfeed com os perfis do [bs2b](https://bs2b.sourceforge.net/) e equalização [AutoEQ](https://github.com/jaakkopasanen/AutoEq) para os auriculares, pelo [CamillaDSP](https://github.com/HEnquist/camilladsp);
 - áudio espacial nos AirPods, com o tocaTintas integrado no «A tocar» do sistema e comandado pelas hastes dos AirPods e pelas teclas multimédia do teclado;
 - transmissão de áudio para receptores AirPlay e AirPlay 2, como o HomePod e a Apple TV;
 - leitura de CDs, com metadados ad hoc vindos do [MusicBrainz](https://musicbrainz.org/) e do [gnudb](https://gnudb.org/);
@@ -580,6 +580,8 @@ O [crossfeed](https://en.wikipedia.org/wiki/Crossfeed) mistura em cada ouvido um
 
 A mudança tem efeito imediato. O som cala-se por um instante enquanto o filtro reinicia.
 
+Quem trata o som é o [CamillaDSP](https://github.com/HEnquist/camilladsp) (`/usr/local/bin/camilladsp`), que o **bs2b_bridge** configura e lança, com o crossfeed e a seguir a equalização. Do bs2b vêm o modelo dos filtros (um passa-baixo de 1.ª ordem no ramo cruzado e uma prateleira de graves no directo, com a mesma margem contra a saturação) e os três perfis. A biblioteca libbs2b já não é usada: o nome da ponte vem da primeira versão, que a usava.
+
 ### Equalização
 
 O crossfeed imita a cabeça, e a equalização corrige os auriculares. No separador **auriculares** escolhem-se a marca e o modelo entre 523 correcções do [projecto AutoEQ](https://github.com/jaakkopasanen/AutoEq), de 106 marcas, para o alvo Harman over-ear. Todas foram medidas por [oratory1990](https://github.com/jaakkopasanen/AutoEq/tree/master/results/oratory1990), excepto a do Sony MDR-V600, que vem da Innerfidelity. A do Sony MDR-7506 vem embutida.
@@ -988,6 +990,7 @@ O **bs2b_bridge**, o **raop_play**, o **cava** e o **ListAudioDevices**, o **vec
 
 - macOS 27 ou posterior.
 - O BlackHole como saída do sistema, para o tratamento dos auriculares, o AirPlay, o histograma e a gravação. Com os AirPods, a saída são eles, e o BlackHole continua instalado para o histograma.
+- O CamillaDSP em `/usr/local/bin`, para o tratamento dos auriculares.
 - Acesso à rede local, para descobrir os receptores AirPlay.
 - Autorização para controlar o Música, para acertar a frequência do BlackHole ao gravar, mostrar o Música na janela e contar as suas audições.
 - O `fonoteca.py` e o Python 3.14 em `/usr/local/bin`, para o registo automático na fonoteca e para as audições do Música.
@@ -996,12 +999,13 @@ O **bs2b_bridge**, o **raop_play**, o **cava** e o **ListAudioDevices**, o **vec
 
 ## Ver também
 
-[**riporinador**(1)](../riporinador/riporinador.html), [**cava**(1)](https://github.com/karlstav/cava), [**bs2b**(3)](https://bs2b.sourceforge.net/), [**abcde**(1)](https://manpages.debian.org/abcde) e [**metaflac**(1)](https://xiph.org/flac/documentation_tools_metaflac.html)
+[**riporinador**(1)](../riporinador/riporinador.html), [**cava**(1)](https://github.com/karlstav/cava), [**camilladsp**(1)](https://github.com/HEnquist/camilladsp), [**bs2b**(3)](https://bs2b.sourceforge.net/), [**abcde**(1)](https://manpages.debian.org/abcde) e [**metaflac**(1)](https://xiph.org/flac/documentation_tools_metaflac.html)
 
 ### Projectos de que o tocaTintas depende
 
 - [BlackHole](https://existential.audio/blackhole/), o aparelho de áudio virtual por onde passa tudo.
-- [bs2b](https://bs2b.sourceforge.net/), a biblioteca do crossfeed.
+- [CamillaDSP](https://github.com/HEnquist/camilladsp), de Henrik Enquist, o crossfeed e a equalização dos auriculares.
+- [bs2b](https://bs2b.sourceforge.net/), o modelo e os perfis do crossfeed.
 - [AutoEQ](https://github.com/jaakkopasanen/AutoEq), as correcções dos auriculares.
 - [cava](https://github.com/karlstav/cava), a análise de frequências do histograma.
 - [rust-raop-player](https://github.com/LinusU/rust-raop-player), de Linus Unnebäck, versão do [RAOP-Player](https://github.com/philippe44/RAOP-Player) de philippe44, que é a base do raop_play, aqui modificado para o AirPlay 2 e o emparelhamento.

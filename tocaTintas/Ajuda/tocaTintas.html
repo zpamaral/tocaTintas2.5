@@ -96,7 +96,7 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <p>Cada faixa toca mostrando a sua <strong>capa</strong>. Esta poderá ser a que vem embutida no ficheiro ou, se essa não existir, a que estiver na pasta de imagem de capa do álbum. A capa aparecerá na janela do tocador, na notificação do sistema, na página WWW «a tocar» e no caso dos WavPack nos ícones gerados pelo Finder. Adicionalmente, um CD receberá também uma capa de álbum. Esta poderá ser a que já exista na fonoteca ou uma obtida no Cover Art Archive (ver <a href="#capas"><strong>CAPAS</strong></a>).</p>
 <p>Além disso, faz uma série de ajustes de som:</p>
 <ul>
-<li>crossfeed <a href="https://bs2b.sourceforge.net/">bs2b</a> e equalização <a href="https://github.com/jaakkopasanen/AutoEq">AutoEQ</a> para os auriculares;</li>
+<li>crossfeed com os perfis do <a href="https://bs2b.sourceforge.net/">bs2b</a> e equalização <a href="https://github.com/jaakkopasanen/AutoEq">AutoEQ</a> para os auriculares, pelo <a href="https://github.com/HEnquist/camilladsp">CamillaDSP</a>;</li>
 <li>áudio espacial nos AirPods, com o tocaTintas integrado no «A tocar» do sistema e comandado pelas hastes dos AirPods e pelas teclas multimédia do teclado;</li>
 <li>transmissão de áudio para receptores AirPlay e AirPlay 2, como o HomePod e a Apple TV;</li>
 <li>leitura de CDs, com metadados ad hoc vindos do <a href="https://musicbrainz.org/">MusicBrainz</a> e do <a href="https://gnudb.org/">gnudb</a>;</li>
@@ -422,6 +422,7 @@ svg.esquema{display:block;width:100%;height:auto;max-width:720px}
 <p class="rotulo"><strong>Forte</strong></p>
 <p>650 Hz / 9,5 dB, o perfil de Jan Meier.</p>
 <p>A mudança tem efeito imediato. O som cala-se por um instante enquanto o filtro reinicia.</p>
+<p>Quem trata o som é o <a href="https://github.com/HEnquist/camilladsp">CamillaDSP</a> (<code>/usr/local/bin/camilladsp</code>), que o <strong>bs2b_bridge</strong> configura e lança, com o crossfeed e a seguir a equalização. Do bs2b vêm o modelo dos filtros (um passa-baixo de 1.ª ordem no ramo cruzado e uma prateleira de graves no directo, com a mesma margem contra a saturação) e os três perfis. A biblioteca libbs2b já não é usada: o nome da ponte vem da primeira versão, que a usava.</p>
 <h3>Equalização</h3>
 <p>O crossfeed imita a cabeça, e a equalização corrige os auriculares. No separador <strong>auriculares</strong> escolhem-se a marca e o modelo entre 523 correcções do <a href="https://github.com/jaakkopasanen/AutoEq">projecto AutoEQ</a>, de 106 marcas, para o alvo Harman over-ear. Todas foram medidas por <a href="https://github.com/jaakkopasanen/AutoEq/tree/master/results/oratory1990">oratory1990</a>, excepto a do Sony MDR-V600, que vem da Innerfidelity. A do Sony MDR-7506 vem embutida.</p>
 <p>Para acrescentar outra, põe-se o ficheiro <code>ParametricEQ.txt</code> em <code>~/Library/Application Support/tocaTintas/eq</code>, na raiz ou numa subpasta com o nome da marca. A linha <strong>Preamp</strong> é lida e respeitada, e é ela que impede o reforço de graves de saturar a saída.</p>
@@ -670,17 +671,19 @@ end repeat</code></pre>
 <ul>
 <li>macOS 27 ou posterior.</li>
 <li>O BlackHole como saída do sistema, para o tratamento dos auriculares, o AirPlay, o histograma e a gravação. Com os AirPods, a saída são eles, e o BlackHole continua instalado para o histograma.</li>
+<li>O CamillaDSP em <code>/usr/local/bin</code>, para o tratamento dos auriculares.</li>
 <li>Acesso à rede local, para descobrir os receptores AirPlay.</li>
 <li>Autorização para controlar o Música, para acertar a frequência do BlackHole ao gravar, mostrar o Música na janela e contar as suas audições.</li>
 <li>O <code>fonoteca.py</code> e o Python 3.14 em <code>/usr/local/bin</code>, para o registo automático na fonoteca e para as audições do Música.</li>
 </ul>
 
 <h2 id="ver-tambem">Ver também</h2>
-<p><a href="../riporinador/riporinador.html"><strong>riporinador</strong>(1)</a>, <a href="https://github.com/karlstav/cava"><strong>cava</strong>(1)</a>, <a href="https://bs2b.sourceforge.net/"><strong>bs2b</strong>(3)</a>, <a href="https://manpages.debian.org/abcde"><strong>abcde</strong>(1)</a> e <a href="https://xiph.org/flac/documentation_tools_metaflac.html"><strong>metaflac</strong>(1)</a></p>
+<p><a href="../riporinador/riporinador.html"><strong>riporinador</strong>(1)</a>, <a href="https://github.com/karlstav/cava"><strong>cava</strong>(1)</a>, <a href="https://github.com/HEnquist/camilladsp"><strong>camilladsp</strong>(1)</a>, <a href="https://bs2b.sourceforge.net/"><strong>bs2b</strong>(3)</a>, <a href="https://manpages.debian.org/abcde"><strong>abcde</strong>(1)</a> e <a href="https://xiph.org/flac/documentation_tools_metaflac.html"><strong>metaflac</strong>(1)</a></p>
 <h3>Projectos de que o tocaTintas depende</h3>
 <ul>
 <li><a href="https://existential.audio/blackhole/">BlackHole</a>, o aparelho de áudio virtual por onde passa tudo.</li>
-<li><a href="https://bs2b.sourceforge.net/">bs2b</a>, a biblioteca do crossfeed.</li>
+<li><a href="https://github.com/HEnquist/camilladsp">CamillaDSP</a>, de Henrik Enquist, o crossfeed e a equalização dos auriculares.</li>
+<li><a href="https://bs2b.sourceforge.net/">bs2b</a>, o modelo e os perfis do crossfeed.</li>
 <li><a href="https://github.com/jaakkopasanen/AutoEq">AutoEQ</a>, as correcções dos auriculares.</li>
 <li><a href="https://github.com/karlstav/cava">cava</a>, a análise de frequências do histograma.</li>
 <li><a href="https://github.com/LinusU/rust-raop-player">rust-raop-player</a>, de Linus Unnebäck, versão do <a href="https://github.com/philippe44/RAOP-Player">RAOP-Player</a> de philippe44, que é a base do raop_play, aqui modificado para o AirPlay 2 e o emparelhamento.</li>
