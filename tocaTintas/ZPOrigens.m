@@ -110,6 +110,12 @@ static NSString * const kZPOrdemDasEtiquetas = @"ZPOrigensOrdemDasEtiquetas";
     return t;
 }
 
+// Depois de as colunas estarem todas: é aí que a tabela repõe o que guardou.
+- (void)gravarColunas:(NSTableView *)t como:(NSString *)nome {
+    t.autosaveName = nome;
+    t.autosaveTableColumns = YES;
+}
+
 - (NSScrollView *)rolar:(NSTableView *)t {
     NSScrollView *s = [[NSScrollView alloc] initWithFrame:NSZeroRect];
     s.documentView = t;
@@ -130,6 +136,8 @@ static NSString * const kZPOrdemDasEtiquetas = @"ZPOrigensOrdemDasEtiquetas";
 
     self.sementes = [self tabelaComColunas:@[@[@"semente", NSLocalizedString(@"origins_col_seed", @"Semente"), @180]]];
     self.sementes.allowsEmptySelection = NO;
+    // A ordem, a largura e as escondidas das colunas ficam nas preferências, como nas Contagens.
+    [self gravarColunas:self.sementes como:@"ZPOrigensColunasDasSementes"];
     NSScrollView *rolSementes = [self rolar:self.sementes];
     self.rolSementes = rolSementes;
 
@@ -158,6 +166,7 @@ static NSString * const kZPOrdemDasEtiquetas = @"ZPOrigensOrdemDasEtiquetas";
     } else {
         self.etiquetas.sortDescriptors = @[[NSSortDescriptor sortDescriptorWithKey:@"faixas" ascending:NO]];
     }
+    [self gravarColunas:self.etiquetas como:@"ZPOrigensColunasDasEtiquetas"];
     NSScrollView *rolEtiquetas = [self rolar:self.etiquetas];
     self.rolEtiquetas = rolEtiquetas;
     self.lista = [self tabelaComColunas:@[@[@"nome", NSLocalizedString(@"origins_col_name", @"Artista"), @200],
@@ -169,6 +178,7 @@ static NSString * const kZPOrdemDasEtiquetas = @"ZPOrigensOrdemDasEtiquetas";
         [self.lista tableColumnWithIdentifier:c[0]].sortDescriptorPrototype =
             [NSSortDescriptor sortDescriptorWithKey:c[0] ascending:[c[1] boolValue]];
     }
+    [self gravarColunas:self.lista como:@"ZPOrigensColunasDaLista"];
     self.rolLista = [self rolar:self.lista];
     self.rolLista.hidden = YES;
 

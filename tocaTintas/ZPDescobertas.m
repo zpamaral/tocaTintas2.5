@@ -66,6 +66,9 @@ static NSPasteboardType const ZPTipoDaLinha = @"JPSdA.tocaTintas.linha-da-fila";
         else coluna.minWidth = 60;
         [self.tabela addTableColumn:coluna];
     }
+    // A ordem, a largura e as escondidas das colunas ficam nas preferências, como nas Contagens.
+    self.tabela.autosaveName = @"ZPASeguirColunas";
+    self.tabela.autosaveTableColumns = YES;
     NSScrollView *rolo = [[NSScrollView alloc] initWithFrame:NSZeroRect];
     rolo.documentView = self.tabela;
     rolo.hasVerticalScroller = YES;

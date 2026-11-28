@@ -263,6 +263,12 @@ static NSString *ZPLMDuracao(id segundos) {
         @[@"titulo", titulo, @220], @[@"duracao", duracao, @96],
         @[@"formato", NSLocalizedString(@"music_links_col_format", @"Onde"), @56],
         @[@"criterio", NSLocalizedString(@"music_links_col_criterion", @"Parecer"), @190] ]];
+    // A ordem, a largura e as escondidas das colunas ficam nas preferências, como nas Contagens.
+    for (NSArray *t in @[@[self.tabelaDosCasos, @"LigacoesDoMusicaColunasDosCasos"],
+                         @[self.tabelaDasCandidatas, @"LigacoesDoMusicaColunasDasCandidatas"]]) {
+        [t[0] setAutosaveName:t[1]];
+        [t[0] setAutosaveTableColumns:YES];
+    }
     self.tabelaDasCandidatas.doubleAction = @selector(ligar:);
     self.tabelaDasCandidatas.target = self;
 
