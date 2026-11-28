@@ -253,8 +253,9 @@
 "up_next_artist" = "Artist";
 "up_next_song" = "Title";
 "up_next_album" = "Album";
-"up_next_no_station" = "No station is playing.";
-"up_next_hint" = "Uncheck the ones you do not want to hear; drag to change the order.";
+"up_next_nothing" = "No station or playlist is playing.";
+"up_next_hint" = "Uncheck the ones you do not want to hear; drag or click a column header to change the order.";
+"up_next_list_ended" = "No more tracks in this round of the playlist.";
 "up_next_ended" = "The station has no more tracks.";
 "origins_menu" = "Stations…";
 "origins_title" = "Stations";

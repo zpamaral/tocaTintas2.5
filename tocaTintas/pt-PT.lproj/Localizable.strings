@@ -253,8 +253,9 @@
 "up_next_artist" = "Artista";
 "up_next_song" = "Título";
 "up_next_album" = "Álbum";
-"up_next_no_station" = "Não há estação a tocar.";
-"up_next_hint" = "Desmarque as que não quer ouvir; arraste para mudar a ordem.";
+"up_next_nothing" = "Não há estação nem lista a tocar.";
+"up_next_hint" = "Desmarque as que não quer ouvir; arraste ou carregue no cabeçalho para mudar a ordem.";
+"up_next_list_ended" = "Não há mais faixas neste ciclo da lista.";
 "up_next_ended" = "A estação não tem mais faixas.";
 "origins_menu" = "Estações…";
 "origins_title" = "Estações";

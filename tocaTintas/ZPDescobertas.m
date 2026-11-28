@@ -6,20 +6,22 @@
 #import "ZPDescobertas.h"
 
 // Os campos de cada linha, como a fonte os dá.
-typedef NS_ENUM(NSUInteger, ZPCampo) { ZPCampoChave, ZPCampoArtista, ZPCampoTitulo, ZPCampoAlbum, ZPCampoMarcada, ZPCampoQuantos };
+typedef NS_ENUM(NSUInteger, ZPCampo) { ZPCampoChave, ZPCampoArtista, ZPCampoTitulo, ZPCampoAlbum, ZPCampoMarcada, ZPCampoLugar, ZPCampoQuantos };
 
 static NSPasteboardType const ZPTipoDaLinha = @"JPSdA.tocaTintas.linha-da-fila";
 
 @interface ZPDescobertas () <NSTableViewDataSource, NSTableViewDelegate>
-@property (nonatomic, weak) id<ZPFonteDaEstacao> fonte;
+@property (nonatomic, weak) id<ZPFonteDaFila> fonte;
 @property (nonatomic, strong) NSMutableArray<NSMutableArray<NSString *> *> *linhas;
 @property (nonatomic, strong) NSTableView *tabela;
 @property (nonatomic, strong) NSTextField *legenda;
+@property (nonatomic) NSUInteger ciclo;          // o da fila que a tabela mostra
+@property (nonatomic) BOOL aLimparOrdenacao;     // a tirar a ordenação por código: não é um clique
 @end
 
 @implementation ZPDescobertas
 
-- (instancetype)initComFonte:(id<ZPFonteDaEstacao>)fonte {
+- (instancetype)initComFonte:(id<ZPFonteDaFila>)fonte {
     NSWindow *janela = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 620, 440)
                                                    styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                                                              NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
@@ -64,11 +66,16 @@ static NSPasteboardType const ZPTipoDaLinha = @"JPSdA.tocaTintas.linha-da-fila";
         coluna.width = [c[2] doubleValue];
         if ([c[0] unsignedIntegerValue] == ZPCampoMarcada) { coluna.minWidth = coluna.maxWidth = 24; }
         else coluna.minWidth = 60;
+        // Carregar no cabeçalho ordena a fila, e é por essa ordem que toca.
+        NSString *chave = @{@(ZPCampoArtista): @"artista", @(ZPCampoTitulo): @"titulo", @(ZPCampoAlbum): @"album"}[c[0]];
+        if (chave) coluna.sortDescriptorPrototype = [NSSortDescriptor sortDescriptorWithKey:chave ascending:YES];
         [self.tabela addTableColumn:coluna];
     }
     // A ordem, a largura e as escondidas das colunas ficam nas preferências, como nas Contagens.
     self.tabela.autosaveName = @"ZPASeguirColunas";
     self.tabela.autosaveTableColumns = YES;
+    // A ordenação não passa de uma fila para outra (nem de um arranque para o seguinte).
+    [self limparOrdenacao];
     NSScrollView *rolo = [[NSScrollView alloc] initWithFrame:NSZeroRect];
     rolo.documentView = self.tabela;
     rolo.hasVerticalScroller = YES;
@@ -100,14 +107,68 @@ static NSPasteboardType const ZPTipoDaLinha = @"JPSdA.tocaTintas.linha-da-fila";
 }
 
 - (void)actualizar {
-    NSArray<NSArray<NSString *> *> *fila = [self.fonte proximasDaEstacao];
+    NSArray<NSArray<NSString *> *> *fila = [self.fonte proximasDaFila];
     NSMutableArray *linhas = [NSMutableArray array];
     for (NSArray<NSString *> *f in fila) if (f.count >= ZPCampoQuantos) [linhas addObject:[f mutableCopy]];
+    // Uma fila nova (outra lista, outra estação, um ciclo novo) chega pela
+    // ordem dela. Na mesma fila, a ordenação escolhida mantém-se, e o que a
+    // fila ganhou entretanto (a estação a prolongar-se) entra no sítio dele.
+    NSUInteger ciclo = [self.fonte cicloDaFila];
+    BOOL reordenada = NO;
+    if (ciclo != self.ciclo) {
+        self.ciclo = ciclo;
+        [self limparOrdenacao];
+    } else if (self.tabela.sortDescriptors.count) {
+        NSArray *ordenadas = [self ordenadas:linhas];
+        reordenada = ![ordenadas isEqualToArray:linhas];
+        linhas = [ordenadas mutableCopy];
+    }
     self.linhas = linhas;
     [self.tabela reloadData];
-    self.legenda.stringValue = !fila ? NSLocalizedString(@"up_next_no_station", @"Não há estação a tocar.")
-                             : linhas.count ? NSLocalizedString(@"up_next_hint", @"Desmarque as que não quer ouvir; arraste para mudar a ordem.")
-                                            : NSLocalizedString(@"up_next_ended", @"A estação não tem mais faixas.");
+    BOOL estacao = [self.fonte filaEhUmaEstacao];
+    self.legenda.stringValue = !fila ? NSLocalizedString(@"up_next_nothing", @"Não há estação nem lista a tocar.")
+                             : linhas.count ? NSLocalizedString(@"up_next_hint", @"Desmarque as que não quer ouvir; arraste ou carregue no cabeçalho para mudar a ordem.")
+                             : estacao ? NSLocalizedString(@"up_next_ended", @"A estação não tem mais faixas.")
+                                       : NSLocalizedString(@"up_next_list_ended", @"Não há mais faixas neste ciclo da lista.");
+    if (reordenada) [self entregar];
+}
+
+#pragma mark Ordenar
+
+- (void)limparOrdenacao {
+    self.aLimparOrdenacao = YES;
+    self.tabela.sortDescriptors = @[];
+    self.aLimparOrdenacao = NO;
+}
+
+// Pela coluna escolhida, com desempates que façam sentido para ouvir: o artista
+// arruma os álbuns dele e as faixas de cada um pela ordem do disco; o álbum
+// arruma as faixas pela ordem do disco; o título desempata pelo artista. A
+// ordenação é estável: o que empata de todo fica como estava.
+- (NSArray<NSMutableArray<NSString *> *> *)ordenadas:(NSArray<NSMutableArray<NSString *> *> *)linhas {
+    NSSortDescriptor *d = self.tabela.sortDescriptors.firstObject;
+    if (!d) return linhas;
+    NSArray<NSNumber *> *campos = [d.key isEqualToString:@"artista"] ? @[@(ZPCampoArtista), @(ZPCampoAlbum), @(ZPCampoLugar)]
+                                : [d.key isEqualToString:@"album"]   ? @[@(ZPCampoAlbum), @(ZPCampoLugar)]
+                                                                     : @[@(ZPCampoTitulo), @(ZPCampoArtista)];
+    BOOL subir = d.ascending;
+    return [linhas sortedArrayWithOptions:NSSortStable usingComparator:^NSComparisonResult(NSArray<NSString *> *a, NSArray<NSString *> *b) {
+        for (NSNumber *c in campos) {
+            NSUInteger i = c.unsignedIntegerValue;
+            NSComparisonResult r = [a[i] localizedStandardCompare:b[i]];
+            if (r != NSOrderedSame) return subir ? r : -r;
+        }
+        return NSOrderedSame;
+    }];
+}
+
+- (void)tableView:(NSTableView *)tableView sortDescriptorsDidChange:(NSArray<NSSortDescriptor *> *)antigos {
+    if (self.aLimparOrdenacao || tableView.sortDescriptors.count == 0) return;
+    NSArray *ordenadas = [self ordenadas:self.linhas];
+    if ([ordenadas isEqualToArray:self.linhas]) return;
+    self.linhas = [ordenadas mutableCopy];
+    [tableView reloadData];
+    [self entregar];
 }
 
 // A fila, como está na tabela, vai para a fonte.
@@ -120,7 +181,7 @@ static NSPasteboardType const ZPTipoDaLinha = @"JPSdA.tocaTintas.linha-da-fila";
         [chaves addObject:l[ZPCampoChave]];
         if (![l[ZPCampoMarcada] isEqualToString:@"1"]) [desmarcadas addObject:l[ZPCampoChave]];
     }
-    [self.fonte filaDaEstacaoPassaASer:chaves desmarcadas:desmarcadas subiu:subiu desceu:desceu];
+    [self.fonte filaPassaASer:chaves desmarcadas:desmarcadas subiu:subiu desceu:desceu];
 }
 
 #pragma mark Tabela
@@ -200,6 +261,8 @@ static NSPasteboardType const ZPTipoDaLinha = @"JPSdA.tocaTintas.linha-da-fila";
     [self.linhas removeObjectAtIndex:(NSUInteger)origem];
     NSInteger onde = destino > origem ? destino - 1 : destino;
     [self.linhas insertObject:movida atIndex:(NSUInteger)onde];
+    // Arrastar desfaz a ordenação: a ordem passa a ser a que se arrumou à mão.
+    [self limparOrdenacao];
     [tableView reloadData];
     [tableView selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)onde] byExtendingSelection:NO];
     NSString *chave = movida[ZPCampoChave];

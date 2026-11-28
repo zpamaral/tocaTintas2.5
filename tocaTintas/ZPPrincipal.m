@@ -272,7 +272,7 @@ static WavpackStreamReader memoryReader = {
     get_length,
     can_seek
 };
-@interface ZPPrincipal () <AVAudioPlayerDelegate, UNUserNotificationCenterDelegate, NSMenuItemValidation, NSMenuDelegate, ZPFonteDaEstacao>
+@interface ZPPrincipal () <AVAudioPlayerDelegate, UNUserNotificationCenterDelegate, NSMenuItemValidation, NSMenuDelegate, ZPFonteDaFila>
 
 @property (nonatomic, strong) NSTextField *playCountLabel;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSNumber *> *trackPlayCounts;   // chave da música → reproduções
@@ -405,6 +405,14 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, assign) BOOL estacaoEsgotada;      // o vectorizar já não tem mais nada para a prolongar
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSArray<NSString *> *> *estacaoInfo;   // chave → artista, título, álbum
 @property (nonatomic, assign) BOOL estacaoAPreparar;    // à espera da base, do catálogo ou do vectorizar
+// Uma lista M3U ou um CD a tocar (ver «A seguir»): a lista como se abriu, de
+// onde cada ciclo recomeça, e os ajustes da janela, que valem até ao fim do ciclo.
+@property (nonatomic, copy, nullable) NSArray<NSURL *> *listaDoCiclo;
+@property (nonatomic, strong, nullable) NSArray<NSURL *> *listaFila;              // o que falta tocar no ciclo, com as desmarcadas
+@property (nonatomic, strong, nullable) NSMutableSet<NSString *> *listaDesmarcadas;
+@property (nonatomic, strong, nullable) NSMutableArray<NSURL *> *listaProximoBaralho;   // com o aleatório: o ciclo seguinte, já tirado
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSArray<NSString *> *> *listaInfo;   // chave → artista, título, álbum, lugar
+@property (nonatomic) NSUInteger cicloDaFilaActual;     // muda a cada fila nova ou ciclo novo (a janela larga a ordenação)
 @property (nonatomic, strong) NSTask *assinaturasTask;
 @property (nonatomic, strong) NSURL *sementeDoMusicaACabeca;   // a linha «musica:» da semente, quando a estação nasce do excerto dela
 @property (nonatomic, copy) NSArray<NSString *> *sementeDoExcerto;   // artista, álbum e título da faixa de que se tirou o excerto (para o vectorizar a reconhecer)
@@ -4047,6 +4055,7 @@ static BOOL ZPHaCava(void) { return ZPPgrepDoCava(@"/usr/bin/pgrep", @[]) == 0; 
 
     // Exit playlist mode after preserving the current track
     self.isPlaylistModeActive = NO;
+    [self largarAListaDoCiclo];
 
     // Reload the audio files from the new directory
     [self loadAudioFiles];  // This will also refresh the combo box
@@ -4882,10 +4891,12 @@ static NSString *ZPLinhaDoURL(NSURL *url) {
     [[NSDocumentController sharedDocumentController] noteNewRecentDocumentURL:playlistURL];
 
     [self adoptarLista:trackURLs];
+    [self comecarAListaDoCiclo];
 }
 
 // Passa a tocar por esta lista: a de um ficheiro M3U ou a de uma estação.
 - (void)adoptarLista:(NSArray<NSURL *> *)trackURLs {
+    [self largarAListaDoCiclo];
     // Abrir uma lista não interrompe o que se está a ouvir: se a faixa em curso
     // também pertencer à lista, a reprodução continua nela. Com o tocador parado
     // não há faixa em curso nenhuma, e era esse o erro de antes — tomava-se o
@@ -5268,6 +5279,7 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
             forte.estacaoRejeitadas = [NSMutableOrderedSet orderedSetWithArray:lembrado[@"rejeitadas"] ?: @[]];
             forte.estacaoEsgotada = NO;
             forte.estacaoInfo = pormenores;
+            forte.cicloDaFilaActual++;   // uma fila nova: a janela «A seguir» larga a ordenação
             [forte actualizarMarcaDaEstacao];
             [forte assumirOMusicaComSemente:((manter || aCabeca) ? faixas.firstObject : nil)];
             [forte.descobertas refazerSeAVista];
@@ -5406,23 +5418,28 @@ static NSMutableDictionary<NSString *, NSArray<NSString *> *> *ZPLerInfoDaEstaca
 // as desmarcadas nos sítios onde estavam. As marcadas são as que a lista ainda
 // tem por tocar; as desmarcadas só existem aqui.
 - (NSArray<NSURL *> *)filaInteiraDaEstacao {
-    NSArray<NSURL *> *lista = self.audioFiles;
+    self.estacaoFila = [self filaInteiraDe:self.audioFiles guardada:self.estacaoFila desmarcadas:self.estacaoDesmarcadas];
+    return self.estacaoFila;
+}
+
+// O mesmo para qualquer lista que toque: o que ela tem por tocar depois da faixa
+// em curso, pela ordem da fila guardada, com as desmarcadas no sítio delas.
+- (NSArray<NSURL *> *)filaInteiraDe:(NSArray<NSURL *> *)lista guardada:(NSArray<NSURL *> *)guardada desmarcadas:(NSSet<NSString *> *)desmarcadas {
     NSMutableArray<NSURL *> *porTocar = [NSMutableArray array];
     for (NSInteger i = MAX(self.currentTrackIndex + 1, 0); i < (NSInteger)lista.count; ++i) [porTocar addObject:lista[i]];
     NSMutableArray<NSURL *> *fila = [NSMutableArray array];
     NSMutableSet<NSURL *> *postas = [NSMutableSet set];
     NSSet<NSURL *> *aindaPorTocar = [NSSet setWithArray:porTocar];
-    for (NSURL *u in self.estacaoFila) {
-        BOOL desmarcada = [self.estacaoDesmarcadas containsObject:ZPChaveDaLinha(u)];
+    for (NSURL *u in guardada) {
+        BOOL desmarcada = [desmarcadas containsObject:ZPChaveDaLinha(u)];
         if ((desmarcada || [aindaPorTocar containsObject:u]) && ![postas containsObject:u]) { [fila addObject:u]; [postas addObject:u]; }
     }
     for (NSURL *u in porTocar) if (![postas containsObject:u]) { [fila addObject:u]; [postas addObject:u]; }
-    self.estacaoFila = fila;
     return fila;
 }
 
-// Para a janela «A seguir». Com o aleatório ligado a ordem é a do baralho, e a
-// fila não se mostra.
+// Para a janela «A seguir». Uma estação não tem aleatório: com ele ligado, a
+// fila dela não se mostra.
 - (NSArray<NSArray<NSString *> *> *)proximasDaEstacao {
     if (![self haEstacaoCorrente] || self.isShuffleModeActive) return nil;
     NSMutableArray<NSArray<NSString *> *> *proximas = [NSMutableArray array];
@@ -5436,7 +5453,8 @@ static NSMutableDictionary<NSString *, NSArray<NSString *> *> *ZPLerInfoDaEstaca
             p = @[@"", nome, @""];
         }
         [proximas addObject:@[chave, [self replaceSingleQuoteAndSmartQuotes:p[0]], [self replaceSingleQuoteAndSmartQuotes:p[1]],
-                              [self replaceSingleQuoteAndSmartQuotes:p[2]], [self.estacaoDesmarcadas containsObject:chave] ? @"0" : @"1"]];
+                              [self replaceSingleQuoteAndSmartQuotes:p[2]], [self.estacaoDesmarcadas containsObject:chave] ? @"0" : @"1",
+                              chave]];
     }
     return proximas;
 }
@@ -5490,6 +5508,205 @@ static NSMutableDictionary<NSString *, NSArray<NSString *> *> *ZPLerInfoDaEstaca
                                                 : [NSMutableArray array];
     for (NSURL *u in fila) if (![desmarcadas containsObject:ZPChaveDaLinha(u)]) [nova addObject:u];
     [self trocarAFilaDaEstacaoPor:nova];
+}
+
+#pragma mark A seguir: listas e CD
+
+// Uma lista M3U ou um CD a tocar (uma estação não conta: tem a sua fila).
+- (BOOL)haListaCorrente {
+    return self.isPlaylistModeActive && self.listaDoCiclo != nil && ![self haEstacaoCorrente];
+}
+
+// A lista que acabou de se abrir passa a ser a de cada ciclo.
+- (void)comecarAListaDoCiclo {
+    self.listaDoCiclo = self.audioFiles;
+    self.listaInfo = [NSMutableDictionary dictionary];
+    [self esquecerOsAjustesDaLista];
+    [self.descobertas refazerSeAVista];
+}
+
+- (void)largarAListaDoCiclo {
+    if (!self.listaDoCiclo) return;
+    self.listaDoCiclo = nil;
+    self.listaInfo = nil;
+    [self esquecerOsAjustesDaLista];
+}
+
+- (void)esquecerOsAjustesDaLista {
+    self.listaFila = nil;
+    self.listaDesmarcadas = [NSMutableSet set];
+    self.listaProximoBaralho = nil;
+    self.cicloDaFilaActual++;
+}
+
+// O baralho do ciclo seguinte, tirado uma vez (o adiantamento pergunta por ele
+// antes de o ciclo acabar, e tem de ser o mesmo que depois toca). Não começa
+// pela faixa com que o ciclo acaba, para ela não se ouvir duas vezes seguidas.
+- (NSMutableArray<NSURL *> *)baralhoDoProximoCiclo {
+    if (!self.listaProximoBaralho) {
+        NSMutableArray<NSURL *> *baralho = [self.listaDoCiclo mutableCopy] ?: [NSMutableArray array];
+        [self shuffleArray:baralho];
+        NSURL *ultima = self.shuffledTracks.lastObject;
+        if (baralho.count > 1 && [baralho.firstObject isEqual:ultima]) {
+            [baralho exchangeObjectAtIndex:0 withObjectAtIndex:1 + arc4random_uniform((uint32_t)baralho.count - 1)];
+        }
+        self.listaProximoBaralho = baralho;
+    }
+    return self.listaProximoBaralho;
+}
+
+// Acabou o ciclo: a lista volta a ser a que se abriu, sem desmarcadas nem
+// ordem mudada, e com o aleatório ligado é baralhada de novo. Quem chama põe
+// o índice.
+- (void)comecarNovoCicloDaLista {
+    BOOL refeita = ![self.audioFiles isEqualToArray:self.listaDoCiclo];
+    self.audioFiles = self.listaDoCiclo;
+    if (self.isShuffleModeActive) {
+        self.shuffledTracks = [self baralhoDoProximoCiclo];
+        self.shuffledToOriginalMap = [NSMutableDictionary dictionary];
+        for (NSURL *u in self.shuffledTracks) self.shuffledToOriginalMap[u] = u;
+    }
+    [self esquecerOsAjustesDaLista];
+    if (refeita) dispatch_async(dispatch_get_main_queue(), ^{ [self createComboBox]; });
+}
+
+// Artista, título, álbum e lugar no álbum de cada faixa de uma lista: da
+// fonoteca para os ficheiros, do mapa do catálogo para as linhas do Música, da
+// identificação do disco para o CD. Lê-se uma vez por lista, quando a janela
+// pede, só o que ainda não se sabe.
+- (void)lerInfoDaLista:(NSArray<NSURL *> *)faixas {
+    if (!self.listaInfo) self.listaInfo = [NSMutableDictionary dictionary];
+    NSMutableArray<NSURL *> *ficheiros = [NSMutableArray array], *doMusica = [NSMutableArray array];
+    for (NSURL *u in faixas) {
+        NSString *chave = ZPChaveDaLinha(u);
+        if (self.listaInfo[chave]) continue;
+        NSDictionary *cd = self.cdFaixas[u.path];
+        if (cd) {
+            self.listaInfo[chave] = @[cd[@"artista"] ?: @"", cd[@"titulo"] ?: @"", cd[@"album"] ?: @"",
+                                      [NSString stringWithFormat:@"%04ld", (long)[cd[@"numero"] integerValue]]];
+        } else if (ZPPidDaLinha(u)) [doMusica addObject:u];
+        else [ficheiros addObject:u];
+    }
+    NSString *pasta = [self loadSongsDirectoryPath];
+    sqlite3 *db = NULL;
+    if (ficheiros.count && sqlite3_open_v2([pasta stringByAppendingPathComponent:@".fonoteca.sqlite"].fileSystemRepresentation, &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
+        sqlite3_busy_timeout(db, 2000);
+        sqlite3_stmt *s = NULL;
+        if (sqlite3_prepare_v2(db, "SELECT m.artista, m.titulo, m.album, COALESCE(m.disco, 1), COALESCE(m.faixa, 0)"
+                                   " FROM ficheiros f JOIN musicas m ON m.id = f.musica WHERE f.caminho = ?", -1, &s, NULL) == SQLITE_OK) {
+            for (NSURL *u in ficheiros) {
+                NSString *chave = ZPChaveDaLinha(u);
+                sqlite3_bind_text(s, 1, chave.UTF8String, -1, SQLITE_TRANSIENT);
+                if (sqlite3_step(s) == SQLITE_ROW) {
+                    const char *a = (const char *)sqlite3_column_text(s, 0), *t = (const char *)sqlite3_column_text(s, 1), *b = (const char *)sqlite3_column_text(s, 2);
+                    self.listaInfo[chave] = @[a ? @(a) : @"", t ? @(t) : @"", b ? @(b) : @"",
+                                              [NSString stringWithFormat:@"%03d.%04d", sqlite3_column_int(s, 3), sqlite3_column_int(s, 4)]];
+                }
+                sqlite3_reset(s);
+                sqlite3_clear_bindings(s);
+            }
+        }
+        sqlite3_finalize(s);
+    }
+    sqlite3_close(db);
+    db = NULL;
+    if (doMusica.count && sqlite3_open_v2([pasta stringByAppendingPathComponent:@".mapa-do-catalogo.sqlite"].fileSystemRepresentation, &db, SQLITE_OPEN_READONLY, NULL) == SQLITE_OK) {
+        sqlite3_busy_timeout(db, 2000);
+        sqlite3_stmt *s = NULL;
+        if (sqlite3_prepare_v2(db, "SELECT artista, titulo, album FROM faixas WHERE pid = ?", -1, &s, NULL) == SQLITE_OK) {
+            for (NSURL *u in doMusica) {
+                sqlite3_bind_text(s, 1, ZPPidDaLinha(u).UTF8String, -1, SQLITE_TRANSIENT);
+                if (sqlite3_step(s) == SQLITE_ROW) {
+                    const char *a = (const char *)sqlite3_column_text(s, 0), *t = (const char *)sqlite3_column_text(s, 1), *b = (const char *)sqlite3_column_text(s, 2);
+                    self.listaInfo[ZPChaveDaLinha(u)] = @[a ? @(a) : @"", t ? @(t) : @"", b ? @(b) : @"", @""];
+                }
+                sqlite3_reset(s);
+                sqlite3_clear_bindings(s);
+            }
+        }
+        sqlite3_finalize(s);
+    }
+    sqlite3_close(db);
+    // O que não se encontrou fica com o nome que a caixa das músicas mostra,
+    // e o caminho a desempatar (a pasta do álbum e o número da faixa).
+    for (NSURL *u in faixas) {
+        NSString *chave = ZPChaveDaLinha(u);
+        if (self.listaInfo[chave]) continue;
+        NSString *nome = u.lastPathComponent.stringByDeletingPathExtension;
+        if ([nome hasPrefix:@"♫ "]) nome = [nome substringFromIndex:2];
+        self.listaInfo[chave] = @[@"", nome ?: @"", @"", chave];
+    }
+}
+
+- (NSArray<NSArray<NSString *> *> *)proximasDaLista {
+    NSArray<NSURL *> *fila = [self filaInteiraDe:[self currentPlaybackList] guardada:self.listaFila desmarcadas:self.listaDesmarcadas];
+    self.listaFila = fila;
+    [self lerInfoDaLista:fila];
+    NSMutableArray<NSArray<NSString *> *> *proximas = [NSMutableArray arrayWithCapacity:fila.count];
+    for (NSURL *url in fila) {
+        NSString *chave = ZPChaveDaLinha(url);
+        NSArray<NSString *> *p = self.listaInfo[chave];
+        [proximas addObject:@[chave, [self replaceSingleQuoteAndSmartQuotes:p[0]], [self replaceSingleQuoteAndSmartQuotes:p[1]],
+                              [self replaceSingleQuoteAndSmartQuotes:p[2]], [self.listaDesmarcadas containsObject:chave] ? @"0" : @"1", p[3]]];
+    }
+    return proximas;
+}
+
+// A janela mexeu na fila de uma lista. O que já tocou neste ciclo fica; depois
+// vêm as marcadas, pela ordem nova. Com o aleatório é o baralho que muda (a
+// caixa das músicas continua com a lista toda); sem ele é a própria lista, e
+// as desmarcadas saem da caixa até ao ciclo seguinte.
+- (void)filaDaListaPassaASer:(NSArray<NSString *> *)chaves desmarcadas:(NSSet<NSString *> *)desmarcadas {
+    NSArray<NSURL *> *lista = [self currentPlaybackList];
+    NSArray<NSURL *> *inteira = [self filaInteiraDe:lista guardada:self.listaFila desmarcadas:self.listaDesmarcadas];
+    NSMutableDictionary<NSString *, NSURL *> *porChave = [NSMutableDictionary dictionary];
+    for (NSURL *u in inteira) porChave[ZPChaveDaLinha(u)] = u;
+    NSMutableArray<NSURL *> *fila = [NSMutableArray array];
+    for (NSString *chave in chaves) {
+        NSURL *u = porChave[chave];
+        if (u) { [fila addObject:u]; [porChave removeObjectForKey:chave]; }
+    }
+    for (NSURL *u in inteira) if (porChave[ZPChaveDaLinha(u)]) [fila addObject:u];
+    self.listaFila = fila;
+    self.listaDesmarcadas = [desmarcadas mutableCopy];
+    self.listaProximoBaralho = nil;   // tirado contra a última faixa deste ciclo, que pode ter mudado
+    NSInteger actual = self.currentTrackIndex;
+    NSMutableArray<NSURL *> *nova = actual >= 0 ? [[lista subarrayWithRange:NSMakeRange(0, MIN((NSUInteger)actual + 1, lista.count))] mutableCopy]
+                                                : [NSMutableArray array];
+    for (NSURL *u in fila) if (![desmarcadas containsObject:ZPChaveDaLinha(u)]) [nova addObject:u];
+    if (self.isShuffleModeActive) {
+        self.shuffledTracks = nova;
+    } else {
+        self.audioFiles = nova;
+        [self createComboBox];
+        [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
+    }
+    // A que vem a seguir pode ser outra: o adiantamento refaz-se.
+    [self prefetchNextTrack];
+    [self.descobertas refazerSeAVista];
+}
+
+#pragma mark A seguir: o protocolo da janela
+
+- (NSArray<NSArray<NSString *> *> *)proximasDaFila {
+    if ([self haEstacaoCorrente]) return [self proximasDaEstacao];
+    if ([self haListaCorrente]) return [self proximasDaLista];
+    return nil;
+}
+
+- (void)filaPassaASer:(NSArray<NSString *> *)chaves desmarcadas:(NSSet<NSString *> *)desmarcadas
+                subiu:(NSString *)subiu desceu:(NSString *)desceu {
+    if ([self haEstacaoCorrente]) [self filaDaEstacaoPassaASer:chaves desmarcadas:desmarcadas subiu:subiu desceu:desceu];
+    else if ([self haListaCorrente]) [self filaDaListaPassaASer:chaves desmarcadas:desmarcadas];
+    else NSBeep();
+}
+
+- (NSUInteger)cicloDaFila {
+    return self.cicloDaFilaActual;
+}
+
+- (BOOL)filaEhUmaEstacao {
+    return [self haEstacaoCorrente];
 }
 
 // Guardar e Guardar como…, como num documento: o primeiro Guardar pergunta o
@@ -5981,6 +6198,7 @@ typedef NS_ENUM(NSInteger, ZPTecla) {
     }
 
     self.isPlaylistModeActive = NO;
+    [self largarAListaDoCiclo];
 
     // −1 marca «da biblioteca ainda não se tocou nada», tal como ao abrir uma
     // lista. Se a faixa em curso também estiver na biblioteca, o índice certo é
@@ -6640,6 +6858,7 @@ static NSString *ZPDesescaparXmcd(NSString *s) {
     self.cdTocarQuandoAquecido = NO;
 
     [self stopAudio];
+    [self largarAListaDoCiclo];
     self.audioFiles = faixas;
     self.isPlaylistModeActive = YES;
     self.currentTrackIndex = -1;
@@ -6647,6 +6866,7 @@ static NSString *ZPDesescaparXmcd(NSString *s) {
     if (self.isShuffleModeActive) {
         [self initializeShuffledTrackList];
     }
+    [self comecarAListaDoCiclo];
     [self createComboBox];
     [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
     [self playAudio];
@@ -8276,6 +8496,11 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
         NSLog(@"Shuffle mode is active. Playing next shuffled track.");
         #endif
         if (self.shuffledTracks.count > 0) {
+            // No fim de um ciclo de uma lista, a seguinte é a primeira de um baralho novo.
+            if ([self haListaCorrente] && self.currentTrackIndex + 1 >= (NSInteger)self.shuffledTracks.count) {
+                [self comecarNovoCicloDaLista];
+                self.currentTrackIndex = -1;
+            }
             // Move to the next track in shuffledTracks
             self.currentTrackIndex = (self.currentTrackIndex + 1) % self.shuffledTracks.count;
             NSURL *nextTrackURL = self.shuffledTracks[self.currentTrackIndex];
@@ -8486,6 +8711,8 @@ void MyAudioQueueOutputCallback(void *inUserData, AudioQueueRef inAQ, AudioQueue
             #ifdef DEBUG
             NSLog(@"End of playlist reached.");
             #endif
+            // Uma lista recomeça pela ordem dela, sem os ajustes do ciclo que acabou.
+            if ([self haListaCorrente]) [self comecarNovoCicloDaLista];
             self.currentTrackIndex = 0;
             dispatch_block_t playAudioBlock = ^{
                 [self playAudio];
@@ -9605,6 +9832,15 @@ static NSScrollView *ZPScrollViewComTabela(NSView *vista) {
         if (self.isShuffleModeActive) {
             // Find the index of the selected track in the shuffled array
             NSUInteger shuffledIndex = [self.shuffledTracks indexOfObject:selectedTrackURL];
+            // Numa lista, uma faixa desmarcada na janela «A seguir» saiu do
+            // baralho mas continua na caixa: escolhê-la trá-la de volta, já.
+            if (shuffledIndex == NSNotFound && [self haListaCorrente] && [self.audioFiles containsObject:selectedTrackURL]) {
+                NSUInteger onde = (NSUInteger)MIN(MAX(self.currentTrackIndex + 1, 0), (NSInteger)self.shuffledTracks.count);
+                [self.shuffledTracks insertObject:selectedTrackURL atIndex:onde];
+                self.shuffledToOriginalMap[selectedTrackURL] = selectedTrackURL;
+                [self.listaDesmarcadas removeObject:ZPChaveDaLinha(selectedTrackURL)];
+                shuffledIndex = onde;
+            }
             if (shuffledIndex != NSNotFound) {
                 self.currentTrackIndex = shuffledIndex;
             } else {
@@ -10216,6 +10452,14 @@ static const NSTimeInterval kCavaEsperaAteApagar = 0.2;
 
     self.isShuffleModeActive = !self.isShuffleModeActive;
     [self updateShuffleButtonAppearance:self.isShuffleModeActive];
+    // Numa lista, mudar o aleatório começa um ciclo novo: os ajustes da janela
+    // «A seguir» eram para a ordem que deixa de valer.
+    BOOL listaRefeita = NO;
+    if ([self haListaCorrente]) {
+        listaRefeita = ![self.audioFiles isEqualToArray:self.listaDoCiclo];
+        [self esquecerOsAjustesDaLista];
+        self.audioFiles = self.listaDoCiclo;
+    }
 
     if (self.isShuffleModeActive) {
         #ifdef DEBUG
@@ -10253,7 +10497,9 @@ static const NSTimeInterval kCavaEsperaAteApagar = 0.2;
     // A linha seleccionada na lista de músicas não muda de faixa, só de índice de
     // origem, portanto isto costuma ser um não-evento; deixá-la no marcador, como
     // se fazia ao ligar o aleatório, é que dava pela mudança.
+    if (listaRefeita) [self createComboBox];
     [self.songComboBox selectItemAtIndex:[self comboBoxIndexForPlaybackPosition]];
+    [self.descobertas refazerSeAVista];
 
     // O que muda mesmo é a faixa seguinte: a que estava adiantada em memória já
     // não é a que vem a seguir nesta fila.
@@ -13818,6 +14064,7 @@ static ZPReplayGainLido ZPLerReplayGain(NSURL *url, NSData *dados) {
     }
 
     if (self.isShuffleModeActive) {
+        if ([self haListaCorrente] && actual + 1 >= (NSInteger)lista.count) return [self baralhoDoProximoCiclo].firstObject;
         return lista[(actual + 1) % (NSInteger)lista.count];
     }
 
