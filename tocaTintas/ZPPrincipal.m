@@ -413,6 +413,9 @@ static WavpackStreamReader memoryReader = {
 @property (nonatomic, strong, nullable) NSMutableArray<NSURL *> *listaProximoBaralho;   // com o aleatório: o ciclo seguinte, já tirado
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSArray<NSString *> *> *listaInfo;   // chave → artista, título, álbum, lugar
 @property (nonatomic) NSUInteger cicloDaFilaActual;     // muda a cada fila nova ou ciclo novo (a janela larga a ordenação)
+// Uma estação não baralha: o aleatório que estava ligado fica suspenso (o botão
+// em cinzento-claro) e volta quando a estação dá lugar a outra lista.
+@property (nonatomic) BOOL aleatorioSuspenso;
 @property (nonatomic, strong) NSTask *assinaturasTask;
 @property (nonatomic, strong) NSURL *sementeDoMusicaACabeca;   // a linha «musica:» da semente, quando a estação nasce do excerto dela
 @property (nonatomic, copy) NSArray<NSString *> *sementeDoExcerto;   // artista, álbum e título da faixa de que se tirou o excerto (para o vectorizar a reconhecer)
@@ -4056,6 +4059,7 @@ static BOOL ZPHaCava(void) { return ZPPgrepDoCava(@"/usr/bin/pgrep", @[]) == 0; 
     // Exit playlist mode after preserving the current track
     self.isPlaylistModeActive = NO;
     [self largarAListaDoCiclo];
+    [self acertarOAleatorioDaEstacao];
 
     // Reload the audio files from the new directory
     [self loadAudioFiles];  // This will also refresh the combo box
@@ -4892,6 +4896,7 @@ static NSString *ZPLinhaDoURL(NSURL *url) {
 
     [self adoptarLista:trackURLs];
     [self comecarAListaDoCiclo];
+    [self acertarOAleatorioDaEstacao];
 }
 
 // Passa a tocar por esta lista: a de um ficheiro M3U ou a de uma estação.
@@ -5280,6 +5285,7 @@ static NSString *ZPNomeDaEstacao(NSString *artista, NSString *titulo, NSString *
             forte.estacaoEsgotada = NO;
             forte.estacaoInfo = pormenores;
             forte.cicloDaFilaActual++;   // uma fila nova: a janela «A seguir» larga a ordenação
+            [forte acertarOAleatorioDaEstacao];
             [forte actualizarMarcaDaEstacao];
             [forte assumirOMusicaComSemente:((manter || aCabeca) ? faixas.firstObject : nil)];
             [forte.descobertas refazerSeAVista];
@@ -5998,6 +6004,8 @@ typedef NS_ENUM(NSInteger, ZPTecla) {
                     : item.tag == ZPTeclaAleatorio ? self.isShuffleModeActive
                     : item.tag == ZPTeclaGravar    ? self.isRecording : NO;
         item.state = ligado ? NSControlStateValueOn : NSControlStateValueOff;
+        // O aleatório suspenso numa estação: nem ligado nem desligado.
+        if (item.tag == ZPTeclaAleatorio && self.aleatorioSuspenso) item.state = NSControlStateValueMixed;
         return botao != nil && botao.enabled;
     }
     if (item.action == @selector(criarEstacao:)) {
@@ -6232,6 +6240,9 @@ typedef NS_ENUM(NSInteger, ZPTecla) {
             }
         }
     }
+
+    // Se se saiu de uma estação, o aleatório que ela suspendeu volta.
+    [self acertarOAleatorioDaEstacao];
 
     dispatch_async(dispatch_get_main_queue(), ^{
         [self createComboBox];
@@ -6867,6 +6878,7 @@ static NSString *ZPDesescaparXmcd(NSString *s) {
         [self initializeShuffledTrackList];
     }
     [self comecarAListaDoCiclo];
+    [self acertarOAleatorioDaEstacao];
     [self createComboBox];
     [self.songComboBox selectItemAtIndex:[self comboBoxIndexForCurrentTrack]];
     [self playAudio];
@@ -10257,7 +10269,8 @@ static const NSTimeInterval kCavaEsperaAteApagar = 0.2;
 
 // Give visual feedback for when repeat is active
 - (void)updateShuffleButtonAppearance:(BOOL)isActive {
-    ZPPintaBotaoDeTransporte(self.shuffleButton, isActive ? [NSColor systemGreenColor] : nil);
+    NSColor *suspenso = [NSColor.systemGrayColor blendedColorWithFraction:0.45 ofColor:NSColor.whiteColor];
+    ZPPintaBotaoDeTransporte(self.shuffleButton, isActive ? [NSColor systemGreenColor] : self.aleatorioSuspenso ? suspenso : nil);
 }
 
 // Give visual feedback for when pause is active
@@ -10427,6 +10440,31 @@ static const NSTimeInterval kCavaEsperaAteApagar = 0.2;
 // posição. Basta reapontar o índice para ela. É o que o botão de repetir sempre
 // fez, e por isso nunca teve este defeito.
 - (void)shuffleTracks {
+    // Numa estação o aleatório não actua: o botão só diz se há-de voltar
+    // ligado quando se sair dela (cinzento-claro) ou não.
+    if ([self haEstacaoCorrente]) {
+        self.aleatorioSuspenso = !self.aleatorioSuspenso;
+        [self updateShuffleButtonAppearance:NO];
+        return;
+    }
+    [self alternarOAleatorio];
+}
+
+// Suspende o aleatório ao entrar numa estação e repõe-no ao sair dela. Chamado
+// sempre que a lista em vigor passa a ser outra.
+- (void)acertarOAleatorioDaEstacao {
+    BOOL estacao = [self haEstacaoCorrente];
+    if (estacao && self.isShuffleModeActive) {
+        [self alternarOAleatorio];
+        self.aleatorioSuspenso = YES;
+        [self updateShuffleButtonAppearance:NO];
+    } else if (!estacao && self.aleatorioSuspenso) {
+        self.aleatorioSuspenso = NO;
+        [self alternarOAleatorio];
+    }
+}
+
+- (void)alternarOAleatorio {
     if (self.audioFiles.count == 0) {
         #ifdef DEBUG
         NSLog(@"No audio files to shuffle.");
@@ -13432,9 +13470,9 @@ static NSSet<NSString *> *ZPChavesAppleScript(void) {
 
 // Os três interruptores mudam-se pelos botões, para o aspecto deles
 // acompanhar; e só quando o valor pedido é outro, porque cada botão alterna.
-- (BOOL)scriptShuffleEnabled { return self.isShuffleModeActive; }
+- (BOOL)scriptShuffleEnabled { return self.isShuffleModeActive || self.aleatorioSuspenso; }
 - (void)setScriptShuffleEnabled:(BOOL)ligado {
-    if (ligado != self.isShuffleModeActive) [self shuffleTracks];
+    if (ligado != [self scriptShuffleEnabled]) [self shuffleTracks];
 }
 
 - (BOOL)scriptRepeatEnabled { return self.isRepeatModeActive; }
